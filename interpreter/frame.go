@@ -217,5 +217,5 @@ func newActivationPool() *activationStackPool {
 }
 
 var (
-	activationStack           = newActivationPool()
+	activationStack = newActivationPool()
 )
