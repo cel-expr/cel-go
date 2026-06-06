@@ -18,7 +18,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
 
 	"github.com/google/cel-go/common/ast"
 	"github.com/google/cel-go/common/functions"
@@ -314,12 +313,15 @@ func (p *prog) Eval(input any) (out ref.Val, det *EvalDetails, err error) {
 	}()
 	// Build a hierarchical activation if there are default vars set.
 	var frame *interpreter.ExecutionFrame
-	var cleanup func()
-	frame, cleanup, err = p.buildFrame(input)
-	if err != nil {
-		return nil, nil, err
+	if f, ok := input.(*interpreter.ExecutionFrame); ok {
+		frame = f
+	} else {
+		frame, err = p.newExecutionFrame(input)
+		if err != nil {
+			return nil, nil, err
+		}
+		defer frame.Close()
 	}
-	defer cleanup()
 	if p.observable != nil {
 		det = &EvalDetails{}
 		out = p.observable.ObserveExec(frame, func(observed any) {
@@ -347,12 +349,12 @@ func (p *prog) ContextEval(ctx context.Context, input any) (ref.Val, *EvalDetail
 	if ctx == nil {
 		return nil, nil, fmt.Errorf("context can not be nil")
 	}
-	frame, cleanup, err := p.buildWithContext(ctx, input)
+	frame, err := p.newExecutionFrame(input)
 	if err != nil {
 		return nil, nil, err
 	}
-	defer cleanup()
-
+	defer frame.Close()
+	frame.SetContext(ctx, p.interruptCheckFrequency)
 	out, det, errEval := p.Eval(frame)
 	if errEval != nil && errors.Is(errEval, interpreter.InterruptError{}) {
 		return out, det, fmt.Errorf("%w: %w", errEval, context.Cause(ctx))
@@ -360,124 +362,16 @@ func (p *prog) ContextEval(ctx context.Context, input any) (ref.Val, *EvalDetail
 	return out, det, errEval
 }
 
-// buildFrame creates an ExecutionFrame for the given input without a timeout context.
-func (p *prog) buildFrame(input any) (*interpreter.ExecutionFrame, func(), error) {
-	var frame *interpreter.ExecutionFrame
-	var cleanup func()
-
-	switch v := input.(type) {
-	case *interpreter.ExecutionFrame:
-		frame = v
-		cleanup = func() {}
-	case Activation:
-		frame = interpreter.NewExecutionFrame(v)
-		cleanup = func() {
-			frame.Close()
-		}
-	case map[string]any:
-		rawVars := activationPool.Setup(v)
-		frame = interpreter.NewExecutionFrame(rawVars)
-		cleanup = func() {
-			frame.Close()
-			activationPool.Put(rawVars)
-		}
-	default:
-		return nil, nil, fmt.Errorf("invalid input, wanted Activation or map[string]any, got: (%T)%v", input, input)
+// newExecutionFrame creates an ExecutionFrame for the given input without a timeout context.
+func (p *prog) newExecutionFrame(input any) (*interpreter.ExecutionFrame, error) {
+	frame, err := interpreter.NewExecutionFrame(input)
+	if err != nil {
+		return nil, err
 	}
-
 	if p.defaultVars != nil {
 		// Update the frame's activation in place.
 		frame.Activation = interpreter.NewHierarchicalActivation(p.defaultVars, frame.Activation)
 	}
 
-	return frame, cleanup, nil
+	return frame, nil
 }
-
-// buildWithContext creates an ExecutionFrame for the given input and context.
-func (p *prog) buildWithContext(ctx context.Context, input any) (*interpreter.ExecutionFrame, func(), error) {
-	frame, cleanup, err := p.buildFrame(input)
-	if err != nil {
-		return nil, nil, err
-	}
-	frame.SetContext(ctx, p.interruptCheckFrequency)
-	return frame, cleanup, nil
-}
-
-type evalActivation struct {
-	vars     map[string]any
-	lazyVars map[string]any
-}
-
-// ResolveName looks up the value of the input variable name, if found.
-//
-// Lazy bindings may be supplied within the map-based input in either of the following forms:
-// - func() any
-// - func() ref.Val
-//
-// The lazy binding will only be invoked once per evaluation.
-//
-// Values which are not represented as ref.Val types on input may be adapted to a ref.Val using
-// the types.Adapter configured in the environment.
-func (a *evalActivation) ResolveName(name string) (any, bool) {
-	v, found := a.vars[name]
-	if !found {
-		return nil, false
-	}
-	switch obj := v.(type) {
-	case func() ref.Val:
-		if resolved, found := a.lazyVars[name]; found {
-			return resolved, true
-		}
-		lazy := obj()
-		a.lazyVars[name] = lazy
-		return lazy, true
-	case func() any:
-		if resolved, found := a.lazyVars[name]; found {
-			return resolved, true
-		}
-		lazy := obj()
-		a.lazyVars[name] = lazy
-		return lazy, true
-	default:
-		return obj, true
-	}
-}
-
-// Parent implements the Activation interface
-func (a *evalActivation) Parent() Activation {
-	return nil
-}
-
-func newEvalActivationPool() *evalActivationPool {
-	return &evalActivationPool{
-		Pool: sync.Pool{
-			New: func() any {
-				return &evalActivation{lazyVars: make(map[string]any)}
-			},
-		},
-	}
-}
-
-type evalActivationPool struct {
-	sync.Pool
-}
-
-// Setup initializes a pooled Activation object with the map input.
-func (p *evalActivationPool) Setup(vars map[string]any) *evalActivation {
-	a := p.Pool.Get().(*evalActivation)
-	a.vars = vars
-	return a
-}
-
-func (p *evalActivationPool) Put(value any) {
-	a := value.(*evalActivation)
-	for k := range a.lazyVars {
-		delete(a.lazyVars, k)
-	}
-	p.Pool.Put(a)
-}
-
-var (
-	// activationPool is an internally managed pool of Activation values that wrap map[string]any inputs
-	activationPool = newEvalActivationPool()
-)

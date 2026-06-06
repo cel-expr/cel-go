@@ -110,8 +110,9 @@ func (a *mapActivation) ResolveName(name string) (any, bool) {
 // hierarchicalActivation which implements Activation and contains a parent and
 // child activation.
 type hierarchicalActivation struct {
-	parent Activation
-	child  Activation
+	parent        Activation
+	child         Activation
+	poolAllocated bool
 }
 
 // Parent implements the Activation interface method.
@@ -148,7 +149,7 @@ func (a *hierarchicalActivation) AsPartialActivation() (PartialActivation, bool)
 // NewHierarchicalActivation takes two activations and produces a new one which prioritizes
 // resolution in the child first and parent(s) second.
 func NewHierarchicalActivation(parent Activation, child Activation) Activation {
-	return &hierarchicalActivation{parent, child}
+	return &hierarchicalActivation{parent: parent, child: child, poolAllocated: false}
 }
 
 // NewPartialActivation returns an Activation which contains a list of AttributePattern values

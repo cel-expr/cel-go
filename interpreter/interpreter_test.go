@@ -2500,7 +2500,7 @@ func TestInterruptErrorIs(t *testing.T) {
 
 func TestFolderActivation(t *testing.T) {
 	parentAct := EmptyActivation()
-	frame := NewExecutionFrame(parentAct)
+	frame := mustNewExecutionFrame(t, parentAct)
 	defer frame.Close()
 	fld := newFolder(&evalFold{}, frame)
 	defer releaseFolder(fld)
@@ -2562,7 +2562,7 @@ func TestV2Adapter(t *testing.T) {
 	if adapted.ID() != 42 {
 		t.Errorf("adapted.ID() = %d, wanted 42", adapted.ID())
 	}
-	frame := NewExecutionFrame(EmptyActivation())
+	frame := mustNewExecutionFrame(t, EmptyActivation())
 	defer frame.Close()
 	val := adapted.Exec(frame)
 	if val.Equal(types.IntOne) != types.True {
@@ -2644,7 +2644,7 @@ func TestExhaustiveOperatorsLegacyEval(t *testing.T) {
 }
 
 func TestFindFrame(t *testing.T) {
-	frame := NewExecutionFrame(EmptyActivation())
+	frame := mustNewExecutionFrame(t, EmptyActivation())
 	defer frame.Close()
 
 	tests := []struct {

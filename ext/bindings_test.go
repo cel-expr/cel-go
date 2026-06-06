@@ -498,8 +498,7 @@ func TestBlockEval_RuntimeErrors(t *testing.T) {
 	}
 }
 
-func TestLegacyBlockEval(t *testing.T) {
-	// 1. Cover dynamicBlock.Eval
+func TestDynamicBlockEval(t *testing.T) {
 	db := &dynamicBlock{
 		expr: interpreter.NewConstValue(1, types.IntOne),
 		slotActivationPool: &sync.Pool{
@@ -508,17 +507,18 @@ func TestLegacyBlockEval(t *testing.T) {
 			},
 		},
 	}
-	res1 := db.Eval(cel.NoVars())
-	if res1.Equal(types.IntOne) != types.True {
-		t.Errorf("db.Eval() = %v, wanted 1", res1)
+	res := db.Eval(cel.NoVars())
+	if res.Equal(types.IntOne) != types.True {
+		t.Errorf("db.Eval() = %v, wanted 1", res)
 	}
+}
 
-	// 2. Cover constantBlock.Eval
+func TestConstantBlockEval(t *testing.T) {
 	cb := &constantBlock{
 		expr: interpreter.NewConstValue(2, types.IntOne),
 	}
-	res2 := cb.Eval(cel.NoVars())
-	if res2.Equal(types.IntOne) != types.True {
-		t.Errorf("cb.Eval() = %v, wanted 1", res2)
+	res := cb.Eval(cel.NoVars())
+	if res.Equal(types.IntOne) != types.True {
+		t.Errorf("cb.Eval() = %v, wanted 1", res)
 	}
 }

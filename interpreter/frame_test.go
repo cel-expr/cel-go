@@ -83,7 +83,7 @@ func TestFrameCheckInterrupt(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			frame := NewExecutionFrame(EmptyActivation())
+			frame := mustNewExecutionFrame(t, EmptyActivation())
 			defer frame.Close()
 
 			var cleanup context.CancelFunc
@@ -128,7 +128,7 @@ func TestFrameResolveName(t *testing.T) {
 		{
 			name: "resolve in base activation",
 			setup: func() *ExecutionFrame {
-				return NewExecutionFrame(baseAct)
+				return mustNewExecutionFrame(t, baseAct)
 			},
 			varName:   "x",
 			wantVal:   1,
@@ -137,7 +137,7 @@ func TestFrameResolveName(t *testing.T) {
 		{
 			name: "missing in base activation",
 			setup: func() *ExecutionFrame {
-				return NewExecutionFrame(baseAct)
+				return mustNewExecutionFrame(t, baseAct)
 			},
 			varName:   "y",
 			wantVal:   nil,
@@ -146,7 +146,7 @@ func TestFrameResolveName(t *testing.T) {
 		{
 			name: "resolve in child activation",
 			setup: func() *ExecutionFrame {
-				f := NewExecutionFrame(baseAct)
+				f := mustNewExecutionFrame(t, baseAct)
 				return f.push(childAct)
 			},
 			varName:   "y",
@@ -156,7 +156,7 @@ func TestFrameResolveName(t *testing.T) {
 		{
 			name: "resolve in parent activation from child",
 			setup: func() *ExecutionFrame {
-				f := NewExecutionFrame(baseAct)
+				f := mustNewExecutionFrame(t, baseAct)
 				return f.push(childAct)
 			},
 			varName:   "x",
@@ -166,7 +166,7 @@ func TestFrameResolveName(t *testing.T) {
 		{
 			name: "missing in hierarchical activation",
 			setup: func() *ExecutionFrame {
-				f := NewExecutionFrame(baseAct)
+				f := mustNewExecutionFrame(t, baseAct)
 				return f.push(childAct)
 			},
 			varName:   "z",
@@ -212,7 +212,7 @@ func TestFrameParent(t *testing.T) {
 		{
 			name: "base frame has no parent activation",
 			setup: func() (*ExecutionFrame, func()) {
-				f := NewExecutionFrame(baseAct)
+				f := mustNewExecutionFrame(t, baseAct)
 				return f, func() { f.Close() }
 			},
 			want: nil,
@@ -220,7 +220,7 @@ func TestFrameParent(t *testing.T) {
 		{
 			name: "pushed frame returns parent activation",
 			setup: func() (*ExecutionFrame, func()) {
-				f := NewExecutionFrame(baseAct)
+				f := mustNewExecutionFrame(t, baseAct)
 				child := f.push(childAct)
 				return child, func() {
 					child.pop()
@@ -248,7 +248,7 @@ func TestFrameUnwrap(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewActivation(x) failed: %v", err)
 	}
-	frame := NewExecutionFrame(baseAct)
+	frame := mustNewExecutionFrame(t, baseAct)
 	defer frame.Close()
 
 	if got := frame.Unwrap(); got != baseAct {
@@ -285,21 +285,21 @@ func TestFrameAsPartialActivation(t *testing.T) {
 		{
 			name: "non-partial activation returns false",
 			setup: func() *ExecutionFrame {
-				return NewExecutionFrame(baseAct)
+				return mustNewExecutionFrame(t, baseAct)
 			},
 			wantFound: false,
 		},
 		{
 			name: "partial activation returns true",
 			setup: func() *ExecutionFrame {
-				return NewExecutionFrame(partAct)
+				return mustNewExecutionFrame(t, partAct)
 			},
 			wantFound: true,
 		},
 		{
 			name: "hierarchical activation wrapping partial activation returns true",
 			setup: func() *ExecutionFrame {
-				f := NewExecutionFrame(partAct)
+				f := mustNewExecutionFrame(t, partAct)
 				return f.push(baseAct)
 			},
 			wantFound: true,
@@ -338,7 +338,7 @@ func TestFramePushPop(t *testing.T) {
 		t.Fatalf("NewActivation(y) failed: %v", err)
 	}
 
-	frame := NewExecutionFrame(baseAct)
+	frame := mustNewExecutionFrame(t, baseAct)
 	defer frame.Close()
 
 	childFrame := frame.push(childAct)
@@ -356,7 +356,7 @@ func TestFramePushPop(t *testing.T) {
 }
 
 func TestFrameClose(t *testing.T) {
-	frame := NewExecutionFrame(EmptyActivation())
+	frame := mustNewExecutionFrame(t, EmptyActivation())
 	ctx := context.Background()
 	frame.SetContext(ctx, 1)
 
@@ -375,4 +375,54 @@ func TestFrameClose(t *testing.T) {
 	default:
 		t.Error("context not canceled after Close()")
 	}
+}
+
+func TestFrameLifecycleAndPooling(t *testing.T) {
+	vars := map[string]any{"a": 1, "b": 2}
+	frame := mustNewExecutionFrame(t, vars)
+	val, found := frame.ResolveName("a")
+	if !found || val != 1 {
+		t.Errorf("ResolveName('a') got %v, %t; want 1, true", val, found)
+	}
+
+	// Wrap in a hierarchical activation (e.g. simulating defaultVars setup in program.go)
+	parentAct, err := NewActivation(map[string]any{"c": 3})
+	if err != nil {
+		t.Fatalf("NewActivation failed: %v", err)
+	}
+	frame.Activation = NewHierarchicalActivation(parentAct, frame.Activation)
+
+	val, found = frame.ResolveName("c")
+	if !found || val != 3 {
+		t.Errorf("ResolveName('c') got %v, %t; want 3, true", val, found)
+	}
+
+	val, found = frame.ResolveName("a")
+	if !found || val != 1 {
+		t.Errorf("ResolveName('a') got %v, %t; want 1, true", val, found)
+	}
+
+	// Close the frame. This should release the pooled evalActivation under the hierarchical activation.
+	frame.Close()
+
+	// Verify that we can obtain a clean frame from the pool.
+	newFrame := mustNewExecutionFrame(t, map[string]any{"x": 10})
+	defer newFrame.Close()
+	val, found = newFrame.ResolveName("x")
+	if !found || val != 10 {
+		t.Errorf("ResolveName('x') got %v, %t; want 10, true", val, found)
+	}
+	val, found = newFrame.ResolveName("a")
+	if found {
+		t.Errorf("ResolveName('a') found on fresh frame: %v", val)
+	}
+}
+
+func mustNewExecutionFrame(t testing.TB, input any) *ExecutionFrame {
+	t.Helper()
+	f, err := NewExecutionFrame(input)
+	if err != nil {
+		t.Fatalf("NewExecutionFrame() failed: %v", err)
+	}
+	return f
 }
