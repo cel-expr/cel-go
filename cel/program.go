@@ -160,7 +160,7 @@ type prog struct {
 	regexOptimizations []*interpreter.RegexOptimization
 
 	// Interpretable configured from an Ast and aggregate decorator set based on program options.
-	interpretable     interpreter.Interpretable
+	interpretable     interpreter.InterpretableV2
 	observable        *interpreter.ObservableInterpretable
 	callCostEstimator interpreter.ActualCostEstimator
 	costOptions       []interpreter.CostTrackerOption
@@ -313,22 +313,16 @@ func (p *prog) Eval(input any) (out ref.Val, det *EvalDetails, err error) {
 		}
 	}()
 	// Build a hierarchical activation if there are default vars set.
-	var vars Activation
-	switch v := input.(type) {
-	case Activation:
-		vars = v
-	case map[string]any:
-		vars = activationPool.Setup(v)
-		defer activationPool.Put(vars)
-	default:
-		return nil, nil, fmt.Errorf("invalid input, wanted Activation or map[string]any, got: (%T)%v", input, input)
+	var frame *interpreter.ExecutionFrame
+	var cleanup func()
+	frame, cleanup, err = p.buildFrame(input)
+	if err != nil {
+		return nil, nil, err
 	}
-	if p.defaultVars != nil {
-		vars = interpreter.NewHierarchicalActivation(p.defaultVars, vars)
-	}
+	defer cleanup()
 	if p.observable != nil {
 		det = &EvalDetails{}
-		out = p.observable.ObserveEval(vars, func(observed any) {
+		out = p.observable.ObserveExec(frame, func(observed any) {
 			switch o := observed.(type) {
 			case interpreter.EvalState:
 				det.state = o
@@ -337,7 +331,7 @@ func (p *prog) Eval(input any) (out ref.Val, det *EvalDetails, err error) {
 			}
 		})
 	} else {
-		out = p.interpretable.Eval(vars)
+		out = p.interpretable.Exec(frame)
 	}
 	// The output of an internal Eval may have a value (`v`) that is a types.Err. This step
 	// translates the CEL value to a Go error response. This interface does not quite match the
@@ -353,84 +347,60 @@ func (p *prog) ContextEval(ctx context.Context, input any) (ref.Val, *EvalDetail
 	if ctx == nil {
 		return nil, nil, fmt.Errorf("context can not be nil")
 	}
-	// Configure the input, making sure to wrap Activation inputs in the special ctxActivation which
-	// exposes the #interrupted variable and manages rate-limited checks of the ctx.Done() state.
-	var vars Activation
+	frame, cleanup, err := p.buildWithContext(ctx, input)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer cleanup()
+
+	out, det, errEval := p.Eval(frame)
+	if errEval != nil && errors.Is(errEval, interpreter.InterruptError{}) {
+		return out, det, fmt.Errorf("%w: %w", errEval, context.Cause(ctx))
+	}
+	return out, det, errEval
+}
+
+// buildFrame creates an ExecutionFrame for the given input without a timeout context.
+func (p *prog) buildFrame(input any) (*interpreter.ExecutionFrame, func(), error) {
+	var frame *interpreter.ExecutionFrame
+	var cleanup func()
+
 	switch v := input.(type) {
+	case *interpreter.ExecutionFrame:
+		frame = v
+		cleanup = func() {}
 	case Activation:
-		vars = ctxActivationPool.Setup(v, ctx.Done(), p.interruptCheckFrequency)
-		defer ctxActivationPool.Put(vars)
+		frame = interpreter.NewExecutionFrame(v)
+		cleanup = func() {
+			frame.Close()
+		}
 	case map[string]any:
 		rawVars := activationPool.Setup(v)
-		defer activationPool.Put(rawVars)
-		vars = ctxActivationPool.Setup(rawVars, ctx.Done(), p.interruptCheckFrequency)
-		defer ctxActivationPool.Put(vars)
+		frame = interpreter.NewExecutionFrame(rawVars)
+		cleanup = func() {
+			frame.Close()
+			activationPool.Put(rawVars)
+		}
 	default:
 		return nil, nil, fmt.Errorf("invalid input, wanted Activation or map[string]any, got: (%T)%v", input, input)
 	}
-	out, det, err := p.Eval(vars)
-	if err != nil && errors.Is(err, interpreter.InterruptError{}) {
-		return out, det, fmt.Errorf("%w: %w", err, context.Cause(ctx))
+
+	if p.defaultVars != nil {
+		// Update the frame's activation in place.
+		frame.Activation = interpreter.NewHierarchicalActivation(p.defaultVars, frame.Activation)
 	}
-	return out, det, err
+
+	return frame, cleanup, nil
 }
 
-type ctxEvalActivation struct {
-	parent                  Activation
-	interrupt               <-chan struct{}
-	interruptCheckCount     uint
-	interruptCheckFrequency uint
-}
-
-// ResolveName implements the Activation interface method, but adds a special #interrupted variable
-// which is capable of testing whether a 'done' signal is provided from a context.Context channel.
-func (a *ctxEvalActivation) ResolveName(name string) (any, bool) {
-	if name == "#interrupted" {
-		a.interruptCheckCount++
-		if a.interruptCheckCount%a.interruptCheckFrequency == 0 {
-			select {
-			case <-a.interrupt:
-				return true, true
-			default:
-				return nil, false
-			}
-		}
-		return nil, false
+// buildWithContext creates an ExecutionFrame for the given input and context.
+func (p *prog) buildWithContext(ctx context.Context, input any) (*interpreter.ExecutionFrame, func(), error) {
+	frame, cleanup, err := p.buildFrame(input)
+	if err != nil {
+		return nil, nil, err
 	}
-	return a.parent.ResolveName(name)
-}
-
-func (a *ctxEvalActivation) Parent() Activation {
-	return a.parent
-}
-
-func (a *ctxEvalActivation) AsPartialActivation() (interpreter.PartialActivation, bool) {
-	pa, ok := a.parent.(interpreter.PartialActivation)
-	return pa, ok
-}
-
-func newCtxEvalActivationPool() *ctxEvalActivationPool {
-	return &ctxEvalActivationPool{
-		Pool: sync.Pool{
-			New: func() any {
-				return &ctxEvalActivation{}
-			},
-		},
-	}
-}
-
-type ctxEvalActivationPool struct {
-	sync.Pool
-}
-
-// Setup initializes a pooled Activation with the ability check for context.Context cancellation
-func (p *ctxEvalActivationPool) Setup(vars Activation, done <-chan struct{}, interruptCheckRate uint) *ctxEvalActivation {
-	a := p.Pool.Get().(*ctxEvalActivation)
-	a.parent = vars
-	a.interrupt = done
-	a.interruptCheckCount = 0
-	a.interruptCheckFrequency = interruptCheckRate
-	return a
+	frame.SetContext(ctx, p.interruptCheckFrequency)
+	return frame, cleanup, nil
 }
 
 type evalActivation struct {
@@ -510,7 +480,4 @@ func (p *evalActivationPool) Put(value any) {
 var (
 	// activationPool is an internally managed pool of Activation values that wrap map[string]any inputs
 	activationPool = newEvalActivationPool()
-
-	// ctxActivationPool is an internally managed pool of Activation values that expose a special #interrupted variable
-	ctxActivationPool = newCtxEvalActivationPool()
 )

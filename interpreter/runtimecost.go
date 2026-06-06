@@ -62,48 +62,6 @@ func CostObserver(opts ...costTrackPlanOption) PlannerOption {
 	}
 }
 
-// costTrackerConverter identifies an object which is convertible to a CostTracker instance.
-type costTrackerConverter interface {
-	asCostTracker() *CostTracker
-}
-
-// costTrackActivation hides state in the Activation in a manner not accessible to expressions.
-type costTrackActivation struct {
-	vars        Activation
-	costTracker *CostTracker
-}
-
-// ResolveName proxies variable lookups to the backing activation.
-func (cta costTrackActivation) ResolveName(name string) (any, bool) {
-	return cta.vars.ResolveName(name)
-}
-
-// Parent proxies parent lookups to the backing activation.
-func (cta costTrackActivation) Parent() Activation {
-	return cta.vars
-}
-
-// AsPartialActivation supports conversion to a partial activation in order to detect unknown attributes.
-func (cta costTrackActivation) AsPartialActivation() (PartialActivation, bool) {
-	return AsPartialActivation(cta.vars)
-}
-
-// asCostTracker implements the costTrackerConverter method.
-func (cta costTrackActivation) asCostTracker() *CostTracker {
-	return cta.costTracker
-}
-
-// asCostTracker walks the Activation hierarchy and returns the first cost tracker found, if present.
-func asCostTracker(vars Activation) (*CostTracker, bool) {
-	if conv, ok := vars.(costTrackerConverter); ok {
-		return conv.asCostTracker(), true
-	}
-	if vars.Parent() != nil {
-		return asCostTracker(vars.Parent())
-	}
-	return nil, false
-}
-
 // costTrackerFactory holds a factory for producing new CostTracker instances on each Eval call.
 type costTrackerFactory struct {
 	factory func() (*CostTracker, error)
@@ -111,27 +69,32 @@ type costTrackerFactory struct {
 
 // InitState produces a CostTracker and bundles it into an Activation in a way which is not visible
 // to expression evaluation.
-func (ct *costTrackerFactory) InitState(vars Activation) (Activation, error) {
+func (ct *costTrackerFactory) InitState(frame *ExecutionFrame) (any, error) {
 	tracker, err := ct.factory()
 	if err != nil {
 		return nil, err
 	}
-	return costTrackActivation{vars: vars, costTracker: tracker}, nil
+	if frame.ctx == nil {
+		frame.ctx = evalContextPool.Get().(*evalContext)
+	}
+	frame.ctx.costs = tracker
+	return tracker, nil
 }
 
 // GetState extracts the CostTracker from the Activation.
-func (ct *costTrackerFactory) GetState(vars Activation) any {
-	if tracker, found := asCostTracker(vars); found {
-		return tracker
+func (ct *costTrackerFactory) GetState(frame *ExecutionFrame) any {
+	if frame == nil || frame.ctx == nil {
+		return nil
 	}
-	return nil
+	return frame.ctx.costs
 }
 
 // Observe computes the incremental cost of each step and records it into the CostTracker associated
 // with the evaluation.
 func (ct *costTrackerFactory) Observe(vars Activation, id int64, programStep any, val ref.Val) {
-	tracker, found := asCostTracker(vars)
-	if !found {
+	frame := AsFrame(vars)
+	tracker := ct.GetState(frame).(*CostTracker)
+	if tracker == nil {
 		return
 	}
 	switch t := programStep.(type) {
@@ -397,7 +360,7 @@ func (s *refValStack) drop(ids ...int64) {
 // the stack.
 // WARNING: It is possible for multiple expressions with the same ID to exist (due to how macros are implemented) so it's
 // possible that a dropped ID will remain on the stack.  They should be removed when IDs on the stack are popped.
-func (s *refValStack) dropArgs(args []Interpretable) ([]ref.Val, bool) {
+func (s *refValStack) dropArgs(args []InterpretableV2) ([]ref.Val, bool) {
 	result := make([]ref.Val, len(args))
 argloop:
 	for nIdx := len(args) - 1; nIdx >= 0; nIdx-- {

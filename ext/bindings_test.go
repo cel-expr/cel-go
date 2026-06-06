@@ -17,6 +17,7 @@ package ext
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/google/cel-go/cel"
@@ -25,6 +26,7 @@ import (
 	"github.com/google/cel-go/common/operators"
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
+	"github.com/google/cel-go/interpreter"
 )
 
 var bindingTests = []struct {
@@ -493,5 +495,30 @@ func TestBlockEval_RuntimeErrors(t *testing.T) {
 				t.Fatalf("prg.Eval() got %v, expected no such attribute error", err)
 			}
 		})
+	}
+}
+
+func TestLegacyBlockEval(t *testing.T) {
+	// 1. Cover dynamicBlock.Eval
+	db := &dynamicBlock{
+		expr: interpreter.NewConstValue(1, types.IntOne),
+		slotActivationPool: &sync.Pool{
+			New: func() any {
+				return &dynamicSlotActivation{}
+			},
+		},
+	}
+	res1 := db.Eval(cel.NoVars())
+	if res1.Equal(types.IntOne) != types.True {
+		t.Errorf("db.Eval() = %v, wanted 1", res1)
+	}
+
+	// 2. Cover constantBlock.Eval
+	cb := &constantBlock{
+		expr: interpreter.NewConstValue(2, types.IntOne),
+	}
+	res2 := cb.Eval(cel.NoVars())
+	if res2.Equal(types.IntOne) != types.True {
+		t.Errorf("cb.Eval() = %v, wanted 1", res2)
 	}
 }
