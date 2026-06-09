@@ -16,6 +16,7 @@ package interpreter
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -75,7 +76,7 @@ func NewExecutionFrame(input any) (*ExecutionFrame, error) {
 	case Activation:
 		f.Activation = v
 	case map[string]any:
-		f.Activation = activationInput.Setup(v)
+		f.Activation = activationInput.create(v)
 	default:
 		return nil, fmt.Errorf("invalid input, wanted Activation or map[string]any, got: (%T)%v", input, input)
 	}
@@ -83,20 +84,25 @@ func NewExecutionFrame(input any) (*ExecutionFrame, error) {
 }
 
 // SetContext sets the context for the execution frame.
-func (f *ExecutionFrame) SetContext(ctx context.Context, interruptCheckFrequency uint) {
-	if f.ctx == nil {
-		f.ctx = evalContextPool.Get().(*evalContext)
+func (f *ExecutionFrame) SetContext(ctx context.Context, interruptCheckFrequency uint) error {
+	if f.parent != nil {
+		return errors.New("SetContext() called on child frame")
 	}
+	if f.ctx != nil {
+		return errors.New("SetContext() called more than once")
+	}
+	f.ctx = evalContextPool.Get().(*evalContext)
 	f.ctx.ctx, f.ctx.cancel = context.WithCancel(ctx)
 	f.ctx.interrupt = ctx.Done()
 	f.ctx.interruptCheckFrequency = interruptCheckFrequency
 	f.ctx.interruptCheckCount.Store(0)
 	f.ctx.interrupted.Store(false)
+	return nil
 }
 
 // Close releases the resources held by the execution frame and returns it to the pool.
 func (f *ExecutionFrame) Close() {
-	if f.ctx != nil {
+	if f.parent == nil && f.ctx != nil {
 		if f.ctx.cancel != nil {
 			f.ctx.cancel()
 			f.ctx.cancel = nil
@@ -109,26 +115,20 @@ func (f *ExecutionFrame) Close() {
 		f.ctx.interruptCheckCount.Store(0)
 		f.ctx.interruptCheckFrequency = 0
 		evalContextPool.Put(f.ctx)
-		f.ctx = nil
 	}
+	f.ctx = nil
 	f.parent = nil
-	releaseActivations(f.Activation)
+	switch a := f.Activation.(type) {
+	case *hierarchicalActivation:
+		if child, ok := a.child.(*inputActivation); ok {
+			activationInput.release(child)
+		}
+		activationStack.release(a)
+	case *inputActivation:
+		activationInput.release(a)
+	}
 	f.Activation = nil
 	frameStack.Put(f)
-}
-
-func releaseActivations(activation Activation) {
-	if activation == nil {
-		return
-	}
-	switch a := activation.(type) {
-	case *hierarchicalActivation:
-		releaseActivations(a.child)
-		releaseActivations(a.parent)
-	case *inputActivation:
-		activationInput.Put(a)
-	}
-	activationStack.release(activation)
 }
 
 // push pushes the given activation onto the activation stack and returns the new frame.
@@ -145,6 +145,9 @@ func (f *ExecutionFrame) push(activation Activation) *ExecutionFrame {
 
 // pop returns the parent frame, releasing the current frame back to the pool.
 func (f *ExecutionFrame) pop() *ExecutionFrame {
+	if f.parent == nil {
+		return f
+	}
 	parent := f.parent
 	activationStack.release(f.Activation)
 	f.Activation = nil
@@ -290,7 +293,9 @@ func newActivationInputPool() *activationInputPool {
 	return &activationInputPool{
 		Pool: sync.Pool{
 			New: func() any {
-				return &inputActivation{lazyVars: make(map[string]any)}
+				return &inputActivation{
+					lazyVars: make(map[string]any),
+				}
 			},
 		},
 	}
@@ -300,14 +305,14 @@ type activationInputPool struct {
 	sync.Pool
 }
 
-// Setup initializes a pooled Activation object with the map input.
-func (p *activationInputPool) Setup(vars map[string]any) *inputActivation {
+// create initializes a pooled Activation object with the map input.
+func (p *activationInputPool) create(vars map[string]any) *inputActivation {
 	a := p.Pool.Get().(*inputActivation)
 	a.vars = vars
 	return a
 }
 
-func (p *activationInputPool) Put(value any) {
+func (p *activationInputPool) release(value any) {
 	a := value.(*inputActivation)
 	for k := range a.lazyVars {
 		delete(a.lazyVars, k)

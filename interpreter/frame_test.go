@@ -17,6 +17,9 @@ package interpreter
 import (
 	"context"
 	"testing"
+
+	"github.com/google/cel-go/common/types"
+	"github.com/google/cel-go/common/types/ref"
 )
 
 func TestFrameCheckInterrupt(t *testing.T) {
@@ -415,6 +418,152 @@ func TestFrameLifecycleAndPooling(t *testing.T) {
 	val, found = newFrame.ResolveName("a")
 	if found {
 		t.Errorf("ResolveName('a') found on fresh frame: %v", val)
+	}
+}
+
+func TestFrameSetContext(t *testing.T) {
+	ctx := context.Background()
+	f := mustNewExecutionFrame(t, EmptyActivation())
+	defer f.Close()
+
+	if err := f.SetContext(ctx, 1); err != nil {
+		t.Errorf("SetContext failed: %v", err)
+	}
+}
+
+func TestFrameSetContextTwiceError(t *testing.T) {
+	ctx := context.Background()
+	f := mustNewExecutionFrame(t, EmptyActivation())
+	defer f.Close()
+
+	if err := f.SetContext(ctx, 1); err != nil {
+		t.Fatalf("SetContext failed first time: %v", err)
+	}
+
+	if err := f.SetContext(ctx, 1); err == nil {
+		t.Error("expected SetContext to return an error when called twice, got nil")
+	}
+}
+
+func TestFrameSetContextChildError(t *testing.T) {
+	ctx := context.Background()
+	f := mustNewExecutionFrame(t, EmptyActivation())
+	defer f.Close()
+
+	child := f.push(EmptyActivation())
+	defer child.pop()
+
+	if err := child.SetContext(ctx, 1); err == nil {
+		t.Error("expected SetContext on a child frame to return an error, got nil")
+	}
+}
+
+func TestNewExecutionFrameInvalidInput(t *testing.T) {
+	f, err := NewExecutionFrame(123)
+	if err == nil {
+		f.Close()
+		t.Error("NewExecutionFrame with int input did not return error")
+	}
+}
+
+func TestFramePopBaseFrame(t *testing.T) {
+	f := mustNewExecutionFrame(t, EmptyActivation())
+	defer f.Close()
+
+	popped := f.pop()
+	if popped != f {
+		t.Errorf("pop() on base frame got %v, want %v", popped, f)
+	}
+}
+
+func TestLazyVariableResolution(t *testing.T) {
+	lazyRefValCalled := 0
+	lazyAnyCalled := 0
+
+	vars := map[string]any{
+		"lazy_ref": func() ref.Val {
+			lazyRefValCalled++
+			return types.IntOne
+		},
+		"lazy_any": func() any {
+			lazyAnyCalled++
+			return 2
+		},
+		"normal": 3,
+	}
+
+	frame := mustNewExecutionFrame(t, vars)
+	defer frame.Close()
+
+	tests := []struct {
+		name        string
+		lookupName  string
+		wantFound   bool
+		wantVal     any
+		wantRefCall int
+		wantAnyCall int
+	}{
+		{
+			name:       "missing variable",
+			lookupName: "missing",
+			wantFound:  false,
+		},
+		{
+			name:       "normal variable",
+			lookupName: "normal",
+			wantFound:  true,
+			wantVal:    3,
+		},
+		{
+			name:        "lazy ref.Val first call",
+			lookupName:  "lazy_ref",
+			wantFound:   true,
+			wantVal:     types.IntOne,
+			wantRefCall: 1,
+		},
+		{
+			name:        "lazy ref.Val second call cached",
+			lookupName:  "lazy_ref",
+			wantFound:   true,
+			wantVal:     types.IntOne,
+			wantRefCall: 1,
+		},
+		{
+			name:        "lazy any first call",
+			lookupName:  "lazy_any",
+			wantFound:   true,
+			wantVal:     2,
+			wantRefCall: 1,
+			wantAnyCall: 1,
+		},
+		{
+			name:        "lazy any second call cached",
+			lookupName:  "lazy_any",
+			wantFound:   true,
+			wantVal:     2,
+			wantRefCall: 1,
+			wantAnyCall: 1,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			val, found := frame.ResolveName(tc.lookupName)
+			if found != tc.wantFound {
+				t.Fatalf("ResolveName(%q) found = %t, want = %t", tc.lookupName, found, tc.wantFound)
+			}
+			if found {
+				if val != tc.wantVal {
+					t.Errorf("ResolveName(%q) value = %v, want = %v", tc.lookupName, val, tc.wantVal)
+				}
+			}
+			if lazyRefValCalled != tc.wantRefCall {
+				t.Errorf("lazyRefValCalled = %d, want = %d", lazyRefValCalled, tc.wantRefCall)
+			}
+			if lazyAnyCalled != tc.wantAnyCall {
+				t.Errorf("lazyAnyCalled = %d, want = %d", lazyAnyCalled, tc.wantAnyCall)
+			}
+		})
 	}
 }
 
