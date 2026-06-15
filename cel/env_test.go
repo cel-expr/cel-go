@@ -1280,3 +1280,65 @@ func (p *customCELProvider) FindStructFieldType(structType, fieldName string) (*
 func (p *customCELProvider) NewValue(structType string, fields map[string]ref.Val) ref.Val {
 	return p.provider.NewValue(structType, fields)
 }
+
+func TestCELTypeAdapter(t *testing.T) {
+	env, err := NewEnv()
+	if err != nil {
+		t.Fatalf("NewEnv() failed: %v", err)
+	}
+	adapter := env.CELTypeAdapter()
+	if adapter == nil {
+		t.Error("CELTypeAdapter() returned nil")
+	}
+}
+
+type mockTypeProvider struct {
+	ref.TypeProvider
+}
+
+func TestMaybeInteropProvider_Error(t *testing.T) {
+	_, err := maybeInteropProvider(123)
+	if err == nil {
+		t.Error("maybeInteropProvider(int) should return error")
+	}
+}
+
+func TestMaybeInteropProvider_LegacyTypeProvider(t *testing.T) {
+	tp := &mockTypeProvider{}
+	p, err := maybeInteropProvider(tp)
+	if err != nil {
+		t.Fatalf("maybeInteropProvider(mockTypeProvider) failed: %v", err)
+	}
+	if _, ok := p.(*interopCELTypeProvider); !ok {
+		t.Errorf("expected *interopCELTypeProvider, got %T", p)
+	}
+}
+
+func TestParserErrorRecoveryLimit(t *testing.T) {
+	env, err := NewEnv(ParserErrorRecoveryLimit(10))
+	if err != nil {
+		t.Fatalf("NewEnv(ParserErrorRecoveryLimit(10)) failed: %v", err)
+	}
+	if env.limits[limitParseErrorRecovery] != 10 {
+		t.Errorf("limitParseErrorRecovery = %d, want 10", env.limits[limitParseErrorRecovery])
+	}
+}
+
+func TestEnableHiddenAccumulatorName(t *testing.T) {
+	_, err := NewEnv(EnableHiddenAccumulatorName(true))
+	if err != nil {
+		t.Fatalf("NewEnv(EnableHiddenAccumulatorName(true)) failed: %v", err)
+	}
+}
+
+func TestDeclareContextProto_Duplicate(t *testing.T) {
+	desc := (&proto3pb.TestAllTypes{}).ProtoReflect().Descriptor()
+	env, err := NewEnv(DeclareContextProto(desc))
+	if err != nil {
+		t.Fatalf("NewEnv(DeclareContextProto()) failed: %v", err)
+	}
+	_, err = DeclareContextProto(desc)(env)
+	if err == nil {
+		t.Error("DeclareContextProto() twice should fail")
+	}
+}

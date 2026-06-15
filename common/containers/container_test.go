@@ -70,6 +70,17 @@ func TestContainers_Alias(t *testing.T) {
 	if !reflect.DeepEqual(cont.ResolveCandidateNames("bigex.Execute"), []string{"my.example.pkg.verbose.Execute"}) {
 		t.Errorf("ResolveCandidateNames() got %s, wanted %s", cont.ResolveCandidateNames("bigex.Execute"), "my.example.pkg.verbose.Execute")
 	}
+
+	cont, err = DefaultContainer.Extend(Alias("really_long_package_name", "short"))
+	if err != nil {
+		t.Fatalf("Extend() failed: %v", err)
+	}
+	if !reflect.DeepEqual(cont.ResolveCandidateNames("short"), []string{"really_long_package_name"}) {
+		t.Errorf("ResolveCandidateNames() got %s, wanted %s", cont.ResolveCandidateNames("short"), "really_long_package_name")
+	}
+	if !reflect.DeepEqual(cont.ResolveCandidateNames("short.field"), []string{"really_long_package_name.field"}) {
+		t.Errorf("ResolveCandidateNames() got %s, wanted %s", cont.ResolveCandidateNames("short.field"), "really_long_package_name.field")
+	}
 }
 
 func TestContainers_Abbrevs(t *testing.T) {
@@ -151,10 +162,6 @@ func TestContainers_Aliasing_Errors(t *testing.T) {
 		{
 			abbrevs: []string{"   bad.alias!  "},
 			err:     "invalid qualified name: bad.alias!, wanted name of the form 'qualified.name'",
-		},
-		{
-			aliases: []aliasDef{{name: "a", alias: "b"}},
-			err:     "alias must refer to a valid qualified name: a",
 		},
 		{
 			aliases: []aliasDef{{name: "my.alias", alias: "b.c"}},

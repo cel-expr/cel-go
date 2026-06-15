@@ -269,30 +269,30 @@ func ExprSelect(id int64, operand *exprpb.Expr, field string) *exprpb.Expr {
 }
 
 // ExprLiteral creates a literal (constant) Expr.
-func ExprLiteral(id int64, value interface{}) *exprpb.Expr {
+func ExprLiteral(id int64, value any) *exprpb.Expr {
 	var literal *exprpb.Constant
-	switch value.(type) {
+	switch v := value.(type) {
 	case bool:
 		literal = &exprpb.Constant{ConstantKind: &exprpb.Constant_BoolValue{
-			BoolValue: value.(bool)}}
+			BoolValue: v}}
 	case int64:
 		literal = &exprpb.Constant{ConstantKind: &exprpb.Constant_Int64Value{
-			Int64Value: value.(int64)}}
+			Int64Value: v}}
 	case uint64:
 		literal = &exprpb.Constant{ConstantKind: &exprpb.Constant_Uint64Value{
-			Uint64Value: value.(uint64)}}
+			Uint64Value: v}}
 	case float64:
 		literal = &exprpb.Constant{ConstantKind: &exprpb.Constant_DoubleValue{
-			DoubleValue: value.(float64)}}
+			DoubleValue: v}}
 	case string:
 		literal = &exprpb.Constant{ConstantKind: &exprpb.Constant_StringValue{
-			StringValue: value.(string)}}
+			StringValue: v}}
 	case structpb.NullValue:
 		literal = &exprpb.Constant{ConstantKind: &exprpb.Constant_NullValue{
-			NullValue: value.(structpb.NullValue)}}
+			NullValue: v}}
 	case []byte:
 		literal = &exprpb.Constant{ConstantKind: &exprpb.Constant_BytesValue{
-			BytesValue: value.([]byte)}}
+			BytesValue: v}}
 	default:
 		panic("literal type not implemented")
 	}

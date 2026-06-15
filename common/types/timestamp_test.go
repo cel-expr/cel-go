@@ -454,6 +454,19 @@ func TestTimestampGetMinutes(t *testing.T) {
 	if !minTz.Equal(Int(5)).(Bool) {
 		t.Errorf("ts.getMinutes('America/Phoenix') got %v, wanted 5 minutes", min)
 	}
+	// A valid offset still resolves: -08:30 shifts 1970-01-01T02:05:06Z back to 17:35.
+	minTz = ts.Receive(overloads.TimeGetMinutes, overloads.TimestampToMinutesWithTz,
+		[]ref.Val{String("-08:30")})
+	if !minTz.Equal(Int(35)).(Bool) {
+		t.Errorf("ts.getMinutes('-08:30') got %v, wanted 35 minutes", minTz)
+	}
+	// Out-of-range and signed minute offsets are rejected rather than silently accepted.
+	for _, tz := range []string{"+00:99", "-00:90", "+05:-30"} {
+		if got := ts.Receive(overloads.TimeGetMinutes, overloads.TimestampToMinutesWithTz,
+			[]ref.Val{String(tz)}); !IsError(got) {
+			t.Errorf("ts.getMinutes(%q) got %v, wanted error", tz, got)
+		}
+	}
 }
 
 func TestTimestampGetSeconds(t *testing.T) {
