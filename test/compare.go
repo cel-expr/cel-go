@@ -26,7 +26,7 @@ func Compare(a string, e string) bool {
 }
 
 // DiffMessage creates a diff dump message for test failures.
-func DiffMessage(context string, actual interface{}, expected interface{}) string {
+func DiffMessage(context string, actual any, expected any) string {
 	return fmt.Sprintf("%s: \ngot %v, \nwanted %v", context, actual, expected)
 }
 

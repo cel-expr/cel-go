@@ -147,7 +147,7 @@ ignored.
 // The `details' var would contain intermediate evaluation state if enabled as
 // a cel.ProgramOption. This can be useful for visualizing how the `out` value
 // was arrive at.
-out, details, err := prg.Eval(map[string]interface{}{
+out, details, err := prg.Eval(map[string]any{
     "name": "/groups/acme.co/documents/secret-stuff",
     "group": "acme.co"})
 fmt.Println(out) // 'true'

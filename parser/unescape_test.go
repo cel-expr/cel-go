@@ -23,7 +23,7 @@ import (
 func TestUnescape(t *testing.T) {
 	tests := []struct {
 		in      string
-		out     interface{}
+		out     any
 		isBytes bool
 	}{
 		// Simple string unescaping tests.

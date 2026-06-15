@@ -19,7 +19,7 @@ import "github.com/google/cel-go/cel"
         log.Fatalln(iss.Err())
     }
     prg, err := env.Program(ast)
-    out, _, err := prg.Eval(map[string]interface{}{
+    out, _, err := prg.Eval(map[string]any{
         "name":   "CEL",
     })
     fmt.Println(out)
@@ -62,7 +62,7 @@ method.
         ),
     )
     prg, _ := env.Program(c)
-    out, _, _ := prg.Eval(map[string]interface{}{
+    out, _, _ := prg.Eval(map[string]any{
         "i": "CEL",
         "you": "world",
     })
@@ -101,7 +101,7 @@ of `MemberOverload` in the `Function` option:
         ),
     )
     prg, _ := env.Program(c)
-    out, _, _ := prg.Eval(map[string]interface{}{
+    out, _, _ := prg.Eval(map[string]any{
         "i": "CEL",
         "you": "world",
     })

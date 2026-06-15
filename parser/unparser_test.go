@@ -32,7 +32,7 @@ func TestUnparse(t *testing.T) {
 	tests := []struct {
 		name               string
 		in                 string
-		out                interface{}
+		out                any
 		requiresMacroCalls bool
 		unparserOptions    []UnparserOption
 	}{
@@ -480,7 +480,7 @@ func TestUnparse(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Unparse(%s) failed: %v", tc.in, err)
 			}
-			var want interface{} = tc.in
+			var want any = tc.in
 			if tc.out != nil {
 				want = tc.out
 			}

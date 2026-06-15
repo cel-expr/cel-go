@@ -8,110 +8,110 @@ type CELVisitor interface {
 	antlr.ParseTreeVisitor
 
 	// Visit a parse tree produced by CELParser#start.
-	VisitStart(ctx *StartContext) interface{}
+	VisitStart(ctx *StartContext) any
 
 	// Visit a parse tree produced by CELParser#expr.
-	VisitExpr(ctx *ExprContext) interface{}
+	VisitExpr(ctx *ExprContext) any
 
 	// Visit a parse tree produced by CELParser#conditionalOr.
-	VisitConditionalOr(ctx *ConditionalOrContext) interface{}
+	VisitConditionalOr(ctx *ConditionalOrContext) any
 
 	// Visit a parse tree produced by CELParser#conditionalAnd.
-	VisitConditionalAnd(ctx *ConditionalAndContext) interface{}
+	VisitConditionalAnd(ctx *ConditionalAndContext) any
 
 	// Visit a parse tree produced by CELParser#relation.
-	VisitRelation(ctx *RelationContext) interface{}
+	VisitRelation(ctx *RelationContext) any
 
 	// Visit a parse tree produced by CELParser#calc.
-	VisitCalc(ctx *CalcContext) interface{}
+	VisitCalc(ctx *CalcContext) any
 
 	// Visit a parse tree produced by CELParser#MemberExpr.
-	VisitMemberExpr(ctx *MemberExprContext) interface{}
+	VisitMemberExpr(ctx *MemberExprContext) any
 
 	// Visit a parse tree produced by CELParser#LogicalNot.
-	VisitLogicalNot(ctx *LogicalNotContext) interface{}
+	VisitLogicalNot(ctx *LogicalNotContext) any
 
 	// Visit a parse tree produced by CELParser#Negate.
-	VisitNegate(ctx *NegateContext) interface{}
+	VisitNegate(ctx *NegateContext) any
 
 	// Visit a parse tree produced by CELParser#MemberCall.
-	VisitMemberCall(ctx *MemberCallContext) interface{}
+	VisitMemberCall(ctx *MemberCallContext) any
 
 	// Visit a parse tree produced by CELParser#Select.
-	VisitSelect(ctx *SelectContext) interface{}
+	VisitSelect(ctx *SelectContext) any
 
 	// Visit a parse tree produced by CELParser#PrimaryExpr.
-	VisitPrimaryExpr(ctx *PrimaryExprContext) interface{}
+	VisitPrimaryExpr(ctx *PrimaryExprContext) any
 
 	// Visit a parse tree produced by CELParser#Index.
-	VisitIndex(ctx *IndexContext) interface{}
+	VisitIndex(ctx *IndexContext) any
 
 	// Visit a parse tree produced by CELParser#Ident.
-	VisitIdent(ctx *IdentContext) interface{}
+	VisitIdent(ctx *IdentContext) any
 
 	// Visit a parse tree produced by CELParser#GlobalCall.
-	VisitGlobalCall(ctx *GlobalCallContext) interface{}
+	VisitGlobalCall(ctx *GlobalCallContext) any
 
 	// Visit a parse tree produced by CELParser#Nested.
-	VisitNested(ctx *NestedContext) interface{}
+	VisitNested(ctx *NestedContext) any
 
 	// Visit a parse tree produced by CELParser#CreateList.
-	VisitCreateList(ctx *CreateListContext) interface{}
+	VisitCreateList(ctx *CreateListContext) any
 
 	// Visit a parse tree produced by CELParser#CreateStruct.
-	VisitCreateStruct(ctx *CreateStructContext) interface{}
+	VisitCreateStruct(ctx *CreateStructContext) any
 
 	// Visit a parse tree produced by CELParser#CreateMessage.
-	VisitCreateMessage(ctx *CreateMessageContext) interface{}
+	VisitCreateMessage(ctx *CreateMessageContext) any
 
 	// Visit a parse tree produced by CELParser#ConstantLiteral.
-	VisitConstantLiteral(ctx *ConstantLiteralContext) interface{}
+	VisitConstantLiteral(ctx *ConstantLiteralContext) any
 
 	// Visit a parse tree produced by CELParser#exprList.
-	VisitExprList(ctx *ExprListContext) interface{}
+	VisitExprList(ctx *ExprListContext) any
 
 	// Visit a parse tree produced by CELParser#listInit.
-	VisitListInit(ctx *ListInitContext) interface{}
+	VisitListInit(ctx *ListInitContext) any
 
 	// Visit a parse tree produced by CELParser#fieldInitializerList.
-	VisitFieldInitializerList(ctx *FieldInitializerListContext) interface{}
+	VisitFieldInitializerList(ctx *FieldInitializerListContext) any
 
 	// Visit a parse tree produced by CELParser#optField.
-	VisitOptField(ctx *OptFieldContext) interface{}
+	VisitOptField(ctx *OptFieldContext) any
 
 	// Visit a parse tree produced by CELParser#mapInitializerList.
-	VisitMapInitializerList(ctx *MapInitializerListContext) interface{}
+	VisitMapInitializerList(ctx *MapInitializerListContext) any
 
 	// Visit a parse tree produced by CELParser#SimpleIdentifier.
-	VisitSimpleIdentifier(ctx *SimpleIdentifierContext) interface{}
+	VisitSimpleIdentifier(ctx *SimpleIdentifierContext) any
 
 	// Visit a parse tree produced by CELParser#EscapedIdentifier.
-	VisitEscapedIdentifier(ctx *EscapedIdentifierContext) interface{}
+	VisitEscapedIdentifier(ctx *EscapedIdentifierContext) any
 
 	// Visit a parse tree produced by CELParser#optExpr.
-	VisitOptExpr(ctx *OptExprContext) interface{}
+	VisitOptExpr(ctx *OptExprContext) any
 
 	// Visit a parse tree produced by CELParser#Int.
-	VisitInt(ctx *IntContext) interface{}
+	VisitInt(ctx *IntContext) any
 
 	// Visit a parse tree produced by CELParser#Uint.
-	VisitUint(ctx *UintContext) interface{}
+	VisitUint(ctx *UintContext) any
 
 	// Visit a parse tree produced by CELParser#Double.
-	VisitDouble(ctx *DoubleContext) interface{}
+	VisitDouble(ctx *DoubleContext) any
 
 	// Visit a parse tree produced by CELParser#String.
-	VisitString(ctx *StringContext) interface{}
+	VisitString(ctx *StringContext) any
 
 	// Visit a parse tree produced by CELParser#Bytes.
-	VisitBytes(ctx *BytesContext) interface{}
+	VisitBytes(ctx *BytesContext) any
 
 	// Visit a parse tree produced by CELParser#BoolTrue.
-	VisitBoolTrue(ctx *BoolTrueContext) interface{}
+	VisitBoolTrue(ctx *BoolTrueContext) any
 
 	// Visit a parse tree produced by CELParser#BoolFalse.
-	VisitBoolFalse(ctx *BoolFalseContext) interface{}
+	VisitBoolFalse(ctx *BoolFalseContext) any
 
 	// Visit a parse tree produced by CELParser#Null.
-	VisitNull(ctx *NullContext) interface{}
+	VisitNull(ctx *NullContext) any
 }
