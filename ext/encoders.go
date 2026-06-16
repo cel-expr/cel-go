@@ -54,6 +54,8 @@ import (
 //
 // # JSON.Encode
 //
+// Introduced at version: 1
+//
 // Encodes a CEL value to a JSON string.
 //
 //	json.encode(<dyn>) -> <string>
@@ -88,8 +90,8 @@ func (*encoderLib) LibraryName() string {
 	return "cel.lib.ext.encoders"
 }
 
-func (*encoderLib) CompileOptions() []cel.EnvOption {
-	return []cel.EnvOption{
+func (lib *encoderLib) CompileOptions() []cel.EnvOption {
+	opts := []cel.EnvOption{
 		cel.Function("base64.decode",
 			cel.Overload("base64_decode_string", []*cel.Type{cel.StringType}, cel.BytesType,
 				cel.UnaryBinding(func(str ref.Val) ref.Val {
@@ -102,12 +104,17 @@ func (*encoderLib) CompileOptions() []cel.EnvOption {
 					b := bytes.(types.Bytes)
 					return stringOrError(base64EncodeBytes([]byte(b)))
 				}))),
-		cel.Function("json.encode",
-			cel.Overload("json_encode_dyn", []*cel.Type{cel.DynType}, cel.StringType,
-				cel.UnaryBinding(func(val ref.Val) ref.Val {
-					return stringOrError(jsonEncodeValue(val))
-				}))),
 	}
+	if lib.version >= 1 {
+		opts = append(opts,
+			cel.Function("json.encode",
+				cel.Overload("json_encode_dyn", []*cel.Type{cel.DynType}, cel.StringType,
+					cel.UnaryBinding(func(val ref.Val) ref.Val {
+						return stringOrError(jsonEncodeValue(val))
+					}))),
+		)
+	}
+	return opts
 }
 
 func (*encoderLib) ProgramOptions() []cel.ProgramOption {

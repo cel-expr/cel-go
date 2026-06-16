@@ -91,8 +91,22 @@ func TestEncoders(t *testing.T) {
 }
 
 func TestEncodersVersion(t *testing.T) {
-	_, err := cel.NewEnv(Encoders(EncodersVersion(0)))
+	env, err := cel.NewEnv(Encoders(EncodersVersion(0)))
 	if err != nil {
 		t.Fatalf("EncodersVersion(0) failed: %v", err)
+	}
+	if _, iss := env.Compile("base64.encode(b'hello')"); iss.Err() != nil {
+		t.Fatalf("base64.encode() got %v, wanted no error", iss.Err())
+	}
+	if _, iss := env.Compile("json.encode('hello')"); iss.Err() == nil {
+		t.Fatal("json.encode() got no error, wanted version-gated function to be unavailable")
+	}
+
+	env, err = cel.NewEnv(Encoders(EncodersVersion(1)))
+	if err != nil {
+		t.Fatalf("EncodersVersion(1) failed: %v", err)
+	}
+	if _, iss := env.Compile("json.encode('hello')"); iss.Err() != nil {
+		t.Fatalf("json.encode() got %v, wanted no error", iss.Err())
 	}
 }
