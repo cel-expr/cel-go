@@ -583,7 +583,7 @@ func configToEnvOptions(config *env.Config, provider types.Provider, optFactorie
 
 	// Configure the context variable declaration
 	if config.ContextVariable != nil {
-		typeName := config.ContextVariable.TypeName
+		typeName := config.ContextVariable.GetType()
 		if _, found := provider.FindStructType(typeName); !found {
 			return nil, fmt.Errorf("invalid context proto type: %q", typeName)
 		}

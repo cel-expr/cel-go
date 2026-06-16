@@ -324,6 +324,15 @@ type ContextVariable struct {
 	// TypeName represents the fully qualified typename of the context variable.
 	// Currently, only protobuf types are supported.
 	TypeName string `yaml:"type_name"`
+	// Alternative spelling.
+	Type string `yaml:"type"`
+}
+
+func (c *ContextVariable) GetType() string {
+	if c.TypeName != "" {
+		return c.TypeName
+	}
+	return c.Type
 }
 
 // Validate validates the context-variable configuration is well-formed.
