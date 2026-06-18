@@ -180,11 +180,11 @@ func TestStringConvertToTimestampStrict(t *testing.T) {
 	}
 	// RFC 3339 violations that time.Parse accepts loosely.
 	invalid := []string{
-		"2025-01-17T01:00:00,001Z",       // ',' fractional separator
-		"2025-01-17T1:00:00Z",            // single-digit hour
-		"2025-01-17T01:5:00Z",            // single-digit minute
-		"2025-01-18T01:01:01.001+24:01",  // offset hour out of range
-		"2025-01-17T01:01:01.001+00:60",  // offset minute out of range
+		"2025-01-17T01:00:00,001Z",      // ',' fractional separator
+		"2025-01-17T1:00:00Z",           // single-digit hour
+		"2025-01-17T01:5:00Z",           // single-digit minute
+		"2025-01-18T01:01:01.001+24:01", // offset hour out of range
+		"2025-01-17T01:01:01.001+00:60", // offset minute out of range
 	}
 	for _, s := range invalid {
 		out := String(s).ConvertToType(TimestampType)
@@ -195,6 +195,15 @@ func TestStringConvertToTimestampStrict(t *testing.T) {
 		want := fmt.Sprintf("invalid RFC 3339 timestamp %q", s)
 		if got := out.(*Err).String(); got != want {
 			t.Errorf("String(%q).ConvertToType(TimestampType) errored with %q, wanted %q", s, got, want)
+		}
+	}
+}
+
+func BenchmarkStringConvertToTimestamp(b *testing.B) {
+	s := String("2025-01-01T12:34:56.123456789Z")
+	for i := 0; i < b.N; i++ {
+		if IsError(s.ConvertToType(TimestampType)) {
+			b.Fatal("ConvertToType(TimestampType) errored, wanted a timestamp")
 		}
 	}
 }
