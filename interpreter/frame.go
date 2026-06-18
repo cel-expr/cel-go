@@ -16,8 +16,12 @@ package interpreter
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
+
+	"github.com/google/cel-go/common/types/ref"
 )
 
 // evalContext contains the stateful information needed for a single evaluation.
@@ -66,27 +70,39 @@ type ExecutionFrame struct {
 }
 
 // NewExecutionFrame creates a new execution frame from the pool.
-func NewExecutionFrame(vars Activation) *ExecutionFrame {
+func NewExecutionFrame(input any) (*ExecutionFrame, error) {
 	f := frameStack.Get().(*ExecutionFrame)
-	f.Activation = vars
-	return f
+	switch v := input.(type) {
+	case Activation:
+		f.Activation = v
+	case map[string]any:
+		f.Activation = activationInput.create(v)
+	default:
+		return nil, fmt.Errorf("invalid input, wanted Activation or map[string]any, got: (%T)%v", input, input)
+	}
+	return f, nil
 }
 
 // SetContext sets the context for the execution frame.
-func (f *ExecutionFrame) SetContext(ctx context.Context, interruptCheckFrequency uint) {
-	if f.ctx == nil {
-		f.ctx = evalContextPool.Get().(*evalContext)
+func (f *ExecutionFrame) SetContext(ctx context.Context, interruptCheckFrequency uint) error {
+	if f.parent != nil {
+		return errors.New("SetContext() called on child frame")
 	}
+	if f.ctx != nil {
+		return errors.New("SetContext() called more than once")
+	}
+	f.ctx = evalContextPool.Get().(*evalContext)
 	f.ctx.ctx, f.ctx.cancel = context.WithCancel(ctx)
 	f.ctx.interrupt = ctx.Done()
 	f.ctx.interruptCheckFrequency = interruptCheckFrequency
 	f.ctx.interruptCheckCount.Store(0)
 	f.ctx.interrupted.Store(false)
+	return nil
 }
 
 // Close releases the resources held by the execution frame and returns it to the pool.
 func (f *ExecutionFrame) Close() {
-	if f.ctx != nil {
+	if f.parent == nil && f.ctx != nil {
 		if f.ctx.cancel != nil {
 			f.ctx.cancel()
 			f.ctx.cancel = nil
@@ -99,19 +115,27 @@ func (f *ExecutionFrame) Close() {
 		f.ctx.interruptCheckCount.Store(0)
 		f.ctx.interruptCheckFrequency = 0
 		evalContextPool.Put(f.ctx)
-		f.ctx = nil
 	}
+	f.ctx = nil
 	f.parent = nil
-	activationStack.release(f.Activation)
+	switch a := f.Activation.(type) {
+	case *hierarchicalActivation:
+		if child, ok := a.child.(*inputActivation); ok {
+			activationInput.release(child)
+		}
+		activationStack.release(a)
+	case *inputActivation:
+		activationInput.release(a)
+	}
 	f.Activation = nil
 	frameStack.Put(f)
 }
 
-// push pushes the given activation onto the activation stack and returns the new frame.
+// Push pushes the given activation onto the activation stack and returns the new frame.
 //
 // This operation is internal to the interpreter and is used to handle comprehension
 // scoping. The child frame inherits the shared evalContext from the parent.
-func (f *ExecutionFrame) push(activation Activation) *ExecutionFrame {
+func (f *ExecutionFrame) Push(activation Activation) *ExecutionFrame {
 	child := frameStack.Get().(*ExecutionFrame)
 	child.parent = f
 	child.ctx = f.ctx
@@ -119,8 +143,11 @@ func (f *ExecutionFrame) push(activation Activation) *ExecutionFrame {
 	return child
 }
 
-// pop returns the parent frame, releasing the current frame back to the pool.
-func (f *ExecutionFrame) pop() *ExecutionFrame {
+// Pop returns the parent frame, releasing the current frame back to the pool.
+func (f *ExecutionFrame) Pop() *ExecutionFrame {
+	if f.parent == nil {
+		return f
+	}
 	parent := f.parent
 	activationStack.release(f.Activation)
 	f.Activation = nil
@@ -193,12 +220,13 @@ func (pool *activationStackPool) create(parent, child Activation) Activation {
 	h := pool.Get().(*hierarchicalActivation)
 	h.child = child
 	h.parent = parent
+	h.poolAllocated = true
 	return h
 }
 
 func (pool *activationStackPool) release(activation Activation) {
 	h, ok := activation.(*hierarchicalActivation)
-	if !ok {
+	if !ok || !h.poolAllocated {
 		return
 	}
 	h.parent = nil
@@ -206,7 +234,7 @@ func (pool *activationStackPool) release(activation Activation) {
 	pool.Pool.Put(h)
 }
 
-func newActivationPool() *activationStackPool {
+func newActivationStackPool() *activationStackPool {
 	return &activationStackPool{
 		Pool: sync.Pool{
 			New: func() any {
@@ -216,6 +244,84 @@ func newActivationPool() *activationStackPool {
 	}
 }
 
+type inputActivation struct {
+	vars     map[string]any
+	lazyVars map[string]any
+}
+
+// ResolveName looks up the value of the input variable name, if found.
+//
+// Lazy bindings may be supplied within the map-based input in either of the following forms:
+// - func() any
+// - func() ref.Val
+//
+// The lazy binding will only be invoked once per evaluation.
+//
+// Values which are not represented as ref.Val types on input may be adapted to a ref.Val using
+// the types.Adapter configured in the environment.
+func (a *inputActivation) ResolveName(name string) (any, bool) {
+	v, found := a.vars[name]
+	if !found {
+		return nil, false
+	}
+	switch obj := v.(type) {
+	case func() ref.Val:
+		if resolved, found := a.lazyVars[name]; found {
+			return resolved, true
+		}
+		lazy := obj()
+		a.lazyVars[name] = lazy
+		return lazy, true
+	case func() any:
+		if resolved, found := a.lazyVars[name]; found {
+			return resolved, true
+		}
+		lazy := obj()
+		a.lazyVars[name] = lazy
+		return lazy, true
+	default:
+		return obj, true
+	}
+}
+
+// Parent implements the Activation interface
+func (a *inputActivation) Parent() Activation {
+	return nil
+}
+
+func newActivationInputPool() *activationInputPool {
+	return &activationInputPool{
+		Pool: sync.Pool{
+			New: func() any {
+				return &inputActivation{
+					lazyVars: make(map[string]any),
+				}
+			},
+		},
+	}
+}
+
+type activationInputPool struct {
+	sync.Pool
+}
+
+// create initializes a pooled Activation object with the map input.
+func (p *activationInputPool) create(vars map[string]any) *inputActivation {
+	a := p.Pool.Get().(*inputActivation)
+	a.vars = vars
+	return a
+}
+
+func (p *activationInputPool) release(value any) {
+	a := value.(*inputActivation)
+	for k := range a.lazyVars {
+		delete(a.lazyVars, k)
+	}
+	a.vars = nil
+	p.Pool.Put(a)
+}
+
 var (
-	activationStack           = newActivationPool()
+	activationStack = newActivationStackPool()
+	activationInput = newActivationInputPool()
 )

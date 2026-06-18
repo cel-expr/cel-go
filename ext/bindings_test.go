@@ -17,6 +17,7 @@ package ext
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/google/cel-go/cel"
@@ -25,6 +26,7 @@ import (
 	"github.com/google/cel-go/common/operators"
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
+	"github.com/google/cel-go/interpreter"
 )
 
 var bindingTests = []struct {
@@ -216,12 +218,13 @@ func TestBindingsInvalidIdent(t *testing.T) {
 }
 
 func BenchmarkBindings(b *testing.B) {
-	env, err := cel.NewEnv(Bindings(), Strings())
-	if err != nil {
-		b.Fatalf("cel.NewEnv(Bindings(), Strings()) failed: %v", err)
-	}
 	for i, tst := range bindingTests {
 		tc := tst
+		opts := append([]cel.EnvOption{Bindings(), Strings()}, tc.vars...)
+		env, err := cel.NewEnv(opts...)
+		if err != nil {
+			b.Fatalf("cel.NewEnv() failed: %v", err)
+		}
 		ast, iss := env.Compile(tc.expr)
 		if iss.Err() != nil {
 			b.Fatalf("env.Compile(%q) failed: %v", tc.expr, iss.Err())
@@ -234,8 +237,12 @@ func BenchmarkBindings(b *testing.B) {
 		b.Run(fmt.Sprintf("[%d]", i), func(b *testing.B) {
 			b.ResetTimer()
 			b.ReportAllocs()
+			var input any = cel.NoVars()
+			if tc.in != nil {
+				input = tc.in
+			}
 			for i := 0; i < b.N; i++ {
-				prg.Eval(cel.NoVars())
+				prg.Eval(input)
 			}
 		})
 	}
@@ -493,5 +500,66 @@ func TestBlockEval_RuntimeErrors(t *testing.T) {
 				t.Fatalf("prg.Eval() got %v, expected no such attribute error", err)
 			}
 		})
+	}
+}
+
+func TestDynamicBlockEval(t *testing.T) {
+	db := &dynamicBlock{
+		expr: interpreter.NewConstValue(1, types.IntOne),
+		slotActivationPool: &sync.Pool{
+			New: func() any {
+				return &dynamicSlotActivation{}
+			},
+		},
+	}
+	res := db.Eval(cel.NoVars())
+	if res.Equal(types.IntOne) != types.True {
+		t.Errorf("db.Eval() = %v, wanted 1", res)
+	}
+}
+
+func TestConstantBlockEval(t *testing.T) {
+	cb := &constantBlock{
+		expr: interpreter.NewConstValue(2, types.IntOne),
+	}
+	res := cb.Eval(cel.NoVars())
+	if res.Equal(types.IntOne) != types.True {
+		t.Errorf("cb.Eval() = %v, wanted 1", res)
+	}
+}
+
+func BenchmarkBlockEval(b *testing.B) {
+	fac := ast.NewExprFactory()
+	expr := fac.NewCall(
+		1, "cel.@block",
+		fac.NewList(2, []ast.Expr{
+			fac.NewIdent(3, "x"),
+			fac.NewIdent(4, "@index0"),
+			fac.NewIdent(5, "@index1"),
+		}, []int32{}),
+		fac.NewCall(9, operators.Add,
+			fac.NewCall(6, operators.Add,
+				fac.NewIdent(7, "@index2"),
+				fac.NewIdent(8, "@index1")),
+			fac.NewIdent(10, "@index0"),
+		),
+	)
+	blockAST := ast.NewAST(expr, nil)
+	env, err := cel.NewEnv(
+		Bindings(),
+		cel.Variable("x", cel.StringType),
+	)
+	if err != nil {
+		b.Fatalf("cel.NewEnv(Bindings()) failed: %v", err)
+	}
+	prg, err := env.PlanProgram(blockAST, cel.EvalOptions(cel.OptOptimize))
+	if err != nil {
+		b.Fatalf("PlanProgram() failed: %v", err)
+	}
+	input := map[string]any{"x": "hello"}
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		prg.Eval(input)
 	}
 }

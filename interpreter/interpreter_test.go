@@ -1695,7 +1695,7 @@ func BenchmarkInterpreter(b *testing.B) {
 		if tst.err != "" || tst.progErr != "" {
 			continue
 		}
-		prg, vars, err := program(b, &tst, Optimize(), CompileRegexConstants(MatchesRegexOptimization))
+		prg, frame, err := program(b, &tst, Optimize(), CompileRegexConstants(MatchesRegexOptimization))
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -1704,7 +1704,7 @@ func BenchmarkInterpreter(b *testing.B) {
 			b.ResetTimer()
 			b.ReportAllocs()
 			for i := 0; i < b.N; i++ {
-				prg.Eval(vars)
+				prg.Exec(frame)
 			}
 		})
 	}
@@ -1894,26 +1894,6 @@ func TestInterpreter_ExhaustiveConditionalExpr(t *testing.T) {
 	}
 }
 
-func TestInterpreter_WrappedActivationEvalState(t *testing.T) {
-	vars, _ := NewActivation(map[string]any{
-		"a": types.True,
-		"b": types.True,
-		"c": types.False,
-		"d": types.False,
-	})
-	state := NewEvalState()
-	esa := &evalStateActivation{vars: vars, state: state}
-	wrappedVars := &testActivationWrapper{esa, "test_activation_wrapper"}
-	ac, _ := NewActivation(wrappedVars)
-	es, found := asEvalState(ac)
-	if !found {
-		t.Errorf("asEvalState(%v) failed to find EvalState", ac)
-	}
-	if es != state {
-		t.Errorf("asEvalState(%v) returned %v, wanted %v", ac, es, state)
-	}
-}
-
 func TestInterpreter_InterruptableEval(t *testing.T) {
 	items := make([]int64, 5000)
 	for i := int64(0); i < 5000; i++ {
@@ -1929,7 +1909,7 @@ func TestInterpreter_InterruptableEval(t *testing.T) {
 		},
 		out: true,
 	}
-	prg, vars, err := program(t, &tc, InterruptableEval())
+	prg, frame, err := program(t, &tc, InterruptableEval())
 	if err != nil {
 		t.Fatalf("program(%s) failed: %v", tc.expr, err)
 	}
@@ -1938,35 +1918,12 @@ func TestInterpreter_InterruptableEval(t *testing.T) {
 	evalCtx, cancel := context.WithTimeout(ctx, 10*time.Microsecond)
 	defer cancel()
 
-	ctxVars := &contextActivation{
-		Activation: vars,
-		interrupt: func() bool {
-			select {
-			case <-evalCtx.Done():
-				return true
-			default:
-				return false
-			}
-		},
-	}
-	out := prg.Eval(ctxVars)
+	frame.SetContext(evalCtx, 100)
+	out := prg.Exec(frame)
+	frame.Close()
 	if !types.IsError(out) || out.(*types.Err).String() != "operation interrupted" {
 		t.Errorf("Got %v, wanted operation interrupted error", out)
 	}
-}
-
-type contextActivation struct {
-	Activation
-	interruptCount int
-	interrupt      func() bool
-}
-
-func (ca *contextActivation) ResolveName(name string) (any, bool) {
-	if name == "#interrupted" {
-		ca.interruptCount++
-		return ca.interruptCount%100 == 0 && ca.interrupt(), true
-	}
-	return ca.Activation.ResolveName(name)
 }
 
 func TestInterpreter_ExhaustiveLogicalOrEquals(t *testing.T) {
@@ -2277,7 +2234,7 @@ func testContainer(name string) *containers.Container {
 	return cont
 }
 
-func program(t testing.TB, tst *testCase, opts ...PlannerOption) (Interpretable, Activation, error) {
+func program(t testing.TB, tst *testCase, opts ...PlannerOption) (InterpretableV2, *ExecutionFrame, error) {
 	// Configure the package.
 	cont := containers.DefaultContainer
 	if tst.container != "" {
@@ -2353,7 +2310,7 @@ func program(t testing.TB, tst *testCase, opts ...PlannerOption) (Interpretable,
 		if err != nil {
 			return nil, nil, err
 		}
-		return prg, vars, nil
+		return prg, AsFrame(vars), nil
 	}
 	// Check the expression.
 	checked, errs := checker.Check(parsed, s, env)
@@ -2365,7 +2322,7 @@ func program(t testing.TB, tst *testCase, opts ...PlannerOption) (Interpretable,
 	if err != nil {
 		return nil, nil, err
 	}
-	return prg, vars, nil
+	return prg, AsFrame(vars), nil
 }
 
 func base64Encode(val ref.Val) ref.Val {
@@ -2512,4 +2469,238 @@ type testActivationWrapper struct {
 
 func (tw *testActivationWrapper) Unwrap() Activation {
 	return tw.Activation
+}
+
+func TestInterruptErrorIs(t *testing.T) {
+	ie := InterruptError{}
+	tests := []struct {
+		name   string
+		target error
+		want   bool
+	}{
+		{
+			name:   "same type",
+			target: InterruptError{},
+			want:   true,
+		},
+		{
+			name:   "different error",
+			target: fmt.Errorf("other error"),
+			want:   false,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ie.Is(tc.target); got != tc.want {
+				t.Errorf("Is(%v) = %t, wanted %t", tc.target, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestFolderActivation(t *testing.T) {
+	parentAct := EmptyActivation()
+	frame := mustNewExecutionFrame(t, parentAct)
+	defer frame.Close()
+	fld := newFolder(&evalFold{}, frame)
+	defer releaseFolder(fld)
+	if fld.Parent() != frame {
+		t.Errorf("fld.Parent() = %v, wanted %v", fld.Parent(), frame)
+	}
+	if fld.Unwrap() != frame {
+		t.Errorf("fld.Unwrap() = %v, wanted %v", fld.Unwrap(), frame)
+	}
+}
+
+func TestEvalWatchConstructor(t *testing.T) {
+	watchConst := &evalWatchConstructor{
+		constructor: &evalList{
+			id:    1,
+			elems: []InterpretableV2{NewConstValue(2, types.IntOne)},
+		},
+	}
+	if len(watchConst.InitVals()) != 1 {
+		t.Errorf("watchConst.InitVals() len = %d, wanted 1", len(watchConst.InitVals()))
+	}
+	if watchConst.Type() != types.ListType {
+		t.Errorf("watchConst.Type() = %v, wanted %v", watchConst.Type(), types.ListType)
+	}
+}
+
+func TestCustomDecorator(t *testing.T) {
+	decV1 := func(i Interpretable) (Interpretable, error) {
+		return i, nil
+	}
+	opt := CustomDecorator(decV1)
+	p := &planner{}
+	p2, err := opt(p)
+	if err != nil {
+		t.Fatalf("CustomDecorator failed: %v", err)
+	}
+	if len(p2.decorators) != 1 {
+		t.Fatalf("CustomDecorator did not add decorator")
+	}
+	res, err := p2.decorators[0](NewConstValue(1, types.IntOne))
+	if err != nil {
+		t.Fatalf("wrapped decorator failed: %v", err)
+	}
+	if res.ID() != 1 {
+		t.Errorf("wrapped decorator returned node with ID %d, wanted 1", res.ID())
+	}
+}
+
+func TestCostTrackerActualCost(t *testing.T) {
+	ct := &CostTracker{cost: 42}
+	if ct.ActualCost() != 42 {
+		t.Errorf("ct.ActualCost() = %d, wanted 42", ct.ActualCost())
+	}
+}
+
+func TestV2Adapter(t *testing.T) {
+	legacy := &testLegacyInterpretable{id: 42}
+	adapted := adaptToV2(legacy)
+	if adapted.ID() != 42 {
+		t.Errorf("adapted.ID() = %d, wanted 42", adapted.ID())
+	}
+	frame := mustNewExecutionFrame(t, EmptyActivation())
+	defer frame.Close()
+	val := adapted.Exec(frame)
+	if val.Equal(types.IntOne) != types.True {
+		t.Errorf("adapted.Exec() = %v, wanted 1", val)
+	}
+}
+
+func TestInterpretableArgs(t *testing.T) {
+	tests := []struct {
+		name string
+		call InterpretableCall
+		want int
+	}{
+		{
+			name: "evalNe",
+			call: &evalNe{lhs: NewConstValue(1, types.IntOne), rhs: NewConstValue(2, types.IntOne)},
+			want: 2,
+		},
+		{
+			name: "evalZeroArity",
+			call: &evalZeroArity{},
+			want: 0,
+		},
+		{
+			name: "evalVarArgs",
+			call: &evalVarArgs{args: []InterpretableV2{NewConstValue(1, types.IntOne)}},
+			want: 1,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := len(tc.call.Args()); got != tc.want {
+				t.Errorf("Args() len = %d, wanted %d", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestNewCall(t *testing.T) {
+	call := NewCall(10, "f", "f_overload", []InterpretableV2{NewConstValue(1, types.IntOne)}, func(args ...ref.Val) ref.Val { return types.True })
+	if call.ID() != 10 {
+		t.Errorf("NewCall.ID() = %d, wanted 10", call.ID())
+	}
+}
+
+func TestExhaustiveOperatorsLegacyEval(t *testing.T) {
+	reg, _ := types.NewRegistry()
+	fac := NewAttributeFactory(containers.DefaultContainer, reg, reg)
+
+	tests := []struct {
+		name string
+		expr Interpretable
+	}{
+		{
+			name: "exhaustive or",
+			expr: &evalExhaustiveOr{id: 1},
+		},
+		{
+			name: "exhaustive and",
+			expr: &evalExhaustiveAnd{id: 2},
+		},
+		{
+			name: "exhaustive conditional",
+			expr: &evalExhaustiveConditional{
+				id: 3,
+				attr: &conditionalAttribute{
+					expr:   NewConstValue(4, types.True),
+					truthy: fac.AbsoluteAttribute(5, "a"),
+					falsy:  fac.AbsoluteAttribute(6, "b"),
+				},
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.expr.Eval(EmptyActivation())
+		})
+	}
+}
+
+func TestFindFrame(t *testing.T) {
+	frame := mustNewExecutionFrame(t, EmptyActivation())
+	defer frame.Close()
+
+	tests := []struct {
+		name string
+		act  Activation
+	}{
+		{
+			name: "nested wrapper",
+			act:  &testActivationWrapper{Activation: &testActivationWrapper{Activation: frame, name: "w1"}, name: "w2"},
+		},
+		{
+			name: "parent hierarchy",
+			act:  &parentActivationWrapper{parent: frame},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			found := findFrame(tc.act)
+			if found != frame {
+				t.Errorf("findFrame() = %v, wanted %v", found, frame)
+			}
+		})
+	}
+}
+
+func TestObservableInterpretable(t *testing.T) {
+	obsInt := &ObservableInterpretable{InterpretableV2: NewConstValue(12, types.True)}
+	if obsInt.ID() != 12 {
+		t.Errorf("obsInt.ID() = %d, wanted 12", obsInt.ID())
+	}
+	res := obsInt.Eval(EmptyActivation())
+	if res.Equal(types.True) != types.True {
+		t.Errorf("obsInt.Eval() = %v, wanted true", res)
+	}
+}
+
+type testLegacyInterpretable struct {
+	id int64
+}
+
+func (t *testLegacyInterpretable) ID() int64 {
+	return t.id
+}
+
+func (t *testLegacyInterpretable) Eval(vars Activation) ref.Val {
+	return types.IntOne
+}
+
+type parentActivationWrapper struct {
+	parent Activation
+}
+
+func (paw *parentActivationWrapper) ResolveName(name string) (any, bool) {
+	return paw.parent.ResolveName(name)
+}
+
+func (paw *parentActivationWrapper) Parent() Activation {
+	return paw.parent
 }

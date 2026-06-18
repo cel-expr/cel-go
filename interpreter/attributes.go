@@ -190,7 +190,7 @@ func (r *attrFactory) AbsoluteAttribute(id int64, names ...string) NamespacedAtt
 func (r *attrFactory) ConditionalAttribute(id int64, expr Interpretable, t, f Attribute) Attribute {
 	return &conditionalAttribute{
 		id:      id,
-		expr:    expr,
+		expr:    adaptToV2(expr),
 		truthy:  t,
 		falsy:   f,
 		adapter: r.adapter,
@@ -225,7 +225,7 @@ func (r *attrFactory) MaybeAttribute(id int64, name string) Attribute {
 func (r *attrFactory) RelativeAttribute(id int64, operand Interpretable) Attribute {
 	return &relativeAttribute{
 		id:                     id,
-		operand:                operand,
+		operand:                adaptToV2(operand),
 		qualifiers:             []Qualifier{},
 		adapter:                r.adapter,
 		fac:                    r,
@@ -384,7 +384,7 @@ func (a *absoluteAttribute) Resolve(vars Activation) (any, error) {
 
 type conditionalAttribute struct {
 	id      int64
-	expr    Interpretable
+	expr    InterpretableV2
 	truthy  Attribute
 	falsy   Attribute
 	adapter types.Adapter
@@ -571,7 +571,7 @@ func (a *maybeAttribute) String() string {
 
 type relativeAttribute struct {
 	id         int64
-	operand    Interpretable
+	operand    InterpretableV2
 	qualifiers []Qualifier
 	adapter    types.Adapter
 	fac        AttributeFactory
