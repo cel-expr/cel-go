@@ -42,8 +42,8 @@ func TestEncoders(t *testing.T) {
 			parseOnly: true,
 		},
 		{expr: "json.encode('hello') == '\"hello\"'"},
-		{expr: "json.encode([1, 'two', true]) == '[1,\"two\",true]'"},
-		{expr: "json.encode({'items': [1, 'two', false]}) == '{\"items\":[1,\"two\",false]}'"},
+		{expr: "json.encode([1, 'two', true]) == '[1, \"two\", true]'"},
+		{expr: "json.encode({'items': [1, 'two', false]}) == '{\"items\":[1, \"two\", false]}'"},
 	}
 
 	env, err := cel.NewEnv(Encoders())
