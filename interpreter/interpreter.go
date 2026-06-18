@@ -43,14 +43,14 @@ type EvalObserver func(vars Activation, id int64, programStep any, value ref.Val
 
 // StatefulObserver observes evaluation while tracking or utilizing stateful behavior.
 type StatefulObserver interface {
-	// InitState configures stateful metadata on the activation.
+	// InitState configures stateful metadata on the execution frame.
 	InitState(*ExecutionFrame) (any, error)
 
-	// GetState retrieves the stateful metadata from the activation.
+	// GetState retrieves the stateful metadata from the execution frame.
 	GetState(*ExecutionFrame) any
 
 	// Observe passes the activation and relevant evaluation metadata to the observer.
-	// The observe method is expected to do the equivalent of GetState(vars) in order
+	// The observe method is expected to do the equivalent of GetState(AsFrame(activation))
 	// to find the metadata that needs to be updated upon invocation.
 	Observe(Activation, int64, any, ref.Val)
 }

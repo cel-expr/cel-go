@@ -164,6 +164,14 @@ func (oi *ObservableInterpretable) Eval(vars Activation) ref.Val {
 	return oi.ObserveExec(AsFrame(vars), func(any) {})
 }
 
+// ObserveEval evaluates an interpretable and performs per-evaluation state-tracking.
+//
+// This method is concurrency safe and the expectation is that the observer function will use
+// a switch statement to determine the type of the state which has been reported back from the call.
+func (oi *ObservableInterpretable) ObserveEval(vars Activation, observer func(any)) ref.Val {
+	return oi.ObserveExec(AsFrame(vars), observer)
+}
+
 // ObserveExec evaluates an interpretable and performs per-evaluation state-tracking.
 //
 // This method is concurrency safe and the expectation is that the observer function will use
@@ -1467,7 +1475,7 @@ func invalidOptionalElementInit(value ref.Val) ref.Val {
 func newFolder(eval *evalFold, frame *ExecutionFrame) *folder {
 	f := folderPool.Get().(*folder)
 	f.evalFold = eval
-	f.frame = frame.push(f)
+	f.frame = frame.Push(f)
 	return f
 }
 
@@ -1637,7 +1645,7 @@ func (f *folder) evalResult() ref.Val {
 // reset clears any state associated with folder evaluation.
 func (f *folder) reset() {
 	f.evalFold = nil
-	f.frame.pop()
+	f.frame.Pop()
 	f.frame = nil
 	f.accuVal = nil
 	f.iterVar1Val = nil

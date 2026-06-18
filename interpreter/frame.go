@@ -131,11 +131,11 @@ func (f *ExecutionFrame) Close() {
 	frameStack.Put(f)
 }
 
-// push pushes the given activation onto the activation stack and returns the new frame.
+// Push pushes the given activation onto the activation stack and returns the new frame.
 //
 // This operation is internal to the interpreter and is used to handle comprehension
 // scoping. The child frame inherits the shared evalContext from the parent.
-func (f *ExecutionFrame) push(activation Activation) *ExecutionFrame {
+func (f *ExecutionFrame) Push(activation Activation) *ExecutionFrame {
 	child := frameStack.Get().(*ExecutionFrame)
 	child.parent = f
 	child.ctx = f.ctx
@@ -143,8 +143,8 @@ func (f *ExecutionFrame) push(activation Activation) *ExecutionFrame {
 	return child
 }
 
-// pop returns the parent frame, releasing the current frame back to the pool.
-func (f *ExecutionFrame) pop() *ExecutionFrame {
+// Pop returns the parent frame, releasing the current frame back to the pool.
+func (f *ExecutionFrame) Pop() *ExecutionFrame {
 	if f.parent == nil {
 		return f
 	}

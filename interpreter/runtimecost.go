@@ -93,8 +93,13 @@ func (ct *costTrackerFactory) GetState(frame *ExecutionFrame) any {
 // with the evaluation.
 func (ct *costTrackerFactory) Observe(vars Activation, id int64, programStep any, val ref.Val) {
 	frame := AsFrame(vars)
-	tracker := ct.GetState(frame).(*CostTracker)
-	if tracker == nil {
+	state := ct.GetState(frame)
+	if state == nil {
+		return
+	}
+	tracker, ok := state.(*CostTracker)
+	if !ok {
+		// The state is configured with CostTrackFactory so this shouldn't happen.
 		return
 	}
 	switch t := programStep.(type) {
