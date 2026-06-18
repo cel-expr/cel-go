@@ -799,7 +799,7 @@ func (fold *evalFold) Eval(ctx Activation) ref.Val {
 	f := newFolder(fold, ctx)
 	defer releaseFolder(f)
 
-	foldRange := fold.iterRange.Eval(ctx)
+	foldRange := fold.iterRange.Eval(f.iterRangeActivation())
 	if types.IsUnknownOrError(foldRange) {
 		return foldRange
 	}
@@ -1309,6 +1309,7 @@ type folder struct {
 	accuVal     ref.Val
 	iterVar1Val any
 	iterVar2Val any
+	iterIndex   int64
 
 	// bookkeeping flags to modify Activation and fold behaviors.
 	initialized   bool
@@ -1321,6 +1322,9 @@ func (f *folder) foldIterable(iterable traits.Iterable) ref.Val {
 	it := iterable.Iterator()
 	for it.HasNext() == types.True {
 		f.iterVar1Val = it.Next()
+		if unk, found := f.maybeUnknownIteratorValue(); found {
+			f.iterVar1Val = unk
+		}
 
 		cond := f.cond.Eval(f)
 		condBool, ok := cond.(types.Bool)
@@ -1335,6 +1339,7 @@ func (f *folder) foldIterable(iterable traits.Iterable) ref.Val {
 			f.interrupted = true
 			return f.evalResult()
 		}
+		f.iterIndex++
 	}
 	return f.evalResult()
 }
@@ -1429,6 +1434,150 @@ func (f *folder) AsPartialActivation() (PartialActivation, bool) {
 	return nil, false
 }
 
+func (f *folder) maybeUnknownIteratorValue() (ref.Val, bool) {
+	partial, isPartial := AsPartialActivation(f.activation)
+	if !isPartial {
+		return nil, false
+	}
+	attr, namespaced, ok := f.iterRangeAttribute()
+	if !ok {
+		return nil, false
+	}
+	rangeQuals := namespaced.Qualifiers()
+	for _, pat := range partial.UnknownAttributePatterns() {
+		if !matchesAnyVariable(pat, namespaced.CandidateVariableNames()) {
+			continue
+		}
+		qualPats := pat.QualifierPatterns()
+		if len(qualPats) <= len(rangeQuals) {
+			continue
+		}
+		if !qualifierPatternsMatch(qualPats, rangeQuals) {
+			continue
+		}
+		if !qualifierPatternMatchesInt(qualPats[len(rangeQuals)], f.iterIndex) {
+			continue
+		}
+		return types.NewUnknown(attr.ID(), attributeTrailFromPattern(pat, f.iterIndex, len(rangeQuals))), true
+	}
+	return nil, false
+}
+
+func (f *folder) iterRangeActivation() Activation {
+	partial, isPartial := AsPartialActivation(f.activation)
+	if !isPartial {
+		return f.activation
+	}
+	_, namespaced, ok := f.iterRangeAttribute()
+	if !ok {
+		return f.activation
+	}
+	rangeQuals := namespaced.Qualifiers()
+	unknowns := partial.UnknownAttributePatterns()
+	filtered := make([]*AttributePattern, 0, len(unknowns))
+	for _, pat := range unknowns {
+		if matchesAnyVariable(pat, namespaced.CandidateVariableNames()) &&
+			len(pat.QualifierPatterns()) > len(rangeQuals) &&
+			qualifierPatternsMatch(pat.QualifierPatterns(), rangeQuals) {
+			continue
+		}
+		filtered = append(filtered, pat)
+	}
+	if len(filtered) == len(unknowns) {
+		return f.activation
+	}
+	return &partActivation{Activation: partial, unknowns: filtered}
+}
+
+func (f *folder) iterRangeAttribute() (InterpretableAttribute, NamespacedAttribute, bool) {
+	attr, ok := f.iterRange.(InterpretableAttribute)
+	if !ok {
+		return nil, nil, false
+	}
+	namespaced, ok := attr.Attr().(NamespacedAttribute)
+	if !ok {
+		return nil, nil, false
+	}
+	return attr, namespaced, true
+}
+
+func matchesAnyVariable(pat *AttributePattern, variables []string) bool {
+	for _, variable := range variables {
+		if pat.VariableMatches(variable) {
+			return true
+		}
+	}
+	return false
+}
+
+func qualifierPatternsMatch(patterns []*AttributeQualifierPattern, qualifiers []Qualifier) bool {
+	if len(patterns) < len(qualifiers) {
+		return false
+	}
+	for i, qual := range qualifiers {
+		if !patterns[i].Matches(qual) {
+			return false
+		}
+	}
+	return true
+}
+
+func qualifierPatternMatchesInt(pattern *AttributeQualifierPattern, value int64) bool {
+	if pattern.wildcard {
+		return true
+	}
+	switch v := pattern.value.(type) {
+	case int:
+		return int64(v) == value
+	case int32:
+		return int64(v) == value
+	case int64:
+		return v == value
+	case uint:
+		return uint64(v) == uint64(value)
+	case uint32:
+		return uint64(v) == uint64(value)
+	case uint64:
+		return v == uint64(value)
+	}
+	return false
+}
+
+func attributeTrailFromPattern(pat *AttributePattern, iterIndex int64, iterIndexOffset int) *types.AttributeTrail {
+	attr := types.NewAttributeTrail(pat.variable)
+	for i, qualPat := range pat.QualifierPatterns() {
+		if i == iterIndexOffset {
+			types.QualifyAttribute[int64](attr, iterIndex)
+			continue
+		}
+		if qualPat.wildcard {
+			types.QualifyAttribute[string](attr, "*")
+			continue
+		}
+		switch v := qualPat.value.(type) {
+		case bool:
+			types.QualifyAttribute[bool](attr, v)
+		case int:
+			types.QualifyAttribute[int64](attr, int64(v))
+		case int32:
+			types.QualifyAttribute[int64](attr, int64(v))
+		case int64:
+			types.QualifyAttribute[int64](attr, v)
+		case string:
+			types.QualifyAttribute[string](attr, v)
+		case uint:
+			types.QualifyAttribute[uint64](attr, uint64(v))
+		case uint32:
+			types.QualifyAttribute[uint64](attr, uint64(v))
+		case uint64:
+			types.QualifyAttribute[uint64](attr, v)
+		default:
+			types.QualifyAttribute[string](attr, fmt.Sprintf("%v", v))
+		}
+	}
+	return attr
+}
+
 // evalResult computes the final result of the fold after all entries have been folded and accumulated.
 func (f *folder) evalResult() ref.Val {
 	f.computeResult = true
@@ -1456,6 +1605,7 @@ func (f *folder) reset() {
 	f.accuVal = nil
 	f.iterVar1Val = nil
 	f.iterVar2Val = nil
+	f.iterIndex = 0
 
 	f.initialized = false
 	f.mutableValue = false

@@ -2090,6 +2090,50 @@ func TestInterpreter_MissingIdentInSelect(t *testing.T) {
 	}
 }
 
+func TestInterpreter_ComprehensionTracksUnknownAttribute(t *testing.T) {
+	tc := testCase{
+		name: "comprehension_tracks_unknown_attribute",
+		expr: `items.exists(x, x.field == 'test')`,
+		vars: []*decls.VariableDecl{
+			decls.NewVariable("items", types.NewListType(types.NewMapType(types.StringType, types.StringType))),
+		},
+		attrs: NewPartialAttributeFactory(testContainer(""), types.DefaultTypeAdapter, types.NewEmptyRegistry()),
+		in: newTestPartialActivation(t, map[string]any{
+			"items": []map[string]string{
+				{"field": "other"},
+				{"field": "nope"},
+				{"field": "unknown"},
+			},
+		}, NewAttributePattern("items").QualInt(2).QualString("field")),
+	}
+	prg, vars, err := program(t, &tc)
+	if err != nil {
+		t.Fatalf("program() failed: %v", err)
+	}
+
+	got := prg.Eval(vars)
+	unk, ok := got.(*types.Unknown)
+	if !ok {
+		t.Fatalf("Eval() got %v, wanted unknown", got)
+	}
+	want := types.QualifyAttribute[string](
+		types.QualifyAttribute[int64](types.NewAttributeTrail("items"), 2),
+		"field",
+	)
+	for _, id := range unk.IDs() {
+		trails, found := unk.GetAttributeTrails(id)
+		if !found {
+			continue
+		}
+		for _, trail := range trails {
+			if trail.Equal(want) {
+				return
+			}
+		}
+	}
+	t.Fatalf("Eval() got unknown %v, wanted attribute trail %v", unk, want)
+}
+
 func TestInterpreter_TypeConversionOpt(t *testing.T) {
 	tests := []struct {
 		in  string
