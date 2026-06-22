@@ -933,19 +933,44 @@ func TestNativeStructEmbedded(t *testing.T) {
 	var nativeTests = []struct {
 		expr string
 		in   any
+		out  any
 	}{
 		{
 			expr: `test.embedded.custom_name == "name"`,
 			in: map[string]any{
-				"test": &TestEmbeddedTypes{TestNestedType{NestedCustomName: "name"}},
+				"test": &TestEmbeddedTypes{
+					TestNestedType: TestNestedType{NestedCustomName: "name"},
+					Skipped:        "should-be-hidden",
+				},
 			},
+			out: true,
+		},
+		{
+			expr: `dyn(test.embedded)["-"] == "error"`,
+			in: map[string]any{
+				"test": &TestEmbeddedTypes{
+					TestNestedType: TestNestedType{NestedCustomName: "name"},
+					Skipped:        "should-be-hidden",
+				},
+			},
+			out: errors.New("no such field: -"),
+		},
+		{
+			expr: `test.embedded == ext.TestNestedType{custom_name: "name"}`,
+			in: map[string]any{
+				"test": &TestEmbeddedTypes{
+					TestNestedType: TestNestedType{NestedCustomName: "name"},
+					Skipped:        "should-be-hidden",
+				},
+			},
+			out: true,
 		},
 	}
 
 	envOpts := []cel.EnvOption{
 		NativeTypes(
-			reflect.TypeOf(&TestEmbeddedTypes{}),
-			reflect.TypeOf(&TestNestedType{}),
+			reflect.TypeFor[*TestEmbeddedTypes](),
+			reflect.TypeFor[*TestNestedType](),
 			ParseStructTag("json"),
 		),
 		cel.Variable("test", cel.ObjectType("ext.TestEmbeddedTypes")),
@@ -977,13 +1002,59 @@ func TestNativeStructEmbedded(t *testing.T) {
 				}
 				out, _, err := prg.Eval(tc.in)
 				if err != nil {
-					t.Fatal(err)
+					if !errors.Is(err, tc.out.(error)) {
+						t.Fatalf("got %v, wanted %v for expr: %s", err, tc.out, tc.expr)
+					}
+					continue
 				}
-				if !reflect.DeepEqual(out.Value(), true) {
-					t.Errorf("got %v, wanted true for expr: %s", out.Value(), tc.expr)
+				if !reflect.DeepEqual(out.Value(), tc.out) {
+					t.Errorf("got %v, wanted %v for expr: %s", out.Value(), tc.out, tc.expr)
 				}
 			}
 		})
+	}
+}
+
+func TestNativeStructHiddenField(t *testing.T) {
+	envOpts := []cel.EnvOption{
+		NativeTypes(
+			reflect.TypeFor[*TestEmbeddedTypes](),
+			ParseStructTag("json"),
+		),
+		cel.Variable("test", cel.ObjectType("ext.TestEmbeddedTypes")),
+	}
+
+	env, err := cel.NewEnv(envOpts...)
+	if err != nil {
+		t.Fatalf("cel.NewEnv(NativeTypes()) failed: %v", err)
+	}
+
+	// 1. Static reference compilation failure case
+	// Attempting to compile `test.Password` should fail static analysis because the field is skipped/hidden.
+	_, iss := env.Compile("test.Password")
+	if iss.Err() == nil {
+		t.Error("env.Compile('test.Password') succeeded, expected a compilation/check error")
+	}
+
+	// 2. Dynamic reference runtime evaluation failure case
+	// Using dyn(test).Password should compile successfully (since dyn disables static type checks),
+	// but it must fail at runtime during evaluation because the field is not exposed.
+	ast, iss := env.Compile("dyn(test).Password")
+	if iss.Err() != nil {
+		t.Fatalf("env.Compile('dyn(test).Password') failed: %v", iss.Err())
+	}
+	prg, err := env.Program(ast)
+	if err != nil {
+		t.Fatalf("env.Program() failed: %v", err)
+	}
+	in := map[string]any{
+		"test": &TestEmbeddedTypes{
+			Skipped: "sensitive_password",
+		},
+	}
+	out, _, err := prg.Eval(in)
+	if err == nil {
+		t.Errorf("prg.Eval() succeeded and returned %v, expected runtime error accessing hidden field", out)
 	}
 }
 
@@ -1198,6 +1269,7 @@ type TestMapVal struct {
 
 type TestEmbeddedTypes struct {
 	TestNestedType `json:"embedded,omitempty"`
+	Skipped        string `json:"-"`
 }
 
 type TestRefValFieldType struct {
