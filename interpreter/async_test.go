@@ -844,7 +844,7 @@ func TestAsyncWithTraceAndExhaustiveEval(t *testing.T) {
 loop:
 	for {
 		res = runPass()
-		if !types.IsUnknown(res) {
+		if !types.IsUnknown(res) && frame.PendingAsyncCalls() == 0 {
 			break loop
 		}
 		select {
