@@ -285,7 +285,7 @@ func (c *CostTracker) costCall(call InterpretableCall, args []ref.Val, result re
 		// In the worst case scenario, we would need to reallocate a new backing store and copy both operands over.
 		cost += uint64(math.Ceil(float64(actualSize(args[0])+actualSize(args[1])) * common.StringTraversalCostFactor))
 	// O(nm) functions
-	case overloads.MatchesString:
+	case overloads.Matches, overloads.MatchesString:
 		// https://swtch.com/~rsc/regexp/regexp1.html applies to RE2 implementation supported by CEL
 		// Add one to string length for purposes of cost calculation to prevent product of string and regex to be 0
 		// in case where string is empty but regex is still expensive.
