@@ -19,8 +19,10 @@ import (
 	"math"
 
 	"github.com/google/cel-go/cel"
+	"github.com/google/cel-go/checker"
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
+	"github.com/google/cel-go/interpreter"
 )
 
 // Encoders returns a cel.EnvOption to configure extended functions for string, byte, and object
@@ -75,8 +77,8 @@ func (*encoderLib) LibraryName() string {
 	return "cel.lib.ext.encoders"
 }
 
-func (*encoderLib) CompileOptions() []cel.EnvOption {
-	return []cel.EnvOption{
+func (lib *encoderLib) CompileOptions() []cel.EnvOption {
+	opts := []cel.EnvOption{
 		cel.Function("base64.decode",
 			cel.Overload("base64_decode_string", []*cel.Type{cel.StringType}, cel.BytesType,
 				cel.UnaryBinding(func(str ref.Val) ref.Val {
@@ -90,10 +92,26 @@ func (*encoderLib) CompileOptions() []cel.EnvOption {
 					return stringOrError(base64EncodeBytes([]byte(b)))
 				}))),
 	}
+	if lib.version >= 1 {
+		estimators := []checker.CostOption{
+			checker.OverloadCostEstimate("base64_decode_string", estimateDecode),
+			checker.OverloadCostEstimate("base64_encode_bytes", estimateEncode),
+		}
+		opts = append(opts, cel.CostEstimatorOptions(estimators...))
+	}
+	return opts
 }
 
-func (*encoderLib) ProgramOptions() []cel.ProgramOption {
-	return []cel.ProgramOption{}
+func (lib *encoderLib) ProgramOptions() []cel.ProgramOption {
+	var opts []cel.ProgramOption
+	if lib.version >= 1 {
+		trackers := []interpreter.CostTrackerOption{
+			interpreter.OverloadCostTracker("base64_decode_string", trackDecode),
+			interpreter.OverloadCostTracker("base64_encode_bytes", trackEncode),
+		}
+		opts = append(opts, cel.CostTrackerOptions(trackers...))
+	}
+	return opts
 }
 
 func base64DecodeString(str string) ([]byte, error) {
@@ -109,4 +127,51 @@ func base64DecodeString(str string) ([]byte, error) {
 
 func base64EncodeBytes(bytes []byte) (string, error) {
 	return base64.StdEncoding.EncodeToString(bytes), nil
+}
+
+func estimateEncode(estimator checker.CostEstimator, target *checker.AstNode, args []checker.AstNode) *checker.CallEstimate {
+	if len(args) != 1 {
+		return nil
+	}
+	sz := estimateSize(estimator, args[0])
+	cost := sz.MultiplyByCostFactor(stringCostFactor).Add(callCostEstimate)
+	resSize := estimateEncodeSize(sz)
+	return &checker.CallEstimate{CostEstimate: cost, ResultSize: &resSize}
+}
+
+func estimateDecode(estimator checker.CostEstimator, target *checker.AstNode, args []checker.AstNode) *checker.CallEstimate {
+	if len(args) != 1 {
+		return nil
+	}
+	sz := estimateSize(estimator, args[0])
+	cost := sz.MultiplyByCostFactor(stringCostFactor).Add(callCostEstimate)
+	resSize := estimateDecodeSize(sz)
+	return &checker.CallEstimate{CostEstimate: cost, ResultSize: &resSize}
+}
+
+func trackEncode(args []ref.Val, _ ref.Val) *uint64 {
+	sz := actualSize(args[0])
+	cost := uint64(math.Ceil(float64(sz)*stringCostFactor)) + callCost
+	return &cost
+}
+
+func trackDecode(args []ref.Val, _ ref.Val) *uint64 {
+	sz := actualSize(args[0])
+	cost := uint64(math.Ceil(float64(sz)*stringCostFactor)) + callCost
+	return &cost
+}
+
+func estimateEncodeSize(sz checker.SizeEstimate) checker.SizeEstimate {
+	minVal := (sz.Min*4 + 2) / 3
+	maxVal := (sz.Max*4 + 2) / 3
+	if sz.Max > math.MaxUint64/4 {
+		maxVal = math.MaxUint64
+	}
+	return checker.SizeEstimate{Min: minVal, Max: maxVal}
+}
+
+func estimateDecodeSize(sz checker.SizeEstimate) checker.SizeEstimate {
+	minVal := sz.Min * 3 / 4
+	maxVal := sz.Max * 3 / 4
+	return checker.SizeEstimate{Min: minVal, Max: maxVal}
 }
