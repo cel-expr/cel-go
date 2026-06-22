@@ -315,6 +315,15 @@ func TestCost(t *testing.T) {
 			wanted: CostEstimate{Min: 3, Max: 103},
 		},
 		{
+			name: "matches global",
+			expr: `matches(input, '\\d+a\\d+b')`,
+			vars: []*decls.VariableDecl{
+				decls.NewVariable("input", types.StringType),
+			},
+			hints:  map[string]uint64{"input": 500},
+			wanted: CostEstimate{Min: 3, Max: 103},
+		},
+		{
 			name: "startsWith",
 			expr: `input.startsWith(arg1)`,
 			vars: []*decls.VariableDecl{

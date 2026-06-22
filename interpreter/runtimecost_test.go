@@ -607,6 +607,15 @@ func TestRuntimeCost(t *testing.T) {
 			in:   map[string]any{"input": string(randSeq(500)), "arg1": string(randSeq(500))},
 		},
 		{
+			name: "matches global",
+			expr: `matches(input, '\\d+a\\d+b')`,
+			vars: []*decls.VariableDecl{
+				decls.NewVariable("input", types.StringType),
+			},
+			want: 103,
+			in:   map[string]any{"input": string(randSeq(500))},
+		},
+		{
 			name: "startsWith",
 			expr: `input.startsWith(arg1)`,
 			vars: []*decls.VariableDecl{
