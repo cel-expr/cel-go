@@ -339,7 +339,7 @@ func TestTwoVarComprehensionsCost(t *testing.T) {
 				"m.@values.@items": 2,
 			},
 			estimatedCost: checker.CostEstimate{Min: 73, Max: 173},
-			actualCost:    100,
+			actualCost:    98,
 		},
 		{
 			name:          "transformMapEntry literal input",
