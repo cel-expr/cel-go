@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/google/cel-go/cel"
+	"github.com/google/cel-go/checker"
 	"github.com/google/cel-go/common/types"
 )
 
@@ -666,4 +667,121 @@ func testMathEnv(t *testing.T, opts ...cel.EnvOption) *cel.Env {
 		t.Fatalf("cel.NewEnv(Math()) failed: %v", err)
 	}
 	return env
+}
+
+func testMathCostsEnv(t *testing.T, version int, opts ...cel.EnvOption) *cel.Env {
+	t.Helper()
+	var mathOpt cel.EnvOption
+	if version > 0 {
+		mathOpt = Math(MathVersion(uint32(version)))
+	} else {
+		mathOpt = Math()
+	}
+	baseOpts := []cel.EnvOption{
+		mathOpt,
+		cel.EnableMacroCallTracking(),
+	}
+	env, err := cel.NewEnv(append(baseOpts, opts...)...)
+	if err != nil {
+		t.Fatalf("cel.NewEnv(Math()) failed: %v", err)
+	}
+	return env
+}
+
+func TestMathCosts(t *testing.T) {
+	tests := []struct {
+		name          string
+		expr          string
+		vars          []cel.EnvOption
+		in            map[string]any
+		hints         map[string]uint64
+		estimatedCost checker.CostEstimate
+		actualCost    uint64
+		version       int
+	}{
+		{
+			name: "math_greatest_list_v2",
+			expr: "math.greatest(x) == 5",
+			vars: []cel.EnvOption{
+				cel.Variable("x", cel.ListType(cel.IntType)),
+			},
+			in: map[string]any{
+				"x": []int64{1, 2, 3, 4, 5},
+			},
+			hints: map[string]uint64{
+				"x": 10,
+			},
+			estimatedCost: checker.CostEstimate{Min: 3, Max: 3},
+			actualCost:    3,
+			version:       2,
+		},
+		{
+			name: "math_greatest_list_v3",
+			expr: "math.greatest(x) == 5",
+			vars: []cel.EnvOption{
+				cel.Variable("x", cel.ListType(cel.IntType)),
+			},
+			in: map[string]any{
+				"x": []int64{1, 2, 3, 4, 5},
+			},
+			hints: map[string]uint64{
+				"x": 10,
+			},
+			estimatedCost: checker.CostEstimate{Min: 3, Max: 13},
+			actualCost:    8,
+			version:       3,
+		},
+		{
+			name: "math_least_list_v2",
+			expr: "math.least(x) == -3.0",
+			vars: []cel.EnvOption{
+				cel.Variable("x", cel.ListType(cel.DoubleType)),
+			},
+			in: map[string]any{
+				"x": []float64{-1.0, -2.0, -3.0},
+			},
+			hints: map[string]uint64{
+				"x": 100,
+			},
+			estimatedCost: checker.CostEstimate{Min: 3, Max: 3},
+			actualCost:    3,
+			version:       2,
+		},
+		{
+			name: "math_least_list_v3",
+			expr: "math.least(x) == -3.0",
+			vars: []cel.EnvOption{
+				cel.Variable("x", cel.ListType(cel.DoubleType)),
+			},
+			in: map[string]any{
+				"x": []float64{-1.0, -2.0, -3.0},
+			},
+			hints: map[string]uint64{
+				"x": 100,
+			},
+			estimatedCost: checker.CostEstimate{Min: 3, Max: 103},
+			actualCost:    6,
+			version:       3,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			env := testMathCostsEnv(t, tc.version, tc.vars...)
+			var asts []*cel.Ast
+			pAst, iss := env.Parse(tc.expr)
+			if iss.Err() != nil {
+				t.Fatalf("env.Parse(%v) failed: %v", tc.expr, iss.Err())
+			}
+			asts = append(asts, pAst)
+			cAst, iss := env.Check(pAst)
+			if iss.Err() != nil {
+				t.Fatalf("env.Check(%v) failed: %v", tc.expr, iss.Err())
+			}
+			testCheckCost(t, env, cAst, tc.hints, tc.estimatedCost)
+			asts = append(asts, cAst)
+			for _, ast := range asts {
+				testEvalWithCost(t, env, ast, tc.in, tc.actualCost)
+			}
+		})
+	}
 }
