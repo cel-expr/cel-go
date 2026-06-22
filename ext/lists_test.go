@@ -269,6 +269,13 @@ func TestListsCosts(t *testing.T) {
 			expr:          `[[1, 2], 3].flatten(1) == [1, 2, 3]`,
 			estimatedCost: checker.FixedCostEstimate(44),
 			actualCost:    44,
+			version:       3,
+		},
+		{
+			name:          "list_flatten_depth_one_v4",
+			expr:          `[[1, 2], 3].flatten(1) == [1, 2, 3]`,
+			estimatedCost: checker.FixedCostEstimate(45),
+			actualCost:    45,
 		},
 		{
 			// (3 array allocs + internal alloc) * 10 + size(list) * 2 + 2 calls
@@ -276,6 +283,13 @@ func TestListsCosts(t *testing.T) {
 			expr:          `[[1, 2], 3].flatten(2) == [1, 2, 3]`,
 			estimatedCost: checker.FixedCostEstimate(46),
 			actualCost:    46,
+			version:       3,
+		},
+		{
+			name:          "list_flatten_depth_two_v4",
+			expr:          `[[1, 2], 3].flatten(2) == [1, 2, 3]`,
+			estimatedCost: checker.FixedCostEstimate(45),
+			actualCost:    45,
 		},
 		{
 			// (3 array allocs + internal alloc) * 10 + size(list) * 3 + 2 calls
@@ -283,9 +297,23 @@ func TestListsCosts(t *testing.T) {
 			expr:          `[[1, 2], 3].flatten(3) == [1, 2, 3]`,
 			estimatedCost: checker.FixedCostEstimate(48),
 			actualCost:    48,
+			version:       3,
+		},
+		{
+			name:          "list_flatten_depth_three_v4",
+			expr:          `[[1, 2], 3].flatten(3) == [1, 2, 3]`,
+			estimatedCost: checker.FixedCostEstimate(45),
+			actualCost:    45,
 		},
 		{
 			name:          "list_flatten",
+			expr:          `[[1], 2, 3].flatten() == [1, 2, 3]`,
+			estimatedCost: checker.FixedCostEstimate(45),
+			actualCost:    45,
+			version:       3,
+		},
+		{
+			name:          "list_flatten_v4",
 			expr:          `[[1], 2, 3].flatten() == [1, 2, 3]`,
 			estimatedCost: checker.FixedCostEstimate(45),
 			actualCost:    45,
@@ -298,6 +326,25 @@ func TestListsCosts(t *testing.T) {
 			hints:         map[string]uint64{"x": 3},
 			estimatedCost: checker.CostEstimate{Min: 23, Max: 26},
 			actualCost:    26,
+			version:       3,
+		},
+		{
+			name:          "list_flatten_var_v4_no_item_hint",
+			expr:          `x.flatten() == [1, 2, 3]`,
+			vars:          []cel.EnvOption{cel.Variable("x", cel.ListType(cel.DynType))},
+			in:            map[string]any{"x": []any{[]any{1}, 2, 3}},
+			hints:         map[string]uint64{"x": 3},
+			estimatedCost: checker.CostEstimate{Min: 23, Max: 18446744073709551615},
+			actualCost:    26,
+		},
+		{
+			name:          "list_flatten_var_v4_with_item_hint",
+			expr:          `x.flatten() == [1, 2, 3]`,
+			vars:          []cel.EnvOption{cel.Variable("x", cel.ListType(cel.DynType))},
+			in:            map[string]any{"x": []any{[]any{1}, 2, 3}},
+			hints:         map[string]uint64{"x": 3, "x.@items": 5},
+			estimatedCost: checker.CostEstimate{Min: 23, Max: 38},
+			actualCost:    26,
 		},
 		{
 			name:          "list_flatten_depth_var",
@@ -307,6 +354,16 @@ func TestListsCosts(t *testing.T) {
 			hints:         map[string]uint64{"x": 10},
 			estimatedCost: checker.FixedCostEstimate(18446744073709551615),
 			actualCost:    53,
+			version:       3,
+		},
+		{
+			name:          "list_flatten_depth_var_v4",
+			expr:          `[[1, 2], 3].flatten(x) == [1, 2, 3]`,
+			vars:          []cel.EnvOption{cel.Variable("x", cel.IntType)},
+			in:            map[string]any{"x": 5},
+			hints:         map[string]uint64{"x": 10},
+			estimatedCost: checker.FixedCostEstimate(46),
+			actualCost:    46,
 		},
 		{
 			// (2 array allocs + 1 internal) * 10

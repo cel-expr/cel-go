@@ -349,13 +349,15 @@ func (lib listsLib) CompileOptions() []cel.EnvOption {
 	if lib.version >= 3 {
 		estimators := []checker.CostOption{
 			checker.OverloadCostEstimate("list_slice", estimateListSlice),
-			checker.OverloadCostEstimate("list_flatten", estimateListFlatten),
-			checker.OverloadCostEstimate("list_flatten_int", estimateListFlatten),
 			checker.OverloadCostEstimate("lists_range", estimateListsRange),
 			checker.OverloadCostEstimate("list_reverse", estimateListReverse),
 		}
 		if lib.version == 3 {
-			estimators = append(estimators, checker.OverloadCostEstimate("list_distinct", estimateListDistinctLegacy))
+			estimators = append(estimators,
+				checker.OverloadCostEstimate("list_flatten", estimateListFlattenLegacy),
+				checker.OverloadCostEstimate("list_flatten_int", estimateListFlattenLegacy),
+				checker.OverloadCostEstimate("list_distinct", estimateListDistinctLegacy),
+			)
 			for _, t := range comparableTypes {
 				estimators = append(estimators,
 					checker.OverloadCostEstimate(
@@ -369,7 +371,11 @@ func (lib listsLib) CompileOptions() []cel.EnvOption {
 				)
 			}
 		} else {
-			estimators = append(estimators, checker.OverloadCostEstimate("list_distinct", estimateListDistinct))
+			estimators = append(estimators,
+				checker.OverloadCostEstimate("list_flatten", estimateListFlatten),
+				checker.OverloadCostEstimate("list_flatten_int", estimateListFlatten),
+				checker.OverloadCostEstimate("list_distinct", estimateListDistinct),
+			)
 			for _, t := range comparableTypes {
 				estimators = append(estimators,
 					checker.OverloadCostEstimate(
@@ -393,14 +399,22 @@ func (lib listsLib) CompileOptions() []cel.EnvOption {
 func (lib *listsLib) ProgramOptions() []cel.ProgramOption {
 	var opts []cel.ProgramOption
 	if lib.version >= 3 {
-		// TODO: Add cost trackers for list operations
 		trackers := []interpreter.CostTrackerOption{
 			interpreter.OverloadCostTracker("list_slice", trackListOutputSize),
-			interpreter.OverloadCostTracker("list_flatten", trackListFlatten),
-			interpreter.OverloadCostTracker("list_flatten_int", trackListFlatten),
 			interpreter.OverloadCostTracker("lists_range", trackListOutputSize),
 			interpreter.OverloadCostTracker("list_reverse", trackListOutputSize),
 			interpreter.OverloadCostTracker("list_distinct", trackListDistinct),
+		}
+		if lib.version == 3 {
+			trackers = append(trackers,
+				interpreter.OverloadCostTracker("list_flatten", trackListFlattenLegacy),
+				interpreter.OverloadCostTracker("list_flatten_int", trackListFlattenLegacy),
+			)
+		} else {
+			trackers = append(trackers,
+				interpreter.OverloadCostTracker("list_flatten", trackListFlatten),
+				interpreter.OverloadCostTracker("list_flatten_int", trackListFlatten),
+			)
 		}
 		for _, t := range comparableTypes {
 			trackers = append(trackers,
@@ -653,7 +667,7 @@ func estimateListReverse(estimator checker.CostEstimator, target *checker.AstNod
 	return estimateAllocatingListCall(1, estimateSize(estimator, *target))
 }
 
-// estimateListFlatten computes an O(n) flatten operation with a cost factor proportional to the flatten depth.
+// estimateListFlatten computes an O(n) flatten operation with a cost factor proportional to the total number of flattened items.
 func estimateListFlatten(estimator checker.CostEstimator, target *checker.AstNode, args []checker.AstNode) *checker.CallEstimate {
 	if target == nil || len(args) > 1 {
 		return nil
@@ -662,7 +676,62 @@ func estimateListFlatten(estimator checker.CostEstimator, target *checker.AstNod
 	if len(args) == 1 {
 		depth = nodeAsUintValue(args[0], math.MaxUint)
 	}
+	var resSize checker.SizeEstimate
+	if (*target).Expr() != nil && (*target).Expr().Kind() == ast.ListKind {
+		szVal := estimateLiteralFlattenSize((*target).Expr(), depth)
+		resSize = checker.FixedSizeEstimate(szVal)
+	} else {
+		resSize = estimateFlattenSize(estimator, *target, depth)
+	}
+	cost := resSize.AsCost()
+	return estimateListCallWithDirectCost(cost, resSize, true)
+}
+
+func estimateListFlattenLegacy(estimator checker.CostEstimator, target *checker.AstNode, args []checker.AstNode) *checker.CallEstimate {
+	if target == nil || len(args) > 1 {
+		return nil
+	}
+	depth := uint64(1)
+	if len(args) == 1 {
+		depth = nodeAsUintValue(args[0], math.MaxUint)
+	}
 	return estimateAllocatingListCall(float64(depth), estimateSize(estimator, *target))
+}
+
+func estimateFlattenSize(estimator checker.CostEstimator, node checker.AstNode, depth uint64) checker.SizeEstimate {
+	sz := estimateSize(estimator, node)
+	if depth == 0 {
+		return sz
+	}
+	tType := node.Type()
+	if tType.Kind() != types.ListKind || len(tType.Parameters()) == 0 {
+		return sz
+	}
+	elemType := tType.Parameters()[0]
+	elemNode := pathAstNode{
+		path: append(append([]string(nil), node.Path()...), "@items"),
+		t:    elemType,
+	}
+	flatElemSize := estimateFlattenSize(estimator, elemNode, depth-1)
+	return sz.Multiply(flatElemSize)
+}
+
+func estimateLiteralFlattenSize(expr ast.Expr, depth uint64) uint64 {
+	if depth == 0 {
+		if expr.Kind() == ast.ListKind {
+			return uint64(expr.AsList().Size())
+		}
+		return 1
+	}
+	if expr.Kind() != ast.ListKind {
+		return 1
+	}
+	listExpr := expr.AsList()
+	totalSize := uint64(0)
+	for _, el := range listExpr.Elements() {
+		totalSize += estimateLiteralFlattenSize(el, depth-1)
+	}
+	return totalSize
 }
 
 // Compute an O(n^2) with a cost factor of 2, equivalent to sets.contains with a result list
@@ -763,9 +832,13 @@ func trackListOutputSize(_ []ref.Val, result ref.Val) *uint64 {
 	return trackAllocatingListCall(1, actualSize(result))
 }
 
-// trackListFlatten computes cost as a function of the size of the result list and the depth of
-// the flatten operation.
-func trackListFlatten(args []ref.Val, _ ref.Val) *uint64 {
+// trackListFlatten computes cost as a function of the size of the result list.
+func trackListFlatten(args []ref.Val, result ref.Val) *uint64 {
+	resSize := actualSize(result)
+	return trackAllocatingListCall(1.0, resSize)
+}
+
+func trackListFlattenLegacy(args []ref.Val, _ ref.Val) *uint64 {
 	depth := 1.0
 	if len(args) == 2 {
 		depth = float64(args[1].(types.Int))
