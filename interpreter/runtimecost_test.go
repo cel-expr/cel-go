@@ -622,7 +622,7 @@ func TestRuntimeCost(t *testing.T) {
 				decls.NewVariable("input", types.StringType),
 				decls.NewVariable("arg1", types.StringType),
 			},
-			want: 3,
+			want: 52,
 			in:   map[string]any{"input": "idc", "arg1": string(randSeq(500))},
 		},
 		{
@@ -632,7 +632,7 @@ func TestRuntimeCost(t *testing.T) {
 				decls.NewVariable("input", types.StringType),
 				decls.NewVariable("arg1", types.StringType),
 			},
-			want: 3,
+			want: 52,
 			in:   map[string]any{"input": "idc", "arg1": string(randSeq(500))},
 		},
 		{

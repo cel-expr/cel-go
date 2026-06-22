@@ -260,7 +260,9 @@ func (c *CostTracker) costCall(call InterpretableCall, args []ref.Val, result re
 	// if user has their own implementation of ActualCostEstimator, make sure to cover the mapping between overloadId and cost calculation
 	switch call.OverloadID() {
 	// O(n) functions
-	case overloads.StartsWithString, overloads.EndsWithString, overloads.StringToBytes, overloads.BytesToString, overloads.ExtQuoteString, overloads.ExtFormatString:
+	case overloads.StartsWithString, overloads.EndsWithString:
+		cost += uint64(math.Ceil(float64(actualSize(args[1])) * common.StringTraversalCostFactor))
+	case overloads.StringToBytes, overloads.BytesToString, overloads.ExtQuoteString, overloads.ExtFormatString:
 		cost += uint64(math.Ceil(float64(actualSize(args[0])) * common.StringTraversalCostFactor))
 	case overloads.InList:
 		// If a list is composed entirely of constant values this is O(1), but we don't account for that here.
