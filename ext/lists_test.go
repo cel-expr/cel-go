@@ -76,7 +76,7 @@ func TestLists(t *testing.T) {
 		{expr: `[ExampleType{name: 'a'}, ExampleType{name: 'b'}, ExampleType{name: 'a'}].distinct() == [ExampleType{name: 'a'}, ExampleType{name: 'b'}]`},
 	}
 
-	env := testListsEnv(t)
+	env := testListsEnv(t, 0)
 	for i, tst := range listsTests {
 		tc := tst
 		t.Run(fmt.Sprintf("%d", i), func(t *testing.T) {
@@ -237,6 +237,7 @@ func TestListsCosts(t *testing.T) {
 		hints         map[string]uint64
 		estimatedCost checker.CostEstimate
 		actualCost    uint64
+		version       int
 	}{
 		{
 			// (1 array alloc + internal alloc) * 10
@@ -268,6 +269,13 @@ func TestListsCosts(t *testing.T) {
 			expr:          `[[1, 2], 3].flatten(1) == [1, 2, 3]`,
 			estimatedCost: checker.FixedCostEstimate(44),
 			actualCost:    44,
+			version:       3,
+		},
+		{
+			name:          "list_flatten_depth_one_v4",
+			expr:          `[[1, 2], 3].flatten(1) == [1, 2, 3]`,
+			estimatedCost: checker.FixedCostEstimate(45),
+			actualCost:    45,
 		},
 		{
 			// (3 array allocs + internal alloc) * 10 + size(list) * 2 + 2 calls
@@ -275,6 +283,13 @@ func TestListsCosts(t *testing.T) {
 			expr:          `[[1, 2], 3].flatten(2) == [1, 2, 3]`,
 			estimatedCost: checker.FixedCostEstimate(46),
 			actualCost:    46,
+			version:       3,
+		},
+		{
+			name:          "list_flatten_depth_two_v4",
+			expr:          `[[1, 2], 3].flatten(2) == [1, 2, 3]`,
+			estimatedCost: checker.FixedCostEstimate(45),
+			actualCost:    45,
 		},
 		{
 			// (3 array allocs + internal alloc) * 10 + size(list) * 3 + 2 calls
@@ -282,9 +297,23 @@ func TestListsCosts(t *testing.T) {
 			expr:          `[[1, 2], 3].flatten(3) == [1, 2, 3]`,
 			estimatedCost: checker.FixedCostEstimate(48),
 			actualCost:    48,
+			version:       3,
+		},
+		{
+			name:          "list_flatten_depth_three_v4",
+			expr:          `[[1, 2], 3].flatten(3) == [1, 2, 3]`,
+			estimatedCost: checker.FixedCostEstimate(45),
+			actualCost:    45,
 		},
 		{
 			name:          "list_flatten",
+			expr:          `[[1], 2, 3].flatten() == [1, 2, 3]`,
+			estimatedCost: checker.FixedCostEstimate(45),
+			actualCost:    45,
+			version:       3,
+		},
+		{
+			name:          "list_flatten_v4",
 			expr:          `[[1], 2, 3].flatten() == [1, 2, 3]`,
 			estimatedCost: checker.FixedCostEstimate(45),
 			actualCost:    45,
@@ -297,6 +326,25 @@ func TestListsCosts(t *testing.T) {
 			hints:         map[string]uint64{"x": 3},
 			estimatedCost: checker.CostEstimate{Min: 23, Max: 26},
 			actualCost:    26,
+			version:       3,
+		},
+		{
+			name:          "list_flatten_var_v4_no_item_hint",
+			expr:          `x.flatten() == [1, 2, 3]`,
+			vars:          []cel.EnvOption{cel.Variable("x", cel.ListType(cel.DynType))},
+			in:            map[string]any{"x": []any{[]any{1}, 2, 3}},
+			hints:         map[string]uint64{"x": 3},
+			estimatedCost: checker.CostEstimate{Min: 23, Max: 18446744073709551615},
+			actualCost:    26,
+		},
+		{
+			name:          "list_flatten_var_v4_with_item_hint",
+			expr:          `x.flatten() == [1, 2, 3]`,
+			vars:          []cel.EnvOption{cel.Variable("x", cel.ListType(cel.DynType))},
+			in:            map[string]any{"x": []any{[]any{1}, 2, 3}},
+			hints:         map[string]uint64{"x": 3, "x.@items": 5},
+			estimatedCost: checker.CostEstimate{Min: 23, Max: 38},
+			actualCost:    26,
 		},
 		{
 			name:          "list_flatten_depth_var",
@@ -306,6 +354,16 @@ func TestListsCosts(t *testing.T) {
 			hints:         map[string]uint64{"x": 10},
 			estimatedCost: checker.FixedCostEstimate(18446744073709551615),
 			actualCost:    53,
+			version:       3,
+		},
+		{
+			name:          "list_flatten_depth_var_v4",
+			expr:          `[[1, 2], 3].flatten(x) == [1, 2, 3]`,
+			vars:          []cel.EnvOption{cel.Variable("x", cel.IntType)},
+			in:            map[string]any{"x": 5},
+			hints:         map[string]uint64{"x": 10},
+			estimatedCost: checker.FixedCostEstimate(46),
+			actualCost:    46,
 		},
 		{
 			// (2 array allocs + 1 internal) * 10
@@ -334,7 +392,7 @@ func TestListsCosts(t *testing.T) {
 			expr:          `x.distinct() == ['hello']`,
 			vars:          []cel.EnvOption{cel.Variable("x", cel.ListType(cel.StringType))},
 			in:            map[string]any{"x": []string{"hello", "hello"}},
-			hints:         map[string]uint64{"x": 3},
+			hints:         map[string]uint64{"x": 3, "x.@items": 5},
 			estimatedCost: checker.CostEstimate{Min: 23, Max: 41},
 			actualCost:    31,
 		},
@@ -444,8 +502,8 @@ func TestListsCosts(t *testing.T) {
 			expr:          `x.sort() == ["a", "a", "b", "b", "c", "c"]`,
 			vars:          []cel.EnvOption{cel.Variable("x", cel.ListType(cel.StringType))},
 			in:            map[string]any{"x": []string{"b", "a", "b", "a", "c", "c"}},
-			hints:         map[string]uint64{"x": 10},
-			estimatedCost: checker.CostEstimate{Min: 23, Max: 233},
+			hints:         map[string]uint64{"x": 10, "x.@items": 1},
+			estimatedCost: checker.CostEstimate{Min: 23, Max: 223},
 			actualCost:    98,
 		},
 		{
@@ -477,8 +535,147 @@ func TestListsCosts(t *testing.T) {
 			expr:          `x.sortBy(m, m['x']) == [{'x': 'a'}, {'x': 'b'}, {'x': 'c'}]`,
 			vars:          []cel.EnvOption{cel.Variable("x", cel.ListType(cel.MapType(cel.StringType, cel.StringType)))},
 			in:            map[string]any{"x": []any{map[string]any{"x": "b"}, map[string]any{"x": "c"}, map[string]any{"x": "a"}}},
+			hints:         map[string]uint64{"x": 3, "x.@items": 1},
+			estimatedCost: checker.CostEstimate{Min: 136, Max: 196},
+			actualCost:    196,
+		},
+		{
+			name: "list_sort_concat_cost",
+			expr: `(x.sort() + y).size() == 20`,
+			vars: []cel.EnvOption{
+				cel.Variable("x", cel.ListType(cel.IntType)),
+				cel.Variable("y", cel.ListType(cel.IntType)),
+			},
+			in: map[string]any{
+				"x": []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10},
+				"y": []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10},
+			},
+			hints: map[string]uint64{
+				"x": 10,
+				"y": 10,
+			},
+			estimatedCost: checker.CostEstimate{Min: 16, Max: 216},
+			actualCost:    216,
+		},
+		{
+			name: "list_distinct_concat_cost_with_item_hint",
+			expr: `(x.distinct() + y).size() == 20`,
+			vars: []cel.EnvOption{
+				cel.Variable("x", cel.ListType(cel.StringType)),
+				cel.Variable("y", cel.ListType(cel.StringType)),
+			},
+			in: map[string]any{
+				"x": []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j"},
+				"y": []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j"},
+			},
+			hints: map[string]uint64{
+				"x":        10,
+				"x.@items": 1,
+				"y":        10,
+			},
+			estimatedCost: checker.CostEstimate{Min: 16, Max: 216},
+			actualCost:    226,
+		},
+		{
+			name: "list_distinct_concat_cost",
+			expr: `(x.distinct() + y).size() == 20`,
+			vars: []cel.EnvOption{
+				cel.Variable("x", cel.ListType(cel.StringType)),
+				cel.Variable("y", cel.ListType(cel.StringType)),
+			},
+			in: map[string]any{
+				"x": []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j"},
+				"y": []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j"},
+			},
+			hints: map[string]uint64{
+				"x": 10,
+				"y": 10,
+			},
+			estimatedCost: checker.CostEstimate{Min: 16, Max: 18446744073709551615},
+			actualCost:    226,
+		},
+		{
+			name:          "list_distinct_var_v3",
+			expr:          `x.distinct() == ['hello']`,
+			vars:          []cel.EnvOption{cel.Variable("x", cel.ListType(cel.StringType))},
+			in:            map[string]any{"x": []string{"hello", "hello"}},
+			hints:         map[string]uint64{"x": 3},
+			estimatedCost: checker.CostEstimate{Min: 23, Max: 42},
+			actualCost:    31,
+			version:       3,
+		},
+		{
+			name:          "list_distinct_var_v4_no_item_hint",
+			expr:          `x.distinct() == ['hello']`,
+			vars:          []cel.EnvOption{cel.Variable("x", cel.ListType(cel.StringType))},
+			in:            map[string]any{"x": []string{"hello", "hello"}},
+			hints:         map[string]uint64{"x": 3},
+			estimatedCost: checker.CostEstimate{Min: 23, Max: 18446744073709551615},
+			actualCost:    31,
+		},
+		{
+			name:          "list_distinct_var_v4_with_item_hint",
+			expr:          `x.distinct() == ['hello']`,
+			vars:          []cel.EnvOption{cel.Variable("x", cel.ListType(cel.StringType))},
+			in:            map[string]any{"x": []string{"hello", "hello"}},
+			hints:         map[string]uint64{"x": 3, "x.@items": 5},
+			estimatedCost: checker.CostEstimate{Min: 23, Max: 41},
+			actualCost:    31,
+		},
+		{
+			name:          "list_sort_var_string_v3",
+			expr:          `x.sort() == ["a", "a", "b", "b", "c", "c"]`,
+			vars:          []cel.EnvOption{cel.Variable("x", cel.ListType(cel.StringType))},
+			in:            map[string]any{"x": []string{"b", "a", "b", "a", "c", "c"}},
+			hints:         map[string]uint64{"x": 10},
+			estimatedCost: checker.CostEstimate{Min: 23, Max: 233},
+			actualCost:    98,
+			version:       3,
+		},
+		{
+			name:          "list_sort_var_string_v4_no_item_hint",
+			expr:          `x.sort() == ["a", "a", "b", "b", "c", "c"]`,
+			vars:          []cel.EnvOption{cel.Variable("x", cel.ListType(cel.StringType))},
+			in:            map[string]any{"x": []string{"b", "a", "b", "a", "c", "c"}},
+			hints:         map[string]uint64{"x": 10},
+			estimatedCost: checker.CostEstimate{Min: 23, Max: 18446744073709551615},
+			actualCost:    98,
+		},
+		{
+			name:          "list_sort_var_string_v4_with_item_hint",
+			expr:          `x.sort() == ["a", "a", "b", "b", "c", "c"]`,
+			vars:          []cel.EnvOption{cel.Variable("x", cel.ListType(cel.StringType))},
+			in:            map[string]any{"x": []string{"b", "a", "b", "a", "c", "c"}},
+			hints:         map[string]uint64{"x": 10, "x.@items": 1},
+			estimatedCost: checker.CostEstimate{Min: 23, Max: 223},
+			actualCost:    98,
+		},
+		{
+			name:          "list_sortBy_var_string_v3",
+			expr:          `x.sortBy(m, m['x']) == [{'x': 'a'}, {'x': 'b'}, {'x': 'c'}]`,
+			vars:          []cel.EnvOption{cel.Variable("x", cel.ListType(cel.MapType(cel.StringType, cel.StringType)))},
+			in:            map[string]any{"x": []any{map[string]any{"x": "b"}, map[string]any{"x": "c"}, map[string]any{"x": "a"}}},
 			hints:         map[string]uint64{"x": 3},
 			estimatedCost: checker.CostEstimate{Min: 136, Max: 197},
+			actualCost:    196,
+			version:       3,
+		},
+		{
+			name:          "list_sortBy_var_string_v4_no_item_hint",
+			expr:          `x.sortBy(m, m['x']) == [{'x': 'a'}, {'x': 'b'}, {'x': 'c'}]`,
+			vars:          []cel.EnvOption{cel.Variable("x", cel.ListType(cel.MapType(cel.StringType, cel.StringType)))},
+			in:            map[string]any{"x": []any{map[string]any{"x": "b"}, map[string]any{"x": "c"}, map[string]any{"x": "a"}}},
+			hints:         map[string]uint64{"x": 3},
+			estimatedCost: checker.CostEstimate{Min: 136, Max: 18446744073709551615},
+			actualCost:    196,
+		},
+		{
+			name:          "list_sortBy_var_string_v4_with_item_hint",
+			expr:          `x.sortBy(m, m['x']) == [{'x': 'a'}, {'x': 'b'}, {'x': 'c'}]`,
+			vars:          []cel.EnvOption{cel.Variable("x", cel.ListType(cel.MapType(cel.StringType, cel.StringType)))},
+			in:            map[string]any{"x": []any{map[string]any{"x": "b"}, map[string]any{"x": "c"}, map[string]any{"x": "a"}}},
+			hints:         map[string]uint64{"x": 3, "x.@items": 1},
+			estimatedCost: checker.CostEstimate{Min: 136, Max: 196},
 			actualCost:    196,
 		},
 	}
@@ -486,7 +683,7 @@ func TestListsCosts(t *testing.T) {
 	for _, tst := range tests {
 		tc := tst
 		t.Run(tc.name, func(t *testing.T) {
-			env := testListsEnv(t, tc.vars...)
+			env := testListsEnv(t, tc.version, tc.vars...)
 			var asts []*cel.Ast
 			pAst, iss := env.Parse(tc.expr)
 			if iss.Err() != nil {
@@ -507,10 +704,16 @@ func TestListsCosts(t *testing.T) {
 	}
 }
 
-func testListsEnv(t *testing.T, opts ...cel.EnvOption) *cel.Env {
+func testListsEnv(t *testing.T, version int, opts ...cel.EnvOption) *cel.Env {
 	t.Helper()
+	var listsOpt cel.EnvOption
+	if version > 0 {
+		listsOpt = Lists(ListsVersion(uint32(version)))
+	} else {
+		listsOpt = Lists()
+	}
 	baseOpts := []cel.EnvOption{
-		Lists(),
+		listsOpt,
 		cel.Container("google.expr.proto2.test"),
 		cel.Types(&proto2pb.ExampleType{},
 			&proto2pb.ExternalMessageType{},
