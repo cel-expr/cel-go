@@ -160,7 +160,7 @@ func Lists(options ...ListsOption) cel.EnvOption {
 	return cel.Lib(l)
 }
 
-const defaultMaxRangeSize = 10_000_000
+const defaultMaxRangeSize = 1_000_000
 
 type listsLib struct {
 	version      uint32
