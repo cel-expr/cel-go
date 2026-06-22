@@ -15,6 +15,7 @@
 package decls
 
 import (
+	"context"
 	"reflect"
 	"strings"
 	"testing"
@@ -1368,6 +1369,149 @@ func TestNilVariable(t *testing.T) {
 	}
 	if v.Documentation() != nil {
 		t.Errorf("v.Documentation() got %v, wanted nil", v.Documentation())
+	}
+}
+
+func TestAsyncBinding(t *testing.T) {
+	fn, err := NewFunction("async_fn",
+		Overload("async_fn_int", []*types.Type{types.IntType}, types.IntType,
+			AsyncBinding(func(ctx context.Context, args ...ref.Val) ref.Val {
+				return args[0]
+			}),
+		),
+	)
+	if err != nil {
+		t.Fatalf("NewFunction() failed: %v", err)
+	}
+	for _, od := range fn.OverloadDecls() {
+		if !od.HasBinding() {
+			t.Errorf("Overload %s does not have binding, wanted async binding", od.ID())
+		}
+	}
+	bindings, err := fn.Bindings()
+	if err != nil {
+		t.Fatalf("fn.Bindings() produced an err: %v", err)
+	}
+	if len(bindings) != 2 {
+		t.Errorf("fn.Bindings() produced %d bindings, wanted 2", len(bindings))
+	}
+	for _, binding := range bindings {
+		if binding.Async == nil {
+			t.Fatal("binding missing Async implementation")
+		}
+
+		ctx := context.Background()
+		ch := binding.Async(ctx, types.Int(42))
+		select {
+		case res := <-ch:
+			if res.Equal(types.Int(42)) != types.True {
+				t.Errorf("async binding returned %v, wanted 42", res)
+			}
+		case <-time.After(1 * time.Second):
+			t.Fatal("async binding timed out")
+		}
+	}
+}
+
+func TestAsyncBindingTypeGuards(t *testing.T) {
+	fn, err := NewFunction("async_fn",
+		Overload("async_fn_int", []*types.Type{types.IntType}, types.IntType,
+			AsyncBinding(func(ctx context.Context, args ...ref.Val) ref.Val {
+				return args[0]
+			}),
+		),
+	)
+	if err != nil {
+		t.Fatalf("NewFunction() failed: %v", err)
+	}
+	bindings, err := fn.Bindings()
+	if err != nil {
+		t.Fatalf("fn.Bindings() produced an err: %v", err)
+	}
+	if len(bindings) != 2 {
+		t.Errorf("fn.Bindings() produced %d bindings, wanted 2", len(bindings))
+	}
+	for _, binding := range bindings {
+		if binding.Async == nil {
+			t.Fatal("binding missing Async implementation")
+		}
+
+		ctx := context.Background()
+		ch := binding.Async(ctx, types.String("hello"))
+		select {
+		case res := <-ch:
+			if !types.IsError(res) {
+				t.Errorf("async binding returned %v, wanted error", res)
+			}
+		case <-time.After(1 * time.Second):
+			t.Fatal("async binding timed out")
+		}
+	}
+}
+
+func TestSingletonAsyncBinding(t *testing.T) {
+	fn, err := NewFunction("async_fn",
+		Overload("async_fn_int", []*types.Type{types.IntType}, types.IntType),
+		Overload("async_fn_string", []*types.Type{types.StringType}, types.StringType),
+		SingletonAsyncBinding(func(ctx context.Context, args ...ref.Val) ref.Val {
+			return args[0]
+		}),
+	)
+	if err != nil {
+		t.Fatalf("NewFunction() failed: %v", err)
+	}
+	bindings, err := fn.Bindings()
+	if err != nil {
+		t.Fatalf("fn.Bindings() produced an err: %v", err)
+	}
+	if len(bindings) != 1 {
+		t.Errorf("fn.Bindings() produced %d bindings, wanted one", len(bindings))
+	}
+	binding := bindings[0]
+	if binding.Async == nil {
+		t.Fatal("binding missing Async implementation")
+	}
+
+	ctx := context.Background()
+	ch := binding.Async(ctx, types.String("hello"))
+	select {
+	case res := <-ch:
+		if res.Equal(types.String("hello")) != types.True {
+			t.Errorf("async binding returned %v, wanted hello", res)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("async binding timed out")
+	}
+}
+
+func TestAsyncBindingRedefinition(t *testing.T) {
+	_, err := NewFunction("async_fn",
+		Overload("async_fn_int", []*types.Type{types.IntType}, types.IntType,
+			AsyncBinding(func(ctx context.Context, args ...ref.Val) ref.Val {
+				return args[0]
+			}),
+			AsyncBinding(func(ctx context.Context, args ...ref.Val) ref.Val {
+				return args[0]
+			}),
+		),
+	)
+	if err == nil || !strings.Contains(err.Error(), "already has a binding") {
+		t.Errorf("NewFunction() got %v, wanted already has a binding", err)
+	}
+}
+
+func TestSingletonAsyncBindingRedefinition(t *testing.T) {
+	_, err := NewFunction("async_fn",
+		Overload("async_fn_int", []*types.Type{types.IntType}, types.IntType),
+		SingletonAsyncBinding(func(ctx context.Context, args ...ref.Val) ref.Val {
+			return args[0]
+		}),
+		SingletonAsyncBinding(func(ctx context.Context, args ...ref.Val) ref.Val {
+			return args[0]
+		}),
+	)
+	if err == nil || !strings.Contains(err.Error(), "already has a singleton binding") {
+		t.Errorf("NewFunction() got %v, wanted already has a singleton binding", err)
 	}
 }
 

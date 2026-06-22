@@ -21,6 +21,8 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/google/cel-go/common/functions"
+	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
 )
 
@@ -52,6 +54,18 @@ type evalContext struct {
 
 	// cancel cancels the context when the evaluation is finished.
 	cancel context.CancelFunc
+
+	// asyncCalls tracks the state of async call invocations across re-evaluations.
+	asyncCalls *asyncCallStateTracker
+
+	// completions is the channel async calls signal their callID to upon completion.
+	completions chan<- int64
+
+	// observer for monitoring async calls.
+	observer AsyncObserver
+
+	// semaphore for limiting async call concurrency. A nil value indicates no limit.
+	semaphore chan struct{}
 }
 
 // ExecutionFrame provides the context for a single evaluation of an expression.
@@ -93,6 +107,7 @@ func (f *ExecutionFrame) SetContext(ctx context.Context, interruptCheckFrequency
 	}
 	f.ctx = evalContextPool.Get().(*evalContext)
 	f.ctx.ctx, f.ctx.cancel = context.WithCancel(ctx)
+	f.ctx.asyncCalls = asyncCallStateTrackerPool.create()
 	f.ctx.interrupt = ctx.Done()
 	f.ctx.interruptCheckFrequency = interruptCheckFrequency
 	f.ctx.interruptCheckCount.Store(0)
@@ -108,6 +123,11 @@ func (f *ExecutionFrame) Close() {
 			f.ctx.cancel = nil
 		}
 		f.ctx.ctx = nil
+		f.ctx.completions = nil
+		asyncCallStateTrackerPool.release(f.ctx.asyncCalls)
+		f.ctx.asyncCalls = nil
+		f.ctx.observer = nil
+		f.ctx.semaphore = nil
 		f.ctx.interrupt = nil
 		f.ctx.state = nil
 		f.ctx.costs = nil
@@ -196,6 +216,81 @@ func (f *ExecutionFrame) CheckInterrupt() bool {
 		}
 	}
 	return false
+}
+
+// ComputeResult tracks and computes the result of the given asynchronous function.
+//
+// The first invocation for a given (node id, args) tuple launches the call and returns an
+// Unknown which references the call's unique callID. Subsequent invocations return the cached
+// result once the call has completed.
+func (f *ExecutionFrame) ComputeResult(id int64, function, overload string, impl functions.AsyncOp, argVals []ref.Val) ref.Val {
+	if f.ctx == nil || f.ctx.asyncCalls == nil {
+		return types.NewErrWithNodeID(id, "asynchronous function calls require concurrent evaluation and cannot be resolved by a synchronous Eval")
+	}
+	t := f.ctx.asyncCalls
+	acs := t.getOrCreate(id, function, overload, argVals, impl, f.ctx.completions)
+	return t.launch(f.ctx.ctx, acs, f.ctx.observer, f.ctx.semaphore)
+}
+
+// PendingAsyncCalls returns the number of async function calls that have been launched
+// but whose completions have not yet been drained.
+func (f *ExecutionFrame) PendingAsyncCalls() int {
+	if f.ctx == nil || f.ctx.asyncCalls == nil {
+		return 0
+	}
+	return f.ctx.asyncCalls.pendingCount()
+}
+
+// AsyncCall returns the state of an async call by its callID, or nil if not found.
+func (f *ExecutionFrame) AsyncCall(callID int64) AsyncCall {
+	if f.ctx == nil || f.ctx.asyncCalls == nil {
+		return nil
+	}
+	acs := f.ctx.asyncCalls.getByID(callID)
+	if acs == nil {
+		return nil
+	}
+	return acs
+}
+
+// NotifyCompletion notifies the execution frame that an async call has completed and been drained.
+func (f *ExecutionFrame) NotifyCompletion(callID int64) {
+	if f.ctx != nil && f.ctx.asyncCalls != nil {
+		f.ctx.asyncCalls.notifyCompletion(callID)
+	}
+}
+
+// SetCompletions configures a channel to receive callIDs when asynchronous evaluations finish.
+func (f *ExecutionFrame) SetCompletions(ch chan<- int64) error {
+	if f.ctx == nil {
+		return errors.New("asynchronous evaluation options require the execution frame to have a context configured")
+	}
+	f.ctx.completions = ch
+	return nil
+}
+
+// SetAsyncObserver sets the observer for monitoring asynchronous function calls.
+func (f *ExecutionFrame) SetAsyncObserver(observer AsyncObserver) error {
+	if f.ctx == nil {
+		return errors.New("asynchronous evaluation options require the execution frame to have a context configured")
+	}
+	f.ctx.observer = observer
+	return nil
+}
+
+// SetAsyncMaxConcurrency sets the maximum concurrency for asynchronous function calls.
+//
+// A non-positive value indicates that concurrency is unbounded.
+func (f *ExecutionFrame) SetAsyncMaxConcurrency(n int) error {
+	if f.ctx == nil {
+		return errors.New("asynchronous evaluation options require the execution frame to have a context configured")
+	}
+	if n > 0 {
+		f.ctx.semaphore = make(chan struct{}, n)
+	} else {
+		f.ctx.semaphore = nil
+	}
+	return nil
 }
 
 // frameStack provides a synchronized pool of ExecutionFrames.
