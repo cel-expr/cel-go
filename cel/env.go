@@ -1009,6 +1009,41 @@ func (i *Issues) Errors() []*Error {
 	return i.errs.GetErrors()
 }
 
+// Source returns the source associated with the issues.
+func (i *Issues) Source() Source {
+	if i == nil {
+		return nil
+	}
+	return i.errs.Source()
+}
+
+// ErrorOffset returns the start character offset for the error, if available.
+func (i *Issues) ErrorOffset(err *Error) (int32, bool) {
+	offsetRange, found := i.ErrorOffsetRange(err)
+	if found {
+		return offsetRange.Start, true
+	}
+	return 0, false
+}
+
+// ErrorOffsetRange returns the character offset range for the error, if available.
+func (i *Issues) ErrorOffsetRange(err *Error) (celast.OffsetRange, bool) {
+	if i == nil || err == nil {
+		return celast.OffsetRange{}, false
+	}
+	if i.info != nil {
+		if offsetRange, found := i.info.GetOffsetRange(err.ExprID); found {
+			return offsetRange, true
+		}
+	}
+	if src := i.Source(); src != nil {
+		if offset, found := src.LocationOffset(err.Location); found {
+			return celast.OffsetRange{Start: offset, Stop: offset}, true
+		}
+	}
+	return celast.OffsetRange{}, false
+}
+
 // Append collects the issues from another Issues struct into a new Issues object.
 func (i *Issues) Append(other *Issues) *Issues {
 	if i == nil {

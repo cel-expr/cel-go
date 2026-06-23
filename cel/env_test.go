@@ -140,6 +140,38 @@ ERROR: <input>:1:2: Syntax error: mismatched input '<EOF>' expecting {'[', '{', 
 	}
 }
 
+func TestIssuesErrorOffsetRange(t *testing.T) {
+	e, err := NewEnv()
+	if err != nil {
+		t.Fatalf("NewEnv() failed: %v", err)
+	}
+	_, iss := e.Compile("missing")
+	if len(iss.Errors()) != 1 {
+		t.Fatalf("iss.Errors() got %v, wanted 1 error", iss.Errors())
+	}
+	errInfo := iss.Errors()[0]
+
+	offset, found := iss.ErrorOffset(errInfo)
+	if !found {
+		t.Fatal("ErrorOffset() got found false, wanted true")
+	}
+	if offset != 0 {
+		t.Errorf("ErrorOffset() got %d, wanted 0", offset)
+	}
+
+	offsetRange, found := iss.ErrorOffsetRange(errInfo)
+	if !found {
+		t.Fatal("ErrorOffsetRange() got found false, wanted true")
+	}
+	if offsetRange != (ast.OffsetRange{Start: 0, Stop: 7}) {
+		t.Errorf("ErrorOffsetRange() got %v, wanted [0, 7]", offsetRange)
+	}
+
+	if iss.Source() == nil {
+		t.Fatal("Source() got nil, wanted source")
+	}
+}
+
 func TestFormatCELTypeEquivalence(t *testing.T) {
 	values := []*Type{
 		AnyType,

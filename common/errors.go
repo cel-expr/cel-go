@@ -70,6 +70,11 @@ func (e *Errors) GetErrors() []*Error {
 	return e.errors[:]
 }
 
+// Source returns the source associated with the errors.
+func (e *Errors) Source() Source {
+	return e.source
+}
+
 // Append creates a new Errors object with the current and input errors.
 func (e *Errors) Append(errs []*Error) *Errors {
 	return &Errors{
