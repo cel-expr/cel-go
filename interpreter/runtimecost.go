@@ -233,6 +233,19 @@ type CostTracker struct {
 	stack refValStack
 }
 
+// Clone makes a shallow copy of the tracker.
+// The different clones can be used independently from
+// each other.
+func (c *CostTracker) Clone() (*CostTracker, error) {
+	tracker := &CostTracker{
+		Estimator:           c.Estimator,
+		overloadTrackers:    c.overloadTrackers,
+		Limit:               c.Limit,
+		presenceTestHasCost: c.presenceTestHasCost,
+	}
+	return tracker, nil
+}
+
 // ActualCost returns the runtime cost
 func (c *CostTracker) ActualCost() uint64 {
 	return c.cost

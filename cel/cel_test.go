@@ -1969,6 +1969,48 @@ func TestCostLimit(t *testing.T) {
 	}
 }
 
+func TestCostTrackingConsistentAcrossEvals(t *testing.T) {
+	env := testEnv(t,
+		Variable("val1", IntType),
+		Variable("val2", IntType),
+	)
+	ast, iss := env.Compile(`val1 + val2`)
+	if iss.Err() != nil {
+		t.Fatalf("env.Compile() failed: %v", iss.Err())
+	}
+	checkedAst, iss := env.Check(ast)
+	if iss.Err() != nil {
+		t.Fatalf("env.Check() failed: %v", iss.Err())
+	}
+	program, err := env.Program(checkedAst, CostTracking(nil))
+	if err != nil {
+		t.Fatalf("env.Program() failed: %v", err)
+	}
+	input := map[string]any{"val1": 1, "val2": 2}
+
+	_, det1, err := program.Eval(input)
+	if err != nil {
+		t.Fatalf("first Eval() failed: %v", err)
+	}
+	cost1 := det1.ActualCost()
+	if cost1 == nil {
+		t.Fatal("first Eval() returned nil ActualCost")
+	}
+
+	_, det2, err := program.Eval(input)
+	if err != nil {
+		t.Fatalf("second Eval() failed: %v", err)
+	}
+	cost2 := det2.ActualCost()
+	if cost2 == nil {
+		t.Fatal("second Eval() returned nil ActualCost")
+	}
+
+	if *cost1 != *cost2 {
+		t.Errorf("ActualCost mismatch across evaluations: first=%d, second=%d", *cost1, *cost2)
+	}
+}
+
 func TestPartialVars(t *testing.T) {
 	env := testEnv(t,
 		Variable("x", StringType),
