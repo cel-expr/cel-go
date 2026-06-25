@@ -138,17 +138,19 @@ func (f *ExecutionFrame) Close() {
 	}
 	f.ctx = nil
 	f.parent = nil
-	switch a := f.Activation.(type) {
-	case *hierarchicalActivation:
-		if child, ok := a.child.(*inputActivation); ok {
-			activationInput.release(child)
+	if f.Activation != nil {
+		switch a := f.Activation.(type) {
+		case *hierarchicalActivation:
+			if child, ok := a.child.(*inputActivation); ok {
+				activationInput.release(child)
+			}
+			activationStack.release(a)
+		case *inputActivation:
+			activationInput.release(a)
 		}
-		activationStack.release(a)
-	case *inputActivation:
-		activationInput.release(a)
+		f.Activation = nil
+		frameStack.Put(f)
 	}
-	f.Activation = nil
-	frameStack.Put(f)
 }
 
 // Push pushes the given activation onto the activation stack and returns the new frame.

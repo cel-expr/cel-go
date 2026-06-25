@@ -16,6 +16,7 @@ package interpreter
 
 import (
 	"context"
+	"math"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -204,24 +205,34 @@ func TestHashCall(t *testing.T) {
 			wantHash: 17791913581187873402,
 		},
 		{
-			name:     "numeric args excluded - int 1",
+			name:     "node id 1 with int arg 1",
 			input:    hashInput{1, overloads.ContainsString, []ref.Val{types.Int(1)}},
-			wantHash: 11388483313428953077,
+			wantHash: 6250879603390619476,
 		},
 		{
-			name:     "numeric args excluded - int 2",
+			name:     "node id 1 with uint arg 1",
+			input:    hashInput{1, overloads.ContainsString, []ref.Val{types.Uint(1)}},
+			wantHash: 6250879603390619476,
+		},
+		{
+			name:     "node id 1 with double arg 1.0",
+			input:    hashInput{1, overloads.ContainsString, []ref.Val{types.Double(1.0)}},
+			wantHash: 6250879603390619476,
+		},
+		{
+			name:     "node id 1 with int arg 2",
 			input:    hashInput{1, overloads.ContainsString, []ref.Val{types.Int(2)}},
-			wantHash: 11388483313428953077,
+			wantHash: 2269972419901218387,
 		},
 		{
-			name:     "numeric args excluded - double 1.5",
+			name:     "node id 1 with double arg 1.5",
 			input:    hashInput{1, overloads.ContainsString, []ref.Val{types.Double(1.5)}},
-			wantHash: 11388483313428953077,
+			wantHash: 1181031487041842476,
 		},
 		{
-			name:     "numeric args excluded - double 9.9",
+			name:     "node id 1 with double arg 9.9",
 			input:    hashInput{1, overloads.ContainsString, []ref.Val{types.Double(9.9)}},
-			wantHash: 11388483313428953077,
+			wantHash: 6763353195175059609,
 		},
 		{
 			name:     "separation a, bc",
@@ -541,6 +552,29 @@ func TestAsyncCallStateEquals(t *testing.T) {
 		var nilState *asyncCallState
 		if nilState.equals(base) {
 			t.Error("nil.equals() returned true")
+		}
+	})
+	t.Run("NaN equivalence", func(t *testing.T) {
+		s1 := mk("fn", "ov", types.Double(math.NaN()))
+		s2 := mk("fn", "ov", types.Double(math.NaN()))
+		s3 := mk("fn", "ov", types.Double(1.23))
+
+		tests := []struct {
+			name  string
+			state *asyncCallState
+			other *asyncCallState
+			want  bool
+		}{
+			{"NaN vs NaN", s1, s2, true},
+			{"NaN vs non-NaN", s1, s3, false},
+			{"non-NaN vs NaN", s3, s1, false},
+		}
+		for _, tc := range tests {
+			t.Run(tc.name, func(t *testing.T) {
+				if got := tc.state.equals(tc.other); got != tc.want {
+					t.Errorf("equals() = %v, wanted %v", got, tc.want)
+				}
+			})
 		}
 	})
 }

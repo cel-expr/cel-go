@@ -380,6 +380,23 @@ func TestFrameClose(t *testing.T) {
 	}
 }
 
+func TestFrameDoubleClose(t *testing.T) {
+	frame := mustNewExecutionFrame(t, EmptyActivation())
+	ctx := context.Background()
+	frame.SetContext(ctx, 1)
+
+	// Close the frame the first time.
+	frame.Close()
+
+	// Closing it again should be a no-op and not panic.
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("double Close() panicked: %v", r)
+		}
+	}()
+	frame.Close()
+}
+
 func TestFrameLifecycleAndPooling(t *testing.T) {
 	vars := map[string]any{"a": 1, "b": 2}
 	frame := mustNewExecutionFrame(t, vars)

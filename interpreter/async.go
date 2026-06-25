@@ -17,7 +17,9 @@ package interpreter
 import (
 	"context"
 	"encoding/binary"
+	"fmt"
 	"hash/fnv"
+	"math"
 	"sync"
 	"sync/atomic"
 
@@ -141,6 +143,7 @@ var (
 	hashStringMarker    = []byte{'s'}
 	hashBoolTrueMarker  = []byte{'b', 1}
 	hashBoolFalseMarker = []byte{'b', 0}
+	hashNumberMarker    = []byte{'n'}
 	hashDefaultMarker   = []byte{'x'}
 )
 
@@ -168,6 +171,21 @@ func hashCall(id int64, overload string, args []ref.Val) uint64 {
 			} else {
 				h.Write(hashBoolFalseMarker)
 			}
+		case types.Int:
+			h.Write(hashNumberMarker)
+			var buf [8]byte
+			binary.LittleEndian.PutUint64(buf[:], math.Float64bits(float64(v)))
+			h.Write(buf[:])
+		case types.Uint:
+			h.Write(hashNumberMarker)
+			var buf [8]byte
+			binary.LittleEndian.PutUint64(buf[:], math.Float64bits(float64(v)))
+			h.Write(buf[:])
+		case types.Double:
+			h.Write(hashNumberMarker)
+			var buf [8]byte
+			binary.LittleEndian.PutUint64(buf[:], math.Float64bits(float64(v)))
+			h.Write(buf[:])
 		default:
 			// Value intentionally omitted; bucket membership falls back to equals.
 			h.Write(hashDefaultMarker)
@@ -333,6 +351,15 @@ func (t *asyncCallStateTracker) launch(ctx context.Context, acs *asyncCallState,
 			defer func() { <-semaphore }()
 		}
 		ch := acs.impl(ctx, acs.argVals...)
+		// Early terminate with a CEL error when an implementation returns an empty channel.
+		if ch == nil {
+			acs.mu.Lock()
+			defer acs.mu.Unlock()
+			acs.result = types.NewErrFromString(
+				fmt.Sprintf("function %s returned an empty channel", acs.function))
+			return
+		}
+
 		// Wait for the async computation to finish or for the context to be cancelled.
 		select {
 		case r := <-ch:
@@ -369,9 +396,17 @@ func (acs *asyncCallState) equals(other *asyncCallState) bool {
 		return false
 	}
 	for i, v := range acs.argVals {
-		if types.Equal(v, other.argVals[i]) != types.True {
-			return false
+		otherV := other.argVals[i]
+		if types.Equal(v, otherV) == types.True {
+			continue
 		}
+		if n, ok := v.(types.Double); ok {
+			// Treat NaN as equivalent for the sake of function dispatch equality.
+			if otherN, ok := otherV.(types.Double); ok && math.IsNaN(float64(n)) && math.IsNaN(float64(otherN)) {
+				continue
+			}
+		}
+		return false
 	}
 	return true
 }
