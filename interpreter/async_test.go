@@ -244,6 +244,26 @@ func TestHashCall(t *testing.T) {
 			input:    hashInput{1, overloads.ContainsString, []ref.Val{types.String("ab"), types.String("c")}},
 			wantHash: 14974838604657976619,
 		},
+		{
+			name:     "node id 1 with double arg NaN",
+			input:    hashInput{1, overloads.ContainsString, []ref.Val{types.Double(math.NaN())}},
+			wantHash: 4356663283625852078,
+		},
+		{
+			name:     "node id 1 with string arg NaN",
+			input:    hashInput{1, overloads.ContainsString, []ref.Val{types.String("NaN")}},
+			wantHash: 17422508148545277865,
+		},
+		{
+			name:     "node id 1 with double arg 0.0",
+			input:    hashInput{1, overloads.ContainsString, []ref.Val{types.Double(0.0)}},
+			wantHash: 2331193227347896467,
+		},
+		{
+			name:     "node id 1 with double arg -0.0",
+			input:    hashInput{1, overloads.ContainsString, []ref.Val{types.Double(math.Copysign(0.0, -1.0))}},
+			wantHash: 2331193227347896467,
+		},
 	}
 
 	for _, tc := range tests {
@@ -930,5 +950,3 @@ func TestAsyncSetupWithoutContextErrors(t *testing.T) {
 		t.Error("SetAsyncMaxConcurrency() succeeded without context, wanted error")
 	}
 }
-
-

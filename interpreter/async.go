@@ -102,6 +102,8 @@ func (fn *evalAsyncFunc) Exec(frame *ExecutionFrame) ref.Val {
 	// Early return if any argument to the function is unknown or error.
 	for i, arg := range fn.args {
 		argVals[i] = arg.Exec(frame)
+		// TODO: early return only on errors, aggregate unknowns and validate
+		// whether any argument is unknown before proceeding with the call.
 		if types.IsUnknownOrError(argVals[i]) {
 			return argVals[i]
 		}
@@ -113,18 +115,11 @@ func (fn *evalAsyncFunc) Exec(frame *ExecutionFrame) ref.Val {
 // asyncCallStateTracker manages async call states across re-evaluations of a single program.
 type asyncCallStateTracker struct {
 	mu sync.RWMutex
-	// calls buckets call states by a composite hash of (node id, overload, string/bool args).
+	// calls buckets call states by a composite hash of (node id, overload, string/int/double/uint/bool args).
 	// A single AST node id may host many concurrently-live calls when it is evaluated inside a
 	// comprehension (once per element with different arguments), so each bucket may hold more
 	// than one state. The exact match within a bucket is resolved via asyncCallState.equals,
 	// which applies CEL's full equality semantics to the arguments.
-	//
-	// Caveat for future implementers: dedup relies on argument equality being reflexive. CEL
-	// values whose equality is not reflexive — notably NaN doubles, where NaN != NaN — will never
-	// match a previously registered state. Such a call is therefore relaunched on every
-	// re-evaluation pass and never converges (the evaluation terminates only via context
-	// cancellation/deadline). This is inherent to the CEL equality model and is not special-cased
-	// here; if it ever needs handling, give equals an identity-based fast path before equality.
 	calls        map[uint64][]*asyncCallState
 	callsByID    map[int64]*asyncCallState
 	nextCallID   atomic.Int64
@@ -149,10 +144,10 @@ var (
 
 // hashCall computes the composite bucket key for an async call.
 //
-// Only string and bool argument values contribute to the hash. Numeric and more complex types
-// rely on a richer notion of equivalence (e.g. cross-type numeric equality, unordered maps) that
-// a byte-level hash cannot capture safely, so they are deliberately excluded from the key and are
-// instead disambiguated within the bucket by asyncCallState.equals.
+// Only string, int, double, uint, and bool argument values contribute to the hash. More complex types
+// rely on a richer notion of equivalence (e.g. unordered maps, proto equality, custom types)
+// that a byte-level hash cannot capture safely, so they are intentionally excluded from the key
+// and are instead disambiguated within the bucket by asyncCallState.equals.
 func hashCall(id int64, overload string, args []ref.Val) uint64 {
 	h := fnv.New64a()
 	var idBuf [8]byte
@@ -183,6 +178,15 @@ func hashCall(id int64, overload string, args []ref.Val) uint64 {
 			h.Write(buf[:])
 		case types.Double:
 			h.Write(hashNumberMarker)
+			if math.IsNaN(float64(v)) {
+				h.Write([]byte("NaN"))
+				continue
+			}
+			// Normalize -0.0 to 0.0. Go will treat -0.0 as 0.0 at compile time,
+			// but the function math.Copysign(0.0, -1.0) can be used to test the -0.0 case.
+			if v == types.Double(0.0) && math.Signbit(float64(v)) {
+				v = types.Double(0.0)
+			}
 			var buf [8]byte
 			binary.LittleEndian.PutUint64(buf[:], math.Float64bits(float64(v)))
 			h.Write(buf[:])
@@ -350,6 +354,21 @@ func (t *asyncCallStateTracker) launch(ctx context.Context, acs *asyncCallState,
 			// Release the concurrency slot when this call finishes or is cancelled.
 			defer func() { <-semaphore }()
 		}
+		if acs.completions != nil {
+			defer func() {
+				// Prioritize context cancellation to prevent racy completion signals.
+				if ctx.Err() != nil {
+					return
+				}
+				// Signal completion to the evaluator. Use a select with ctx.Done() to prevent
+				// the goroutine from leaking if the evaluator has already timed out or aborted.
+				select {
+				case acs.completions <- acs.callID:
+				case <-ctx.Done():
+				}
+			}()
+		}
+
 		ch := acs.impl(ctx, acs.argVals...)
 		// Early terminate with a CEL error when an implementation returns an empty channel.
 		if ch == nil {
@@ -359,7 +378,6 @@ func (t *asyncCallStateTracker) launch(ctx context.Context, acs *asyncCallState,
 				fmt.Sprintf("function %s returned an empty channel", acs.function))
 			return
 		}
-
 		// Wait for the async computation to finish or for the context to be cancelled.
 		select {
 		case r := <-ch:
@@ -368,14 +386,6 @@ func (t *asyncCallStateTracker) launch(ctx context.Context, acs *asyncCallState,
 			acs.mu.Unlock()
 			if observer != nil {
 				observer.OnCallFinished(acs.callID, acs.function, acs.overload, r)
-			}
-			if acs.completions != nil {
-				// Signal completion to the evaluator. Use a select with ctx.Done() to prevent
-				// the goroutine from leaking if the evaluator has already timed out or aborted.
-				select {
-				case acs.completions <- acs.callID:
-				case <-ctx.Done():
-				}
 			}
 		case <-ctx.Done():
 			// Evaluation context cancelled before the async operation completed.
