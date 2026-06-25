@@ -2229,6 +2229,904 @@ func TestInterpreter_PlanMapComprehensionTwoVar(t *testing.T) {
 	}
 }
 
+func TestInterpreter_LateBindCalls(t *testing.T) {
+
+	f1 := func(t *testing.T) *decls.FunctionDecl {
+		decl, err := decls.NewFunction(
+			"f1",
+			decls.Overload("f1_int", []*types.Type{}, types.IntType, decls.FunctionBinding(
+				func(_ ...ref.Val) ref.Val {
+					return types.Int(37)
+				},
+			)),
+			decls.Overload("f1_string_int", []*types.Type{types.StringType}, types.IntType, decls.UnaryBinding(
+				func(arg ref.Val) ref.Val {
+					return arg.(types.String).Size()
+				},
+			)),
+			decls.Overload("f1_int_int_int", []*types.Type{types.IntType, types.IntType}, types.IntType, decls.BinaryBinding(
+				func(lhs ref.Val, rhs ref.Val) ref.Val {
+					return lhs.(types.Int).Add(rhs)
+				},
+			)),
+			decls.Overload("f1_bool_bool_bool_int", []*types.Type{types.BoolType, types.BoolType, types.BoolType}, types.IntType, decls.FunctionBinding(
+				func(args ...ref.Val) ref.Val {
+					count := 0
+					for _, arg := range args {
+						if arg == types.True {
+							count++
+						}
+					}
+					return types.Int(count)
+				},
+			)),
+		)
+
+		if err != nil {
+			t.Fatalf("pre-condition failed: could not create function declaration for f1 (cause: %v)", err)
+		}
+		return decl
+	}
+
+	// overrides supplied at runtime with the activation.
+	f1_int := function("f1_int", 0, false, func(_ ...ref.Val) ref.Val { return types.Int(51) })
+
+	f1_string_int := unary("f1_string_int", 0, false, func(arg ref.Val) ref.Val {
+		size := arg.(types.String).Size().(types.Int)
+		return size.Multiply(types.Int(2))
+	})
+	f1_int_int_int := binary("f1_int_int_int", 0, false, func(lhs ref.Val, rhs ref.Val) ref.Val {
+		return lhs.(types.Int).Subtract(rhs)
+	})
+	f1_bool_bool_bool_int := function("f1_bool_bool_bool_int", 0, false, func(args ...ref.Val) ref.Val {
+		count := 0
+		for _, arg := range args {
+			if arg == types.False {
+				count++
+			}
+		}
+		return types.Int(count)
+	})
+
+	// activation configures an activation that exposes the given variables
+	// and the supplied runtime overrides for function overloads.
+	activation := func(vars Activation, ovls ...*functions.Overload) Activation {
+
+		d := &defaultDispatcher{
+			overloads: overloadMap{},
+		}
+		for _, ovl := range ovls {
+			d.overloads[ovl.Operator] = ovl
+		}
+		return &lateBindActivation{
+			vars:       vars,
+			dispatcher: d,
+		}
+	}
+
+	// dummyDecorator substitutes the evalZeroArity with the
+	// custom type dummyEval for the purpose of demonstrating
+	// the handling of unknown implementations of IntepretableCall
+	dummyDecorator := func() PlannerOption {
+
+		return CustomDecorator(func(i Interpretable) (Interpretable, error) {
+			switch expr := i.(type) {
+			case *evalZeroArity:
+				return &dummyEval{
+					id:       expr.id,
+					function: expr.function,
+					overload: expr.overload,
+					impl:     expr.impl,
+				}, nil
+			default:
+				return i, nil
+			}
+		})
+	}
+
+	testCases := []testCase{
+		// Test Group 01 - Single Function Call Expressions
+		// ------------------------------------------------
+		// This is to verify that the very simple case works
+		// when we don't supply any function overload. In this
+		// case the presence of the decorator should not alter
+		// the execution.
+		{
+			name:      "T01.01__OK_ZeroArity_No_Overrides",
+			expr:      "f1()",
+			funcs:     []*decls.FunctionDecl{f1(t)},
+			unchecked: false,
+			in:        EmptyActivation(),
+			out:       types.Int(37),
+		},
+		{
+			name:      "T01.02__OK_Unary_No_Overrides",
+			expr:      `f1("hello")`,
+			funcs:     []*decls.FunctionDecl{f1(t)},
+			unchecked: false,
+			in:        EmptyActivation(),
+			out:       types.Int(5),
+		},
+		{
+			name:      "T01.03__OK_Binary_No_Overrides",
+			expr:      `f1(3,4)`,
+			funcs:     []*decls.FunctionDecl{f1(t)},
+			unchecked: false,
+			in:        EmptyActivation(),
+			out:       types.Int(7),
+		},
+		{
+			name:      "T01.04__OK_VarArgs_No_Overrides",
+			expr:      `f1(true, false, true)`,
+			funcs:     []*decls.FunctionDecl{f1(t)},
+			unchecked: false,
+			in:        EmptyActivation(),
+			out:       types.Int(2),
+		},
+		// Test Group 02 - Single Function Call Expression Overrides
+		// ---------------------------------------------------------
+		// This case is to ensure that the decorator injects and
+		// configures correctly the lateBindEval to replace the
+		// call with the one supplied via the activation.
+		{
+			name:      "T02.01__OK_ZeroArity_With_Overrides",
+			expr:      "f1()",
+			funcs:     []*decls.FunctionDecl{f1(t)},
+			unchecked: false,
+			in:        activation(EmptyActivation(), f1_int),
+			out:       types.Int(51),
+		},
+		{
+			name:      "T02.02__OK_Unary_With_Overrides",
+			expr:      `f1("hello")`,
+			funcs:     []*decls.FunctionDecl{f1(t)},
+			unchecked: false,
+			in:        activation(EmptyActivation(), f1_string_int),
+			out:       types.Int(10),
+		},
+		{
+			name:      "T02.03__OK_Binary_With_Overrides",
+			expr:      `f1(3,4)`,
+			funcs:     []*decls.FunctionDecl{f1(t)},
+			unchecked: false,
+			in:        activation(EmptyActivation(), f1_int_int_int),
+			out:       types.Int(-1),
+		},
+		{
+			name:      "T02.04__OK_VarArgs_With_Overrides",
+			expr:      `f1(true, false, true)`,
+			funcs:     []*decls.FunctionDecl{f1(t)},
+			unchecked: false,
+			in:        activation(EmptyActivation(), f1_bool_bool_bool_int),
+			out:       types.Int(1),
+		},
+		// TestGroup 03 - Expressions with Operators
+		// -----------------------------------------
+		// We expect the expressions of the operators
+		// to be processed by the planner and decorated
+		// accordingly.
+		{
+			name: "T03.01__OK_Equal_With_Overrides",
+			// without overrides:
+			// - f1() -> 37
+			// - f1("hello") -> 5
+			// result: 37 == 5 + 32 = true
+			// with overrides: false (51 != 10 + 32)
+			expr:      `f1() == f1("hello") + 32`,
+			funcs:     []*decls.FunctionDecl{f1(t)},
+			unchecked: false,
+			in:        activation(EmptyActivation(), f1_int, f1_string_int),
+			out:       types.False,
+		},
+		{
+			name: "T03.02__OK_Not_Equal_With_Overrides",
+			// without overrides:
+			// - f1(3,4) -> 7
+			// - f1(true, true, true) -> 3
+			// - f1() -> 37
+			// result: 7 - 3 + 37 == 41 = false
+			// with overrides: true (-1 - 0 + 51 != 41)
+			expr:      `f1(3,4) - f1(true, true, true) + f1() != 41`,
+			funcs:     []*decls.FunctionDecl{f1(t)},
+			unchecked: false,
+			in:        activation(EmptyActivation(), f1_int, f1_int_int_int, f1_bool_bool_bool_int),
+			out:       types.True,
+		},
+		{
+			name: "T03.03__OK_And_Or_With_Overrides",
+			// without overrides:
+			// - f1(3,4) -> 7
+			// - f1(true, true, true) -> 3
+			// - f1("hello") -> 5
+			// result: (7 > 0) && (3 == 3 || 5 == 10): true
+			// with overrides: false (-1 < 0) && (0 == 3 || 10 == 10)
+			expr:      `f1(3,4) > 0 && (f1(true, true, true) == 3 || f1("hello") == 10)`,
+			funcs:     []*decls.FunctionDecl{f1(t)},
+			unchecked: false,
+			in:        activation(EmptyActivation(), f1_string_int, f1_int_int_int, f1_bool_bool_bool_int),
+			out:       types.False,
+		},
+		{
+			name: "T03.04__OK_Ternary_Operator",
+			// without overrides:
+			// - f1(3,4) -> 7
+			// - f1() -> 51
+			// - f1("hello") -> 5
+			// result: (7 > 0 ? 51 : 5) = 51
+			// with overrides: 10 (-1 > 0 ? 51 : 10)
+			expr:      `f1(3,4) > 0 ? f1() : f1("hello")`,
+			funcs:     []*decls.FunctionDecl{f1(t)},
+			unchecked: false,
+			in:        activation(EmptyActivation(), f1_int, f1_string_int, f1_int_int_int),
+			out:       types.Int(10),
+		},
+		{
+			name: "T03.05__OK_List_Index_Operator",
+			// without overrides:
+			// - f1(true,true,true) -> 3
+			// result: <array>[3] = 6
+			// with overrides: 1 (<array>[0])
+			expr:      `[1, 3, 5, 6][f1(true,true,true)]`,
+			funcs:     []*decls.FunctionDecl{f1(t)},
+			unchecked: false,
+			in:        activation(EmptyActivation(), f1_bool_bool_bool_int),
+			out:       types.Int(1),
+		},
+		{
+			name: "T03.06__OK_Map_Index_Operator",
+			// without overrides:
+			// - f1() -> 37
+			// result: { 31: 1, 51: 2 }[37] = 1
+			// with overrides: 2 (<map>[51])
+			expr:      `{ 37: 1, 51: 2 }[f1()]`,
+			funcs:     []*decls.FunctionDecl{f1(t)},
+			unchecked: false,
+			in:        activation(EmptyActivation(), f1_int),
+			out:       types.Int(2),
+		},
+		// Test Group 04 - Object Construction
+		// -----------------------------------
+		// We expect the expressions to initialise
+		// the object to be processed by the planner
+		// and then decorated accordingly.
+		{
+			name: "T04.01__OK_Map_Construction_Values",
+			// without overrides:
+			// - f1() -> 37
+			// - f1("hello") -> 5
+			// - f1(2,3) -> 5
+			// result: { "a": 37, "b": 5, "c": 5 }
+			// with overrides: { "a": 51, "b": 10, "c": -1 }
+			expr:      `{ "a": f1(), "b": f1("hello"), "c": f1(2,3) }`,
+			funcs:     []*decls.FunctionDecl{f1(t)},
+			unchecked: false,
+			in:        activation(EmptyActivation(), f1_int, f1_string_int, f1_int_int_int),
+			out: types.NewDynamicMap(types.DefaultTypeAdapter, map[string]ref.Val{
+				"a": types.Int(51), "b": types.Int(10), "c": types.Int(-1),
+			}),
+		},
+		{
+			name: "T04.02__OK_Map_Construction_Keys",
+			// without overrides:
+			// - f1() -> 37
+			// - f1("hello") -> 5
+			// - f1(2,3) -> 5
+			// result: { 37: 10, 5: 3, 5: 6 }
+			// with overrides: { 51: 10, 10: 3, -1: 6 }
+			expr:      `{ f1(): 10, f1("hello"): 3, f1(2,3): 6 }`,
+			funcs:     []*decls.FunctionDecl{f1(t)},
+			unchecked: false,
+			in:        activation(EmptyActivation(), f1_int, f1_string_int, f1_int_int_int),
+			out: types.NewDynamicMap(types.DefaultTypeAdapter, map[ref.Val]ref.Val{
+				types.Int(51): types.Int(10),
+				types.Int(10): types.Int(3),
+				types.Int(-1): types.Int(6),
+			}),
+		},
+		{
+			name: "T04.03__OK_List_Construction",
+			// without overrides:
+			// - f1() -> 37
+			// - f1("hi") -> 2
+			// - f1(2,3) -> 5
+			// result: [37, 2, 5]
+			// with overrides: [51, 4, 3]
+			expr:      `[ f1(), f1("hi"), f1(false, false, false) ]`,
+			funcs:     []*decls.FunctionDecl{f1(t)},
+			unchecked: false,
+			in:        activation(EmptyActivation(), f1_int, f1_string_int, f1_bool_bool_bool_int),
+			out: types.NewDynamicList(types.DefaultTypeAdapter, []ref.Val{
+				types.Int(51), types.Int(4), types.Int(3),
+			}),
+		},
+		{
+			name: "T04.04__OK_Object_Construction",
+			// without overrides:
+			// - f1() -> 37
+			// result: { single_int64: 37 }
+			// with overrides: { single_int64: 51 }
+			expr:      `test.TestAllTypes{single_int64: f1()}`,
+			container: "google.expr.proto3",
+			types:     []proto.Message{&proto3pb.TestAllTypes{}},
+			funcs:     []*decls.FunctionDecl{f1(t)},
+			unchecked: false,
+			in:        activation(EmptyActivation(), f1_int),
+			out: &proto3pb.TestAllTypes{
+				SingleInt64: 51,
+			},
+		},
+		// Test Group 05 - Macros (Comprehensions)
+		// ---------------------------------------
+		// The expectation is that the planner processes
+		// all the expressions and invokes the decorator
+		// accordingly.
+		{
+			name: "T05.01__OK_Map_Filter",
+			// without overrides:
+			// - f1() -> 37
+			// result: [39, 52]
+			// with overrides: [52]
+			expr:  `m.filter(k, k > f1())`,
+			funcs: []*decls.FunctionDecl{f1(t)},
+			vars: []*decls.VariableDecl{
+				decls.NewVariable("m", types.NewMapType(types.IntType, types.StringType)),
+			},
+			in: activation(&mapActivation{
+				bindings: map[string]any{
+					"m": map[int]string{
+						39: "hello",
+						52: "hi",
+					},
+				}},
+				f1_int,
+			),
+			out: types.NewDynamicList(types.DefaultTypeAdapter, []ref.Val{
+				types.Int(52),
+			}),
+		},
+		{
+			name: "T05.02__OK_Map_All",
+			// without overrides:
+			// - f1() -> 37
+			// result: [39 > 37, 52 > 37] = true
+			// with overrides: [39 < 51, 52 > 51] = false
+			expr:      `m.all(k, k > f1())`,
+			funcs:     []*decls.FunctionDecl{f1(t)},
+			unchecked: false,
+			vars: []*decls.VariableDecl{
+				decls.NewVariable("m", types.NewMapType(types.IntType, types.StringType)),
+			},
+			in: activation(&mapActivation{
+				bindings: map[string]any{
+					"m": map[int]string{
+						39: "hello",
+						52: "hi",
+					},
+				}},
+				f1_int,
+			),
+			out: types.False,
+		},
+		{
+			name: "T05.03__OK_Map_ExistOne",
+			// without overrides:
+			// - f1() -> 37
+			// result: [39 > 37, 45 > 37, 52 > 37] = false
+			// with overrides: [39 < 51, 45 < 51, 52 > 51] = true
+			expr:      `m.exists_one(k, k > f1())`,
+			funcs:     []*decls.FunctionDecl{f1(t)},
+			unchecked: false,
+			vars: []*decls.VariableDecl{
+				decls.NewVariable("m", types.NewMapType(types.IntType, types.StringType)),
+			},
+			in: activation(&mapActivation{
+				bindings: map[string]any{
+					"m": map[int]string{
+						39: "hello",
+						45: "hey",
+						52: "hi",
+					},
+				}},
+				f1_int,
+			),
+			out: types.True,
+		},
+		{
+			name: "T05.04__OK_Map_Exists",
+			// without overrides:
+			// - f1() -> 37
+			// result: [39 > 37, 45 > 37, 52 > 37] = true
+			// with overrides: [39 < 51, 45 < 51, 10 < 51] = false
+			expr:      `m.exists(k, k > f1())`,
+			funcs:     []*decls.FunctionDecl{f1(t)},
+			unchecked: false,
+			vars: []*decls.VariableDecl{
+				decls.NewVariable("m", types.NewMapType(types.IntType, types.StringType)),
+			},
+			in: activation(&mapActivation{
+				bindings: map[string]any{
+					"m": map[int]string{
+						39: "hello",
+						45: "hey",
+						10: "hi",
+					},
+				}},
+				f1_int,
+			),
+			out: types.False,
+		},
+		{
+			name: "T05.05__OK_Map_Map",
+			// without overrides:
+			// - f1(5,3) -> 8
+			// - f1(true,true,false) -> 2
+			// result: [1 < 8, 2 < 8, 7 < 8] = [1 * 2, 2 * 2, 7 * 2] = [2, 4, 14]
+			// with overrides:
+			// - f1(5,3) -> 2
+			// - f1(true,true,false) -> 1
+			// result: [1]
+			//
+			// NOTE: ensure the expected result is only one, so we don't get flakiness
+			// due to variable key ordering of the map iterator.
+			expr:      `m.map(k, k < f1(5,3), k * f1(true, true, false))`,
+			funcs:     []*decls.FunctionDecl{f1(t)},
+			unchecked: false,
+			vars: []*decls.VariableDecl{
+				decls.NewVariable("m", types.NewMapType(types.IntType, types.StringType)),
+			},
+			in: activation(&mapActivation{
+				bindings: map[string]any{
+					"m": map[int]string{
+						1: "hello",
+						2: "hey",
+						7: "hi",
+					},
+				}},
+				f1_int_int_int,
+				f1_bool_bool_bool_int,
+			),
+			out: types.NewDynamicList(types.DefaultTypeAdapter, []int{1}),
+		},
+		{
+			name: "T05.06__OK_List_Filter",
+			// without overrides:
+			// - f1(6,3) -> 9
+			// result: [12, 20]
+			// with overrides: [12, 4, 20]
+			expr:  `l.filter(e, e > f1(6,3))`,
+			funcs: []*decls.FunctionDecl{f1(t)},
+			vars: []*decls.VariableDecl{
+				decls.NewVariable("l", types.NewListType(types.IntType)),
+			},
+			unchecked: false,
+			in: activation(&mapActivation{
+				bindings: map[string]any{
+					"l": []int{2, 12, 4, 20},
+				}},
+				f1_int_int_int,
+			),
+			out: types.NewDynamicList(types.DefaultTypeAdapter, []int{12, 4, 20}),
+		},
+		{
+			name: "T05.07__OK_List_All",
+			// without overrides:
+			// - f1(6,3) -> 9
+			// result: false
+			// with overrides: true
+			expr:  `l.all(e, e > f1(6,3))`,
+			funcs: []*decls.FunctionDecl{f1(t)},
+			vars: []*decls.VariableDecl{
+				decls.NewVariable("l", types.NewListType(types.IntType)),
+			},
+			unchecked: false,
+			in: activation(&mapActivation{
+				bindings: map[string]any{
+					"l": []int{5, 6, 4, 7},
+				}},
+				f1_int_int_int,
+			),
+			out: types.True,
+		},
+		{
+			name: "T05.08__OK_List_Exists",
+			// without overrides:
+			// - f1() -> 37
+			// result: true
+			// with overrides: false
+			expr:  `l.exists(e, e == f1())`,
+			funcs: []*decls.FunctionDecl{f1(t)},
+			vars: []*decls.VariableDecl{
+				decls.NewVariable("l", types.NewListType(types.IntType)),
+			},
+			unchecked: false,
+			in: activation(&mapActivation{
+				bindings: map[string]any{
+					"l": []int{37, 6, 4, 7},
+				}},
+				f1_int,
+			),
+			out: types.False,
+		},
+		{
+			name: "T05.09__OK_List_Exists_One",
+			// without overrides:
+			// - f1("hello") -> 5
+			// result: 4 < 5 (only one): true
+			// with overrides: 6,4,7 < 10: false
+			expr:  `l.exists_one(e, e < f1("hello"))`,
+			funcs: []*decls.FunctionDecl{f1(t)},
+			vars: []*decls.VariableDecl{
+				decls.NewVariable("l", types.NewListType(types.IntType)),
+			},
+			unchecked: false,
+			in: activation(&mapActivation{
+				bindings: map[string]any{
+					"l": []int{37, 6, 4, 7},
+				}},
+				f1_string_int,
+			),
+			out: types.False,
+		},
+		{
+			name: "T05.10__OK_List_Map",
+			// without overrides:
+			// - f1("hi") -> 2
+			// result: [5 * len("hello"), 5 * len("hey"), 5 * len("howdy")] = [25, 15, 25]
+			// with overrides: [5 * 2 * len("hello"), 5 * 2 * len("howdy")] = [50, 50]
+			expr:  `l.map(e, size(e) > f1("hi"),  5 * f1(e))`,
+			funcs: []*decls.FunctionDecl{f1(t)},
+			vars: []*decls.VariableDecl{
+				decls.NewVariable("l", types.NewListType(types.StringType)),
+			},
+			unchecked: false,
+			in: activation(&mapActivation{
+				bindings: map[string]any{
+					"l": []string{"hello", "hi", "hey", "howdy"},
+				}},
+				f1_string_int,
+			),
+			out: types.NewDynamicList(types.DefaultTypeAdapter, []int{50, 50}),
+		},
+		// Test Group 06 - Complex Nesting
+		// -------------------------------
+		// These are just sanity checks to ensure that when we
+		// have complex expressions we don't have forgotten
+		// something.
+		{
+			name: "T06.01__OK_Nested_Function_Calls",
+			// without overrides:
+			// - f1() -> 37
+			// - f1(bool, bool, bool) -> nr of trues
+			// - f1("hi") -> 2, f1("hello") -> 5
+			// - f1(n,m) -> n + m
+			// result: 37 + f1(true, true, false) = 39
+			// with overrides:
+			// - f1() -> 51
+			// - f1(bool, bool, bool) -> nr of falses
+			// - f1("hi") -> 4, f1("hello") -> 10
+			// - f1(n,m) -> n - m
+			// result: 51 + f1(false, false, true) = 53
+			expr: `f1() + f1(
+				l.all(
+					e,
+					e < f1(f1("hello"), f1("hi"))
+				), 
+				m.exists(
+					k,
+					k == f1()
+				), 
+				c > f1(a,b)
+			)`,
+			funcs: []*decls.FunctionDecl{f1(t)},
+			vars: []*decls.VariableDecl{
+				decls.NewVariable("l", types.NewListType(types.IntType)),
+				decls.NewVariable("m", types.NewMapType(types.IntType, types.StringType)),
+				decls.NewVariable("c", types.IntType),
+				decls.NewVariable("a", types.IntType),
+				decls.NewVariable("b", types.IntType),
+			},
+			unchecked: false,
+			in: activation(&mapActivation{
+				bindings: map[string]any{
+					// true for l.all with no overrides, false with overrides
+					"l": []int{3, 4, 5, 6},
+					// true for m.exists with no overrides, false with overrides
+					"m": map[int]string{
+						37: "x",
+						45: "y",
+						81: "z",
+					},
+					// false for c > f1(a,b) with no overrides
+					"c": 3,
+					"a": 5,
+					"b": 4,
+				}},
+				f1_int,
+				f1_string_int,
+				f1_int_int_int,
+				f1_bool_bool_bool_int,
+			),
+			out: types.Int(53),
+		},
+		{
+			name: "T06.02__OK_Nested_Runtime_Overrides",
+			// without overrides:
+			// - f1() -> 37
+			// - f1(a) -> 5
+			// - f1(b,c) -> 7
+			// - f1(d,e,f) -> 2
+			// result: 37 + 5 + 7 + 2 = 51
+			// with overrides:
+			// - f1() -> 51
+			// - f1(a) -> 10
+			// - f1(b,c) -> -1
+			// - f1(d,e,f) -> 1
+			// result: 51 + 10 - 1 + 1 = 61
+			expr:  `f1() + f1(a) + f1(b,c) + f1(d,e,f)`,
+			funcs: []*decls.FunctionDecl{f1(t)},
+			vars: []*decls.VariableDecl{
+				decls.NewVariable("a", types.StringType),
+				decls.NewVariable("b", types.IntType),
+				decls.NewVariable("c", types.IntType),
+				decls.NewVariable("d", types.BoolType),
+				decls.NewVariable("e", types.BoolType),
+				decls.NewVariable("f", types.BoolType),
+			},
+			unchecked: false,
+			in: &hierarchicalActivation{
+				parent: activation(
+					&mapActivation{
+						bindings: map[string]any{
+							"a": "howdy",
+							"b": 3,
+						},
+					},
+					f1_int,
+				),
+				child: &hierarchicalActivation{
+					parent: activation(
+						&mapActivation{
+							bindings: map[string]any{
+								"c": 4,
+								"d": true,
+							},
+						},
+						f1_string_int,
+					),
+					child: &lateBindActivation{
+						dispatcher: &defaultDispatcher{
+							parent: &defaultDispatcher{
+								overloads: overloadMap{
+									"f1_int_int_int": f1_int_int_int,
+								},
+							},
+							overloads: overloadMap{
+								"f1_bool_bool_bool_int": f1_bool_bool_bool_int,
+							},
+						},
+						vars: &mapActivation{
+							bindings: map[string]any{
+								"e": false,
+								"f": true,
+							},
+						},
+					},
+				},
+			},
+			out: types.Int(61),
+		},
+
+		// Test Group 07 - With Eval Observer and Others
+		// ---------------------------------------------------
+		// These test cases are important to ensure that when
+		// interpretables are wrapped by evalWatchXXX the late
+		// bind decorator, if added later, can still travel
+		// through the wrapped Inteprepretable.
+		{
+			name: "T07.01__OK_With_EvalObserver",
+			// without overrides:
+			// - f1() -> 37
+			// - f2(2,b) -> 2 + b
+			// result: a + 37 - 2 + b = 28
+			// with overrides:
+			// - f1() -> 51
+			// - f2(2,b) -> 2 - b
+			// result: a + 51 - 2 - b = 66
+			expr:  `a + f1() - f1(2,b)`,
+			funcs: []*decls.FunctionDecl{f1(t)},
+			vars: []*decls.VariableDecl{
+				decls.NewVariable("a", types.IntType),
+				decls.NewVariable("b", types.IntType),
+			},
+			extraOpts: []PlannerOption{
+				EvalStateObserver(),
+				LateBindCalls(),
+			},
+			in: activation(
+				&mapActivation{
+					bindings: map[string]any{
+						"a": 5,
+						"b": 12,
+					},
+				},
+				f1_int,
+				f1_int_int_int,
+			),
+			out: types.Int(66),
+		},
+		{
+			name:  "T07.02__OK_With_Optimize",
+			expr:  `f1() in [ 23, 34, 51 ]`,
+			funcs: []*decls.FunctionDecl{f1(t)},
+			extraOpts: []PlannerOption{
+				Optimize(),
+				LateBindCalls(),
+			},
+			unchecked: false,
+			in:        activation(&emptyActivation{}, f1_int),
+			out:       types.True,
+		},
+
+		// Test Group 08 - LateBindCalls Variations
+		// ------------------------------------------
+		// These test cases are aimed at checking that when
+		// we play around with LateBindCalls the outcome is
+		// still predictable and expected:
+		// - if we add two LateBindCalls options, only the
+		//   first one will have effect.
+		// - if we add a custom injector, this will be honored.
+		{
+			name: "T08.01__OK_With_Custom_Injector_And_Custom_Eval",
+			// without overrides:
+			// - f1() -> 37
+			// with overrides:
+			// - f1() -> 51
+			expr:  `f1()`,
+			funcs: []*decls.FunctionDecl{f1(t)},
+			extraOpts: []PlannerOption{
+
+				// injects custom type.
+				dummyDecorator(),
+				// lateBind will not process this node
+				// and throw an error.
+				LateBindCalls(Injector(
+					&dummyEval{},
+					func(i InterpretableCall, ovl *functions.Overload, _ LateBindFlags) (InterpretableCall, error) {
+
+						de := i.(*dummyEval)
+
+						return &dummyEval{
+							id:       de.id,
+							function: de.function,
+							overload: de.overload,
+							// we should check that the function is not nil
+							// but we only do this for the purpose of test.
+							impl: ovl.Function,
+						}, nil
+					}),
+				),
+			},
+			unchecked: false,
+			in:        activation(&emptyActivation{}, f1_int),
+			out:       types.Int(51),
+		},
+		{
+			name: "T08.02__ERROR_With_Custom_Eval",
+			// without overrides:
+			// - f1() -> 37
+			// with overrides:
+			// - f1() -> 51 (error)
+			// NOTE: since f1() is mutated from evalZeroArity to evalDummy
+			// we will receive an error, because there is no custom injector
+			// able to handle this type.
+			expr:  `f1()`,
+			funcs: []*decls.FunctionDecl{f1(t)},
+			extraOpts: []PlannerOption{
+
+				// injects custom type.
+				dummyDecorator(),
+				// lateBind will not process this node
+				// and throw an error.
+				LateBindCalls(),
+			},
+			in:      activation(&emptyActivation{}, f1_int),
+			progErr: fmt.Sprintf(errorUnknownCallNode, 1, &dummyEval{}),
+		},
+		{
+			name: "T08.03__OK_With_Multiple_LateBind_Calls",
+			// without overrides:
+			// - f1() -> 37
+			// - f1("hi") -> 2
+			// - f1(4,2) -> 6
+			// - f1(true,true,true) -> 3
+			// result: 37 + 2 + 6 + 3 = 48
+			// with overrides:
+			// - f1() -> 51
+			// - f1("hi") -> 4
+			// - f1(4,2) -> 2
+			// - f1(true,true,true) -> 0
+			// result: 51 + 4 + 2 + 0 = 57
+			expr:      `f1() + f1("hi") + f1(4,2) + f1(true,true,true)`,
+			funcs:     []*decls.FunctionDecl{f1(t)},
+			unchecked: false,
+			extraOpts: []PlannerOption{
+				LateBindCalls(),
+				LateBindCalls(), // this will not take effect.
+			},
+			in: activation(
+				&emptyActivation{},
+				f1_int,
+				f1_string_int,
+				f1_int_int_int,
+				f1_bool_bool_bool_int,
+			),
+			out: types.Int(57),
+		},
+	}
+
+	for _, tc := range testCases {
+
+		t.Run(tc.name, func(t *testing.T) {
+
+			// this is to control the use case scenarios where we
+			// need to explicitly add and configure LateBindCalls
+			if len(tc.extraOpts) == 0 {
+
+				// if it is empty, we add the default behaviour
+				// otherwise we expect the test case to explicitly
+				// configure the decorator.
+				tc.extraOpts = append(tc.extraOpts, LateBindCalls())
+			}
+
+			interpretable, activation, err := program(t, &tc, tc.extraOpts...)
+
+			if err != nil {
+
+				if len(tc.progErr) > 0 {
+
+					if !strings.Contains(err.Error(), tc.progErr) {
+						t.Fatalf("got %v, (%T), wanted program error with: %s", err.Error(), err, tc.progErr)
+					}
+					// if we have a program error, we cannot continue.
+					return
+
+				} else {
+
+					t.Fatalf("pre-condition failed: could not create program (cause: %v)", err)
+				}
+			}
+			got := interpretable.Eval(activation)
+			if len(tc.err) > 0 {
+				// we expect error
+				if !types.IsError(got) || !strings.Contains(got.(*types.Err).String(), tc.err) {
+					t.Fatalf("got %v (%T), wanted error: %s", got, got, tc.err)
+				}
+			} else {
+				want := tc.out.(ref.Val)
+				if got.Equal(want) != types.True {
+					t.Fatalf("got %v, wanted: %v", got, want)
+				}
+			}
+		})
+	}
+}
+
+// dummyEval is a test struct used to demonstrate
+// the behaviour of the OverloadInjector or its
+// absence during late binding.
+type dummyEval struct {
+	id       int64
+	function string
+	overload string
+	impl     func(...ref.Val) ref.Val
+}
+
+func (de *dummyEval) ID() int64                   { return de.id }
+func (de *dummyEval) Eval(ctx Activation) ref.Val { return types.LabelErrNode(de.id, de.impl()) }
+func (de *dummyEval) Function() string            { return de.function }
+func (de *dummyEval) OverloadID() string          { return de.overload }
+func (de *dummyEval) Args() []Interpretable       { return []Interpretable{} }
+
 func testContainer(name string) *containers.Container {
 	cont, _ := containers.NewContainer(containers.Name(name))
 	return cont

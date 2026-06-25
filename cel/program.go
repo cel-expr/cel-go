@@ -164,6 +164,8 @@ type prog struct {
 	callCostEstimator interpreter.ActualCostEstimator
 	costOptions       []interpreter.CostTrackerOption
 	costLimit         *uint64
+
+	lateBindOptions []interpreter.LateBindCallOption
 }
 
 // newProgram creates a program instance with an environment, an ast, and an optional list of
@@ -177,10 +179,11 @@ func newProgram(e *Env, a *ast.AST, opts []ProgramOption) (Program, error) {
 	// Ensure the default attribute factory is set after the adapter and provider are
 	// configured.
 	p := &prog{
-		Env:            e,
-		plannerOptions: []interpreter.PlannerOption{},
-		dispatcher:     disp,
-		costOptions:    []interpreter.CostTrackerOption{},
+		Env:             e,
+		plannerOptions:  []interpreter.PlannerOption{},
+		dispatcher:      disp,
+		costOptions:     []interpreter.CostTrackerOption{},
+		lateBindOptions: []interpreter.LateBindCallOption{},
 	}
 
 	// Configure the program via the ProgramOption values.
@@ -280,6 +283,20 @@ func newProgram(e *Env, a *ast.AST, opts []ProgramOption) (Program, error) {
 			plannerOptions = append(plannerOptions, observers...)
 		}
 	}
+
+	// add behaviour for latebinding calls.
+	if p.evalOpts&OptLateBindCalls != 0 {
+
+		// we need to ensure that the AST is checked otherwise
+		// we won't be able to resolve overloaded functions by
+		// overload identifiers
+		if !a.IsChecked() {
+			return nil, interpreter.UncheckedAstError()
+		}
+
+		plannerOptions = append(plannerOptions, interpreter.LateBindCalls(p.lateBindOptions...))
+	}
+
 	return p.initInterpretable(a, plannerOptions)
 }
 
@@ -322,6 +339,18 @@ func (p *prog) Eval(input any) (out ref.Val, det *EvalDetails, err error) {
 		}
 		defer frame.Close()
 	}
+
+	// before executing the evaluation if the late bind option was
+	// configured we ensure that the activation does have compatible
+	// overloads with the one maintained in the dispatcher.
+	if p.evalOpts&OptLateBindCalls != 0 {
+
+		err := interpreter.ValidateOverloads(p.dispatcher, vars)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+
 	if p.observable != nil {
 		det = &EvalDetails{}
 		out = p.observable.ObserveExec(frame, func(observed any) {

@@ -41,6 +41,7 @@ import (
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/google/cel-go/common/types/traits"
 	"github.com/google/cel-go/interpreter"
+	"github.com/google/cel-go/interpreter/functions"
 	"github.com/google/cel-go/parser"
 	"github.com/google/cel-go/test"
 
@@ -1208,6 +1209,215 @@ func TestContextEvalUnknowns(t *testing.T) {
 	}
 	if !reflect.DeepEqual(out, ctxOut) {
 		t.Errorf("got %v, wanted %v", out, ctxOut)
+	}
+}
+
+func TestEvalLateBinding(t *testing.T) {
+
+	// functions statically bound to function call nodes
+	// during parsing and program planning.
+
+	f1_int := func(_ ...ref.Val) ref.Val {
+		return types.Int(10)
+	}
+
+	f1_int_int := func(arg ref.Val) ref.Val {
+		return arg.(traits.Multiplier).Multiply(types.Int(2))
+	}
+
+	f1 := func() EnvOption {
+		return Function("f1",
+			Overload("f1_int", []*Type{}, types.IntType, FunctionBinding(f1_int)),
+			Overload("f1_int_int", []*Type{types.IntType}, types.IntType, UnaryBinding(f1_int_int)),
+		)
+	}
+
+	// functions supplied during evaluation to override the
+	// logic implemented in the static bindings.
+
+	f1_int_override := func() *functions.Overload {
+		return &functions.Overload{
+			Operator: "f1_int",
+			Function: func(_ ...ref.Val) ref.Val {
+
+				return types.Int(0)
+			},
+			NonStrict:    false,
+			OperandTrait: 0,
+		}
+	}
+
+	f1_int_int_override := func() *functions.Overload {
+		return &functions.Overload{
+			Operator: "f1_int_int",
+			Unary: func(arg ref.Val) ref.Val {
+				return arg.(traits.Adder).Add(types.Int(100))
+			},
+			NonStrict:    false,
+			OperandTrait: 0,
+		}
+	}
+
+	activation := func(t *testing.T, vars map[string]any, ovls ...*functions.Overload) Activation {
+		t.Helper()
+		act, err := NewActivation(vars)
+		if err == nil {
+			act, err = interpreter.NewLateBindActivation(act, ovls...)
+		}
+		if err != nil {
+			t.Fatalf("pre-condition failed: could not create activation (cause: %v)", err)
+		}
+		return act
+	}
+
+	// expectValue generates an expectation function that checks that the outcome of the
+	// evaluation has generated no error and has returned the value originally passed as
+	// argument. The comparision is performed by invoking Equal on the expected value and
+	// passing the outcome of the evaluation as argument.
+	expectValue := func(expected ref.Val) func(t *testing.T, actual ref.Val, _ *EvalDetails, err error) {
+
+		return func(t *testing.T, actual ref.Val, _ *EvalDetails, err error) {
+
+			if err != nil {
+				t.Errorf("unexpected error (cause: %v)", err)
+			}
+
+			if expected.Equal(actual) != types.True {
+				t.Errorf("unexpected value (got: %v, want: %v)", actual, expected)
+			}
+		}
+	}
+
+	// expectError generates an expectation function that checks whether the outcome of the
+	// execution of the test (program generation, and evaluation) has generated an error and
+	// that error contains a predefined message.
+	expectError := func(errMsg string) func(t *testing.T, _ ref.Val, _ *EvalDetails, err error) {
+
+		return func(t *testing.T, _ ref.Val, _ *EvalDetails, err error) {
+
+			if err == nil {
+				t.Fatal("expected error, but error is nil")
+			}
+
+			if !strings.Contains(err.Error(), errMsg) {
+				t.Errorf("the evaluation error does not contain expected message (got: %s, want: %s)", err.Error(), errMsg)
+			}
+		}
+	}
+
+	testCases := []struct {
+		name       string
+		env        *Env
+		expression string
+		parseOnly  bool
+		opts       []ProgramOption
+		activation Activation
+		expect     func(t *testing.T, out ref.Val, details *EvalDetails, err error)
+	}{
+		{
+			name:       "OK_Happy_Path_No_Overrides",
+			env:        testEnv(t, f1()),
+			expression: `f1() + f1(10)`,
+			parseOnly:  false,
+			opts:       []ProgramOption{EvalOptions(OptLateBindCalls)},
+			activation: NoVars(),
+			expect:     expectValue(types.Int(10 + 10*2)),
+		}, {
+			name: "OK_Happy_Path_With_Overrides",
+			env: testEnv(t,
+				Variable("a", types.IntType),
+				f1(),
+			),
+			expression: `f1() + f1(a)`,
+			parseOnly:  false,
+			opts:       []ProgramOption{EvalOptions(OptLateBindCalls)},
+			activation: activation(t,
+				map[string]any{
+					"a": 15,
+				},
+				f1_int_override(),
+			),
+			expect: expectValue(types.Int(0 + 15*2)),
+		}, {
+			name: "OK_Happy_Path_With_Overrides_Explicit_Program_Option",
+			env: testEnv(t,
+				Variable("a", types.IntType),
+				f1(),
+			),
+			expression: "f1() + f1(a)",
+			parseOnly:  false,
+			opts:       []ProgramOption{LateBindOptions()},
+			activation: activation(t,
+				map[string]any{
+					"a": 10,
+				},
+				f1_int_override(),
+				f1_int_int_override(),
+			),
+			expect: expectValue(types.Int(0 + 100 + 10)),
+		}, {
+			name:       "ERROR_Invalid_Overloads",
+			env:        testEnv(t, f1()),
+			expression: "f1() + f1(10)",
+			parseOnly:  false,
+			opts:       []ProgramOption{LateBindOptions()},
+			activation: activation(t, map[string]any{},
+				f1_int_override(),
+				&functions.Overload{
+					Operator: "f1_int_int",
+					Binary: func(lhs ref.Val, rhs ref.Val) ref.Val {
+						return types.Int(50)
+					},
+					NonStrict:    false,
+					OperandTrait: 0,
+				},
+			),
+			expect: expectError(
+				interpreter.OverloadSignatureError(
+					"<unknown>",
+					"f1_int_int",
+					"binary{ func(ref.Val, ref.Val) ref.Val }",
+					"unary{ func(ref.Val) ref.Val }",
+				).Error(),
+			),
+		}, {
+			name:       "ERROR_Unchecked_AST",
+			env:        testEnv(t, f1()),
+			expression: "f1 + f1(20)",
+			parseOnly:  true,
+			opts:       []ProgramOption{EvalOptions(OptLateBindCalls)},
+			activation: activation(t, map[string]any{}),
+			expect:     expectError(interpreter.UncheckedAstError().Error()),
+		},
+	}
+
+	for _, testCase := range testCases {
+
+		t.Run(testCase.name, func(t *testing.T) {
+
+			var ast *Ast
+			var issues *Issues
+
+			if testCase.parseOnly == true {
+				ast, issues = testCase.env.Parse(testCase.expression)
+			} else {
+				ast, issues = testCase.env.Compile(testCase.expression)
+			}
+
+			err := issues.Err()
+			if err != nil {
+				t.Fatalf("pre-condition failed could not parse/compile expression (cause: %v)", err)
+			}
+
+			prg, err := testCase.env.Program(ast, testCase.opts...)
+			if err != nil {
+				testCase.expect(t, nil, nil, err)
+			} else {
+
+				out, details, err := prg.Eval(testCase.activation)
+				testCase.expect(t, out, details, err)
+			}
+		})
 	}
 }
 

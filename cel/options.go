@@ -714,6 +714,12 @@ const (
 	//
 	// Deprecated: use ext.StringsValidateFormatCalls() as this option is now a no-op.
 	OptCheckStringFormat EvalOption = 1 << iota
+
+	// OptLateBindCalls enables overriding the binding of function overloads at evaluation time.
+	//
+	// This option works in concert with the a specific implementation of the activation that is
+	// wraps dispatcher, otherwise it defaults to standard behaviour.
+	OptLateBindCalls EvalOption = 1 << iota
 )
 
 // EvalOptions sets one or more evaluation options which may affect the evaluation or Result.
@@ -724,6 +730,18 @@ func EvalOptions(opts ...EvalOption) ProgramOption {
 		}
 		return p, nil
 	}
+}
+
+// LateBindOptions sets one of more LateBindCallOption and automatically
+// add the OptLateBindCalls to the evaluation options, to enable the late
+// binding behaviour.
+func LateBindOptions(opts ...interpreter.LateBindCallOption) ProgramOption {
+	return func(p *prog) (*prog, error) {
+		p.lateBindOptions = append(p.lateBindOptions, opts...)
+		p.evalOpts |= OptLateBindCalls
+		return p, nil
+	}
+
 }
 
 // InterruptCheckFrequency configures the number of iterations within a comprehension to evaluate

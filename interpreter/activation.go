@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/google/cel-go/common/functions"
 	"github.com/google/cel-go/common/types/ref"
 )
 
@@ -208,4 +209,144 @@ func AsPartialActivation(vars Activation) (PartialActivation, bool) {
 		return AsPartialActivation(vars.Parent())
 	}
 	return nil, false
+}
+
+// NewLateBindActivation creates an activation that wraps the given activation and
+// exposes the given function overloads to the evaluation. If the list of overloads
+// has duplicates or the given activation is nil, it will return an error.
+func NewLateBindActivation(activation Activation, overloads ...*functions.Overload) (LateBindActivation, error) {
+
+	dispatcher := NewDispatcher()
+	err := dispatcher.Add(overloads...)
+	if err != nil {
+		return nil, err
+	}
+
+	if activation == nil {
+		return nil, errors.New("cannot create a late bind activation with a nil activation")
+	}
+
+	return &lateBindActivation{
+		vars:       activation,
+		dispatcher: dispatcher,
+	}, nil
+}
+
+// LateBindActivation provides an interface that defines
+// the contract for exposing function overloads during
+// the evaluation.
+//
+// This interface enables the integration of external
+// implementations of the late bind behaviour, without
+// limiting the design to a given concrete type.
+type LateBindActivation interface {
+	Activation
+	// ResolveOverload resolves the function overload that is
+	// mapped to overloadId. Implementations of this function
+	// are expected to recursively navigate the activation tree
+	// by respecting the parent-child relationships to find the
+	// first overload definition that is mapped to overloadId.
+	ResolveOverload(overloadId string) *functions.Overload
+	// ResolveOverloads returns a Dispatcher implementation that maintains all
+	// the overload functions that are defined starting from the instance of the
+	// concrete type implementing this method. The list is guaranteed to be
+	// unique (i.e. with no duplicates). Should duplicates be found, only the
+	// first occurrence of the overload is added to the list, thus ensuring
+	// that the correct behaviour is being implemented.
+	ResolveOverloads() Dispatcher
+}
+
+// lateBindActivation is an Activation implementation
+// that carries a dispatcher which can be used to
+// supply overrides for function overloads during
+// evaluation.
+type lateBindActivation struct {
+	vars       Activation
+	dispatcher Dispatcher
+}
+
+// ResolveName implemments Activation.ResolveName(string). The
+// method defers the name resolution to the activation instance
+// that is wrapped.
+func (activation *lateBindActivation) ResolveName(name string) (any, bool) {
+	return activation.vars.ResolveName(name)
+}
+
+// Parent implements Activation.Parent() and returns the
+// activation that is wrapped by this struct.
+func (activation *lateBindActivation) Parent() Activation {
+	return activation.vars
+}
+
+// ResolveOverload resolves function overload that is mapped by
+// the given overloadId. The implementation first checks if the
+// dispatcher configured with the current activation defines an
+// overload for overloadId, and if found it returns such overload.
+// If the dispatcher does not define such overloads the function
+// recursively checks the activation to find any LateBindActivation
+// that might declare such overload.
+func (activation *lateBindActivation) ResolveOverload(overloadId string) *functions.Overload {
+
+	if activation.dispatcher != nil {
+		ovl, found := activation.dispatcher.FindOverload(overloadId)
+		if found {
+			return ovl
+		}
+	}
+
+	return resolveOverload(overloadId, activation.vars)
+}
+
+// ResolveOverloads returns a Dispatcher implementation that aggregates
+// all function overloads definition that are accessible from the current
+// activation reference. The preference is given to the overloads of the
+// defined dispatcher, and then the hierarchy of activations originating
+// from the configured parent activation. If there are any duplicates
+func (activation *lateBindActivation) ResolveOverloads() Dispatcher {
+
+	dispatcher := NewDispatcher()
+	for _, ovlId := range activation.dispatcher.OverloadIds() {
+		ovl, _ := activation.dispatcher.FindOverload(ovlId)
+		dispatcher.Add(ovl)
+	}
+
+	resolveAllOverloads(dispatcher, activation.vars)
+
+	return dispatcher
+}
+
+// resolveOverload travels the hierarchy of activations originating from the given
+// Activation implementation to find the overload associatd to overloadId. Since the
+// Activation APIs allow for different types of activations and compositions we need
+// to ensure that if there is any valid overload that is mapped to overloadId we can
+// find it.
+func resolveOverload(overloadId string, activation Activation) *functions.Overload {
+
+	if activation == nil {
+		return nil
+	}
+
+	switch act := activation.(type) {
+	case *mapActivation:
+		return nil
+	case *emptyActivation:
+		return nil
+	case *partActivation:
+		return resolveOverload(overloadId, act.Activation)
+	case *hierarchicalActivation:
+		ovl := resolveOverload(overloadId, act.child)
+		if ovl == nil {
+			return resolveOverload(overloadId, act.parent)
+		}
+		return ovl
+	case LateBindActivation:
+
+		return act.ResolveOverload(overloadId)
+	default:
+		// this is to cater for all other implementations
+		// that we don't known about but that rightfully
+		// implement the Activation interface.
+		return resolveOverload(overloadId, act.Parent())
+	}
+
 }
