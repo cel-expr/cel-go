@@ -197,6 +197,27 @@ func TestEncodersCosts(t *testing.T) {
 			actualCost:    3,
 			version:       1,
 		},
+		{
+			name:          "encode_empty_bytes_v1_literal",
+			expr:          "base64.encode(b'') == ''",
+			estimatedCost: checker.FixedCostEstimate(1),
+			actualCost:    1,
+			version:       1,
+		},
+		{
+			name:          "decode_empty_string_v1_literal",
+			expr:          "base64.decode('') == b''",
+			estimatedCost: checker.FixedCostEstimate(1),
+			actualCost:    1,
+			version:       1,
+		},
+		{
+			name:          "encode_non_utf8_bytes_v1_literal",
+			expr:          "base64.encode(b'\xff\xfe\xfd') != '////'",
+			estimatedCost: checker.FixedCostEstimate(3),
+			actualCost:    3,
+			version:       1,
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -217,5 +238,30 @@ func TestEncodersCosts(t *testing.T) {
 				testEvalWithCost(t, env, ast, tc.in, tc.actualCost)
 			}
 		})
+	}
+}
+
+func TestDecodeNonBase64Error(t *testing.T) {
+	env := testEncodersCostsEnv(t, 1)
+	pAst, iss := env.Parse("base64.decode('abc-') == b''")
+	if iss.Err() != nil {
+		t.Fatalf("env.Parse() failed: %v", iss.Err())
+	}
+	cAst, iss := env.Check(pAst)
+	if iss.Err() != nil {
+		t.Fatalf("env.Check() failed: %v", iss.Err())
+	}
+	testCheckCost(t, env, cAst, nil, checker.FixedCostEstimate(2))
+	prgOpts := []cel.ProgramOption{}
+	if cAst.IsChecked() {
+		prgOpts = append(prgOpts, cel.CostTracking(nil))
+	}
+	prg, err := env.Program(cAst, prgOpts...)
+	if err != nil {
+		t.Fatalf("env.Program() failed: %v", err)
+	}
+	_, _, err = prg.Eval(cel.NoVars())
+	if err == nil {
+		t.Fatal("expected eval error for non-base64 string decoding, got nil")
 	}
 }
