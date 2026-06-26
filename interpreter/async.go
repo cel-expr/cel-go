@@ -118,12 +118,11 @@ type asyncCallStateTracker struct {
 	// calls buckets call states by a composite hash of (node id, overload, string/int/double/uint/bool args).
 	// A single AST node id may host many concurrently-live calls when it is evaluated inside a
 	// comprehension (once per element with different arguments), so each bucket may hold more
-	// than one state. The exact match within a bucket is resolved via asyncCallState.equals,
+	// than one state. The exact match within a bucket is resolved via asyncCallState.matches,
 	// which applies CEL's full equality semantics to the arguments.
-	calls        map[uint64][]*asyncCallState
-	callsByID    map[int64]*asyncCallState
-	nextCallID   atomic.Int64
-	pendingCalls atomic.Int32
+	calls      map[uint64][]*asyncCallState
+	callsByID  map[int64]*asyncCallState
+	nextCallID atomic.Int64
 }
 
 func newAsyncCallStateTracker() *asyncCallStateTracker {
@@ -147,7 +146,7 @@ var (
 // Only string, int, double, uint, and bool argument values contribute to the hash. More complex types
 // rely on a richer notion of equivalence (e.g. unordered maps, proto equality, custom types)
 // that a byte-level hash cannot capture safely, so they are intentionally excluded from the key
-// and are instead disambiguated within the bucket by asyncCallState.equals.
+// and are instead disambiguated within the bucket by asyncCallState.matches.
 func hashCall(id int64, overload string, args []ref.Val) uint64 {
 	h := fnv.New64a()
 	var idBuf [8]byte
@@ -180,6 +179,7 @@ func hashCall(id int64, overload string, args []ref.Val) uint64 {
 			h.Write(hashNumberMarker)
 			if math.IsNaN(float64(v)) {
 				h.Write([]byte("NaN"))
+				h.Write(hashZeroMarker)
 				continue
 			}
 			// Normalize -0.0 to 0.0. Go will treat -0.0 as 0.0 at compile time,
@@ -191,7 +191,7 @@ func hashCall(id int64, overload string, args []ref.Val) uint64 {
 			binary.LittleEndian.PutUint64(buf[:], math.Float64bits(float64(v)))
 			h.Write(buf[:])
 		default:
-			// Value intentionally omitted; bucket membership falls back to equals.
+			// Value intentionally omitted; bucket membership falls back to matches.
 			h.Write(hashDefaultMarker)
 		}
 		// Separator to avoid cross-argument collisions, e.g. ("a", "bc") vs ("ab", "c").
@@ -202,9 +202,9 @@ func hashCall(id int64, overload string, args []ref.Val) uint64 {
 
 // findInBucket returns the call state in the bucket matching the same node id and call identity,
 // or nil if no match is present.
-func findInBucket(bucket []*asyncCallState, id int64, want *asyncCallState) *asyncCallState {
+func findInBucket(bucket []*asyncCallState, id int64, function, overload string, args []ref.Val) *asyncCallState {
 	for _, acs := range bucket {
-		if acs.id == id && acs.equals(want) {
+		if acs.matches(id, function, overload, args) {
 			return acs
 		}
 	}
@@ -215,10 +215,9 @@ func findInBucket(bucket []*asyncCallState, id int64, want *asyncCallState) *asy
 // returns a new one. A newly registered call is assigned a unique callID and counted as pending.
 func (t *asyncCallStateTracker) getOrCreate(id int64, function, overload string, argVals []ref.Val, impl functions.AsyncOp, gate *asyncGate) *asyncCallState {
 	key := hashCall(id, overload, argVals)
-	potentialState := newAsyncCallState(id, function, overload, argVals, impl)
 
 	t.mu.RLock()
-	acs := findInBucket(t.calls[key], id, potentialState)
+	acs := findInBucket(t.calls[key], id, function, overload, argVals)
 	t.mu.RUnlock()
 	if acs != nil {
 		return acs
@@ -227,20 +226,18 @@ func (t *asyncCallStateTracker) getOrCreate(id int64, function, overload string,
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	// Check again in case it was created while waiting for the lock.
-	if acs := findInBucket(t.calls[key], id, potentialState); acs != nil {
+	if acs := findInBucket(t.calls[key], id, function, overload, argVals); acs != nil {
 		return acs
 	}
 
 	// Assign a new unique call ID for this async call.
+	acs = newAsyncCallState(id, function, overload, argVals, impl)
 	callID := t.nextCallID.Add(1)
-	potentialState.callID = callID
-	potentialState.gate = gate
-	t.calls[key] = append(t.calls[key], potentialState)
-	t.callsByID[callID] = potentialState
-	// Note: pendingCalls is incremented when the call is actually launched (see launch), not at
-	// registration, so that "pending" reflects in-flight calls and excludes calls deferred by the
-	// launch limiter. Counting deferred calls as pending would deadlock DrainAll.
-	return potentialState
+	acs.callID = callID
+	acs.gate = gate
+	t.calls[key] = append(t.calls[key], acs)
+	t.callsByID[callID] = acs
+	return acs
 }
 
 func (t *asyncCallStateTracker) getByID(callID int64) *asyncCallState {
@@ -358,19 +355,19 @@ func (t *asyncCallStateTracker) launch(ctx context.Context, acs *asyncCallState,
 	return types.NewUnknown(acs.callID, nil)
 }
 
-// equals reports whether two call states refer to the same function, overload, and arguments.
-func (acs *asyncCallState) equals(other *asyncCallState) bool {
-	if acs == nil || other == nil {
+// matches reports whether two call states refer to the same function, overload, and arguments.
+func (acs *asyncCallState) matches(id int64, function, overload string, args []ref.Val) bool {
+	if acs == nil {
 		return false
 	}
-	if acs.function != other.function || acs.overload != other.overload {
+	if acs.id != id || acs.function != function || acs.overload != overload {
 		return false
 	}
-	if len(acs.argVals) != len(other.argVals) {
+	if len(acs.argVals) != len(args) {
 		return false
 	}
 	for i, v := range acs.argVals {
-		otherV := other.argVals[i]
+		otherV := args[i]
 		if types.Equal(v, otherV) == types.True {
 			continue
 		}
@@ -419,7 +416,6 @@ func (pool *asyncCallTrackerPool) release(tracker *asyncCallStateTracker) {
 		}
 	}
 	tracker.nextCallID.Store(0)
-	tracker.pendingCalls.Store(0)
 	tracker.mu.Unlock()
 	pool.Pool.Put(tracker)
 }

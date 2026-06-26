@@ -247,7 +247,7 @@ func TestHashCall(t *testing.T) {
 		{
 			name:     "node id 1 with double arg NaN",
 			input:    hashInput{1, overloads.ContainsString, []ref.Val{types.Double(math.NaN())}},
-			wantHash: 4356663283625852078,
+			wantHash: 4464412628189895594,
 		},
 		{
 			name:     "node id 1 with string arg NaN",
@@ -546,7 +546,7 @@ func TestAsyncTrackerPoolReleaseClearsState(t *testing.T) {
 	}
 }
 
-func TestAsyncCallStateEquals(t *testing.T) {
+func TestAsyncCallStateMatches(t *testing.T) {
 	mk := func(fn, ov string, args ...ref.Val) *asyncCallState {
 		return newAsyncCallState(1, fn, ov, args, nil)
 	}
@@ -561,19 +561,18 @@ func TestAsyncCallStateEquals(t *testing.T) {
 		{"diff overload", mk("fn", "other", types.Int(1), types.String("a")), false},
 		{"diff arg value", mk("fn", "ov", types.Int(2), types.String("a")), false},
 		{"diff arity", mk("fn", "ov", types.Int(1)), false},
-		{"nil other", nil, false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := base.equals(tc.other); got != tc.want {
-				t.Errorf("equals() = %v, wanted %v", got, tc.want)
+			if got := base.matches(1, tc.other.function, tc.other.overload, tc.other.argVals); got != tc.want {
+				t.Errorf("matches() = %v, wanted %v", got, tc.want)
 			}
 		})
 	}
 	t.Run("nil receiver", func(t *testing.T) {
 		var nilState *asyncCallState
-		if nilState.equals(base) {
-			t.Error("nil.equals() returned true")
+		if nilState.matches(1, base.function, base.overload, base.argVals) {
+			t.Error("nil.matches() returned true")
 		}
 	})
 	t.Run("NaN equivalence", func(t *testing.T) {
@@ -593,8 +592,8 @@ func TestAsyncCallStateEquals(t *testing.T) {
 		}
 		for _, tc := range tests {
 			t.Run(tc.name, func(t *testing.T) {
-				if got := tc.state.equals(tc.other); got != tc.want {
-					t.Errorf("equals() = %v, wanted %v", got, tc.want)
+				if got := tc.state.matches(1, tc.other.function, tc.other.overload, tc.other.argVals); got != tc.want {
+					t.Errorf("matches() = %v, wanted %v", got, tc.want)
 				}
 			})
 		}
