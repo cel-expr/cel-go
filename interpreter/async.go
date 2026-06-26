@@ -213,7 +213,7 @@ func findInBucket(bucket []*asyncCallState, id int64, want *asyncCallState) *asy
 
 // getOrCreate returns the existing call state for the (node id, args) tuple, or registers and
 // returns a new one. A newly registered call is assigned a unique callID and counted as pending.
-func (t *asyncCallStateTracker) getOrCreate(id int64, function, overload string, argVals []ref.Val, impl functions.AsyncOp, completions chan<- int64) *asyncCallState {
+func (t *asyncCallStateTracker) getOrCreate(id int64, function, overload string, argVals []ref.Val, impl functions.AsyncOp, gate *asyncGate) *asyncCallState {
 	key := hashCall(id, overload, argVals)
 	potentialState := newAsyncCallState(id, function, overload, argVals, impl)
 
@@ -234,7 +234,7 @@ func (t *asyncCallStateTracker) getOrCreate(id int64, function, overload string,
 	// Assign a new unique call ID for this async call.
 	callID := t.nextCallID.Add(1)
 	potentialState.callID = callID
-	potentialState.completions = completions
+	potentialState.gate = gate
 	t.calls[key] = append(t.calls[key], potentialState)
 	t.callsByID[callID] = potentialState
 	// Note: pendingCalls is incremented when the call is actually launched (see launch), not at
@@ -247,14 +247,6 @@ func (t *asyncCallStateTracker) getByID(callID int64) *asyncCallState {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	return t.callsByID[callID]
-}
-
-func (t *asyncCallStateTracker) pendingCount() int {
-	return int(t.pendingCalls.Load())
-}
-
-func (t *asyncCallStateTracker) notifyCompletion(_ int64) {
-	t.pendingCalls.Add(-1)
 }
 
 func newAsyncCallState(id int64, function, overload string, argVals []ref.Val, impl functions.AsyncOp) *asyncCallState {
@@ -280,7 +272,7 @@ type asyncCallState struct {
 	started bool
 	result  ref.Val
 
-	completions chan<- int64
+	gate *asyncGate
 }
 
 // CallID returns the unique identifier for this async call invocation.
@@ -308,7 +300,7 @@ func (acs *asyncCallState) Overload() string {
 // blocking it here while completing calls block on an undrained completion channel would deadlock.
 // The slot is held by the launched goroutine and released when it exits, so the number of live
 // async goroutines is bounded by the semaphore capacity.
-func (t *asyncCallStateTracker) launch(ctx context.Context, acs *asyncCallState, observer AsyncObserver, semaphore chan struct{}) ref.Val {
+func (t *asyncCallStateTracker) launch(ctx context.Context, acs *asyncCallState, observer AsyncObserver) ref.Val {
 	acs.mu.RLock()
 	res := acs.result
 	started := acs.started
@@ -320,54 +312,26 @@ func (t *asyncCallStateTracker) launch(ctx context.Context, acs *asyncCallState,
 		return types.NewUnknown(acs.callID, nil)
 	}
 
-	if semaphore != nil {
-		// Non-blocking try-acquire of a concurrency slot. If the semaphore channel is full,
-		// we immediately fallback to default to return an Unknown. This prevents blocking
-		// the single-threaded evaluator, allowing it to continue with other evaluations.
-		// The call will be retried in a future evaluation pass.
-		select {
-		case semaphore <- struct{}{}:
-		default:
-			// No launch slot available; defer to a later pass.
-			return types.NewUnknown(acs.callID, nil)
-		}
+	gate := acs.gate
+	if !gate.TryAcquire() {
+		return types.NewUnknown(acs.callID, nil)
 	}
 	acs.mu.Lock()
 	if acs.started || acs.result != nil {
 		// Defensive: the evaluator is single-threaded so this should not happen, but if it does,
 		// return the reserved slot rather than leak it.
 		acs.mu.Unlock()
-		if semaphore != nil {
-			<-semaphore
-		}
+		gate.Release()
 		return types.NewUnknown(acs.callID, nil)
 	}
 	acs.started = true
 	acs.mu.Unlock()
-	t.pendingCalls.Add(1)
 
 	if observer != nil {
 		observer.OnCallStarted(acs.callID, acs.function, acs.overload, acs.argVals)
 	}
 	go func() {
-		if semaphore != nil {
-			// Release the concurrency slot when this call finishes or is cancelled.
-			defer func() { <-semaphore }()
-		}
-		if acs.completions != nil {
-			defer func() {
-				// Prioritize context cancellation to prevent racy completion signals.
-				if ctx.Err() != nil {
-					return
-				}
-				// Signal completion to the evaluator. Use a select with ctx.Done() to prevent
-				// the goroutine from leaking if the evaluator has already timed out or aborted.
-				select {
-				case acs.completions <- acs.callID:
-				case <-ctx.Done():
-				}
-			}()
-		}
+		defer gate.Complete(ctx, acs.callID)
 
 		ch := acs.impl(ctx, acs.argVals...)
 		// Early terminate with a CEL error when an implementation returns an empty channel.
@@ -454,8 +418,8 @@ func (pool *asyncCallTrackerPool) release(tracker *asyncCallStateTracker) {
 			delete(tracker.callsByID, k)
 		}
 	}
-	tracker.pendingCalls.Store(0)
 	tracker.nextCallID.Store(0)
+	tracker.pendingCalls.Store(0)
 	tracker.mu.Unlock()
 	pool.Pool.Put(tracker)
 }
@@ -471,3 +435,78 @@ func newAsyncCallTrackerPool() *asyncCallTrackerPool {
 }
 
 var asyncCallStateTrackerPool = newAsyncCallTrackerPool()
+
+// asyncGate coordinates async call admission control and completion signaling.
+type asyncGate struct {
+	semaphore   chan struct{}
+	completions chan<- int64
+	activeCalls atomic.Int32
+}
+
+func newAsyncGate(maxConcurrency int, completions chan<- int64) *asyncGate {
+	var sem chan struct{}
+	if maxConcurrency > 0 {
+		sem = make(chan struct{}, maxConcurrency)
+	}
+	return &asyncGate{
+		semaphore:   sem,
+		completions: completions,
+	}
+}
+
+// TryAcquire attempts to acquire a concurrency slot and increments the active calls count.
+func (g *asyncGate) TryAcquire() bool {
+	if g == nil {
+		return true
+	}
+	if g.semaphore != nil {
+		select {
+		case g.semaphore <- struct{}{}:
+		default:
+			return false
+		}
+	}
+	g.activeCalls.Add(1)
+	return true
+}
+
+// Release releases a concurrency slot and decrements the active calls count (used for defensive recovery).
+func (g *asyncGate) Release() {
+	if g == nil {
+		return
+	}
+	if g.semaphore != nil {
+		select {
+		case <-g.semaphore:
+		default:
+		}
+	}
+	g.activeCalls.Add(-1)
+}
+
+// Complete releases a concurrency slot and notifies completions.
+func (g *asyncGate) Complete(ctx context.Context, callID int64) {
+	if g == nil {
+		return
+	}
+	g.Release()
+
+	if g.completions != nil {
+		// Prioritize context cancellation to prevent racy completion signals.
+		if ctx.Err() != nil {
+			return
+		}
+		select {
+		case g.completions <- callID:
+		case <-ctx.Done():
+		}
+	}
+}
+
+// ActiveCalls returns the number of active asynchronous calls.
+func (g *asyncGate) ActiveCalls() int {
+	if g == nil {
+		return 0
+	}
+	return int(g.activeCalls.Load())
+}

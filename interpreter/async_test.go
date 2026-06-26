@@ -70,8 +70,7 @@ func awaitResult(t *testing.T, frame *ExecutionFrame, completions <-chan int64, 
 			return res
 		}
 		select {
-		case callID := <-completions:
-			frame.NotifyCompletion(callID)
+		case <-completions:
 		case <-deadline:
 			t.Fatal("timed out waiting for async result")
 		}
@@ -89,8 +88,8 @@ func TestComputeResultWithoutContext(t *testing.T) {
 	if !types.IsError(res) {
 		t.Errorf("ComputeResult() got %v, wanted error when tracking uninitialized", res)
 	}
-	if frame.PendingAsyncCalls() != 0 {
-		t.Errorf("PendingAsyncCalls() = %d, wanted 0", frame.PendingAsyncCalls())
+	if frame.ActiveAsyncCalls() != 0 {
+		t.Errorf("ActiveAsyncCalls() = %d, wanted 0", frame.ActiveAsyncCalls())
 	}
 	if call := frame.AsyncCall(1); call != nil {
 		t.Errorf("AsyncCall() = %v, wanted nil", call)
@@ -124,11 +123,12 @@ func TestTrackerDedupAndCallIDs(t *testing.T) {
 	// process-global frame/tracker pools used by ExecutionFrame.
 	tracker := newAsyncCallStateTracker()
 	completions := make(chan int64, 4)
+	gate := newAsyncGate(0, completions)
 	impl := asyncReturning(types.Int(1), nil)
 
 	// Same node id, same args, invoked repeatedly: must dedup to a single registered call.
-	a1 := tracker.getOrCreate(1, "fn", "fn_int", []ref.Val{types.Int(1)}, impl, completions)
-	a2 := tracker.getOrCreate(1, "fn", "fn_int", []ref.Val{types.Int(1)}, impl, completions)
+	a1 := tracker.getOrCreate(1, "fn", "fn_int", []ref.Val{types.Int(1)}, impl, gate)
+	a2 := tracker.getOrCreate(1, "fn", "fn_int", []ref.Val{types.Int(1)}, impl, gate)
 	if a1 != a2 {
 		t.Error("getOrCreate returned distinct states for identical (id, args)")
 	}
@@ -140,7 +140,7 @@ func TestTrackerDedupAndCallIDs(t *testing.T) {
 	}
 
 	// Same node id, different args: a new call must be registered (re-evaluation with new inputs).
-	a3 := tracker.getOrCreate(1, "fn", "fn_int", []ref.Val{types.Int(2)}, impl, completions)
+	a3 := tracker.getOrCreate(1, "fn", "fn_int", []ref.Val{types.Int(2)}, impl, gate)
 	if a3.CallID() == a1.CallID() {
 		t.Error("arg change reused the prior callID, wanted a fresh call")
 	}
@@ -148,8 +148,8 @@ func TestTrackerDedupAndCallIDs(t *testing.T) {
 		t.Errorf("getByID(%d) did not return the second registered call", a3.CallID())
 	}
 	// Registration alone does not mark a call as in-flight; pending counts launched calls only.
-	if got := tracker.pendingCount(); got != 0 {
-		t.Errorf("pendingCount() after registration only = %d, wanted 0", got)
+	if got := gate.ActiveCalls(); got != 0 {
+		t.Errorf("ActiveCalls() after registration only = %d, wanted 0", got)
 	}
 }
 
@@ -285,6 +285,7 @@ func TestTrackerComprehensionReuse(t *testing.T) {
 	// relaunch every iteration and never converge.
 	tracker := newAsyncCallStateTracker()
 	completions := make(chan int64, 8)
+	gate := newAsyncGate(0, completions)
 	impl := asyncReturning(types.Int(0), nil)
 	const id = int64(1)
 
@@ -295,7 +296,7 @@ func TestTrackerComprehensionReuse(t *testing.T) {
 	}
 	states := make([]*asyncCallState, len(args))
 	for i, a := range args {
-		states[i] = tracker.getOrCreate(id, "fn", "fn_int", a, impl, completions)
+		states[i] = tracker.getOrCreate(id, "fn", "fn_int", a, impl, gate)
 	}
 
 	// Each distinct argument set is a distinct, uniquely-identified call.
@@ -310,14 +311,14 @@ func TestTrackerComprehensionReuse(t *testing.T) {
 	// Re-evaluation: every prior (id, args) tuple must resolve to its existing state and must
 	// not register a new call.
 	for i, a := range args {
-		if got := tracker.getOrCreate(id, "fn", "fn_int", a, impl, completions); got != states[i] {
+		if got := tracker.getOrCreate(id, "fn", "fn_int", a, impl, gate); got != states[i] {
 			t.Errorf("re-lookup of args %v returned a new state, wanted the existing one", a)
 		}
 	}
 
 	// Identical string arguments at the same node dedup to a single call.
-	s1 := tracker.getOrCreate(2, "fn", "fn_str", []ref.Val{types.String("k")}, impl, completions)
-	s2 := tracker.getOrCreate(2, "fn", "fn_str", []ref.Val{types.String("k")}, impl, completions)
+	s1 := tracker.getOrCreate(2, "fn", "fn_str", []ref.Val{types.String("k")}, impl, gate)
+	s2 := tracker.getOrCreate(2, "fn", "fn_str", []ref.Val{types.String("k")}, impl, gate)
 	if s1 != s2 {
 		t.Error("identical string args did not dedup to a single call")
 	}
@@ -326,10 +327,11 @@ func TestTrackerComprehensionReuse(t *testing.T) {
 func TestTrackerRegistrationLookup(t *testing.T) {
 	tracker := newAsyncCallStateTracker()
 	completions := make(chan int64, 2)
+	gate := newAsyncGate(0, completions)
 	impl := asyncReturning(types.Int(1), nil)
 
-	a := tracker.getOrCreate(1, "fn", "a", []ref.Val{types.Int(1)}, impl, completions)
-	b := tracker.getOrCreate(2, "fn", "b", []ref.Val{types.Int(2)}, impl, completions)
+	a := tracker.getOrCreate(1, "fn", "a", []ref.Val{types.Int(1)}, impl, gate)
+	b := tracker.getOrCreate(2, "fn", "b", []ref.Val{types.Int(2)}, impl, gate)
 
 	// Registered calls must be retrievable by callID.
 	for _, want := range []*asyncCallState{a, b} {
@@ -415,7 +417,7 @@ func TestLaunchAdmissionAndBounding(t *testing.T) {
 
 	// A single evaluation pass: attempt to launch all calls (distinct node ids).
 	pass := func() {
-		for i := 0; i < total; i++ {
+		for i := range total {
 			frame.ComputeResult(int64(i+1), "fn", "fn_int", impl, []ref.Val{types.Int(int64(i))})
 		}
 	}
@@ -423,8 +425,8 @@ func TestLaunchAdmissionAndBounding(t *testing.T) {
 	// First pass admits only `limit` launches; the rest are deferred. pending is updated
 	// synchronously as calls are admitted, so it must equal the limit immediately.
 	pass()
-	if got := frame.PendingAsyncCalls(); got != limit {
-		t.Fatalf("PendingAsyncCalls() after first pass = %d, wanted %d", got, limit)
+	if got := frame.ActiveAsyncCalls(); got != limit {
+		t.Fatalf("ActiveAsyncCalls() after first pass = %d, wanted %d", got, limit)
 	}
 
 	// Drive completions and re-evaluate until every call has resolved, simulating ConcurrentEval.
@@ -435,7 +437,6 @@ func TestLaunchAdmissionAndBounding(t *testing.T) {
 		pass() // re-evaluate: launch any newly-admissible calls
 		select {
 		case id := <-completions:
-			frame.NotifyCompletion(id)
 			done[id] = true
 		case <-deadline:
 			t.Fatalf("only %d/%d calls completed; maxLive=%d", len(done), total, maxLive.Load())
@@ -445,8 +446,8 @@ func TestLaunchAdmissionAndBounding(t *testing.T) {
 	if got := maxLive.Load(); got > limit {
 		t.Errorf("max concurrent launches = %d, wanted <= %d", got, limit)
 	}
-	if got := frame.PendingAsyncCalls(); got != 0 {
-		t.Errorf("PendingAsyncCalls() after all completions = %d, wanted 0", got)
+	if got := frame.ActiveAsyncCalls(); got != 0 {
+		t.Errorf("ActiveAsyncCalls() after all completions = %d, wanted 0", got)
 	}
 }
 
@@ -461,12 +462,17 @@ func TestLaunchUnlimitedWhenNoSemaphore(t *testing.T) {
 		t.Fatalf("SetCompletions() failed: %v", err)
 	}
 
+	release := make(chan struct{})
+	defer close(release)
+	var live, maxLive atomic.Int32
+	impl := asyncControllable(release, &live, &maxLive)
+
 	const total = 5
 	for i := 0; i < total; i++ {
-		frame.ComputeResult(int64(i+1), "fn", "fn_int", asyncReturning(types.Int(int64(i)), nil), []ref.Val{types.Int(int64(i))})
+		frame.ComputeResult(int64(i+1), "fn", "fn_int", impl, []ref.Val{types.Int(int64(i))})
 	}
-	if got := frame.PendingAsyncCalls(); got != total {
-		t.Errorf("PendingAsyncCalls() with no limit = %d, wanted %d", got, total)
+	if got := frame.ActiveAsyncCalls(); got != total {
+		t.Errorf("ActiveAsyncCalls() with no limit = %d, wanted %d", got, total)
 	}
 }
 
@@ -514,20 +520,16 @@ func TestAsyncCallStateCancellation(t *testing.T) {
 func TestAsyncTrackerPoolReleaseClearsState(t *testing.T) {
 	tracker := newAsyncCallStateTracker()
 	completions := make(chan int64, 4)
+	gate := newAsyncGate(0, completions)
 	for i := int64(1); i <= 3; i++ {
-		tracker.getOrCreate(i, "fn", "ov", []ref.Val{types.Int(i)}, asyncReturning(types.Int(i), nil), completions)
+		tracker.getOrCreate(i, "fn", "ov", []ref.Val{types.Int(i)}, asyncReturning(types.Int(i), nil), gate)
 	}
-	// Simulate launched calls so the release path is exercised against non-zero in-flight state.
-	tracker.pendingCalls.Store(3)
 	if tracker.getByID(2) == nil {
 		t.Fatal("getByID(2) = nil before release, wanted a call record")
 	}
 
 	asyncCallStateTrackerPool.release(tracker)
 
-	if got := tracker.pendingCount(); got != 0 {
-		t.Errorf("pendingCount() after release = %d, wanted 0", got)
-	}
 	if got := len(tracker.calls); got != 0 {
 		t.Errorf("calls map size after release = %d, wanted 0", got)
 	}
@@ -538,7 +540,7 @@ func TestAsyncTrackerPoolReleaseClearsState(t *testing.T) {
 		t.Errorf("nextCallID after release = %d, wanted 0", got)
 	}
 	// A released tracker is safe to reuse: callIDs restart and bookkeeping is fresh.
-	acs := tracker.getOrCreate(1, "fn", "ov", []ref.Val{types.Int(1)}, asyncReturning(types.Int(1), nil), completions)
+	acs := tracker.getOrCreate(1, "fn", "ov", []ref.Val{types.Int(1)}, asyncReturning(types.Int(1), nil), gate)
 	if acs.CallID() != 1 {
 		t.Errorf("reused tracker assigned callID %d, wanted 1", acs.CallID())
 	}
@@ -612,25 +614,25 @@ func TestExecutionFrameChildSharesAsyncContext(t *testing.T) {
 
 	// Counts are taken relative to a baseline, since ExecutionFrame draws its tracker from a
 	// process-global pool whose starting pending count is not guaranteed to be zero.
-	base := frame.PendingAsyncCalls()
+	base := frame.ActiveAsyncCalls()
 
 	child := frame.Push(EmptyActivation())
-	if got := child.PendingAsyncCalls(); got != base {
-		t.Errorf("child PendingAsyncCalls() = %d, wanted %d (shared parent ctx)", got, base)
+	if got := child.ActiveAsyncCalls(); got != base {
+		t.Errorf("child ActiveAsyncCalls() = %d, wanted %d (shared parent ctx)", got, base)
 	}
 
 	// A call launched from the child frame must be visible through the shared parent tracker.
 	child.ComputeResult(1, "fn", "fn_int", asyncReturning(types.Int(5), nil), []ref.Val{types.Int(1)})
-	if got := child.PendingAsyncCalls(); got != base+1 {
-		t.Errorf("child PendingAsyncCalls() after launch = %d, wanted %d", got, base+1)
+	if got := child.ActiveAsyncCalls(); got != base+1 {
+		t.Errorf("child ActiveAsyncCalls() after launch = %d, wanted %d", got, base+1)
 	}
 
 	parent := child.Pop()
 	if parent != frame {
 		t.Fatalf("Pop() did not return the parent frame")
 	}
-	if got := frame.PendingAsyncCalls(); got != base+1 {
-		t.Errorf("parent PendingAsyncCalls() after Pop = %d, wanted %d", got, base+1)
+	if got := frame.ActiveAsyncCalls(); got != base+1 {
+		t.Errorf("parent ActiveAsyncCalls() after Pop = %d, wanted %d", got, base+1)
 	}
 	// The launched call is retrievable via the parent frame's AsyncCall accessor.
 	select {
@@ -638,7 +640,6 @@ func TestExecutionFrameChildSharesAsyncContext(t *testing.T) {
 		if call := frame.AsyncCall(callID); call == nil {
 			t.Errorf("AsyncCall(%d) = nil, wanted a call record from the shared tracker", callID)
 		}
-		frame.NotifyCompletion(callID)
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for child call completion")
 	}
@@ -710,10 +711,9 @@ func TestEvalAsyncFuncLifecycle(t *testing.T) {
 		t.Errorf("Exec() first call got %v, wanted Unknown", res)
 	}
 
-	// Now notify completion and re-evaluate
+	// Now await completion and re-evaluate
 	select {
-	case callID := <-completions:
-		frame.NotifyCompletion(callID)
+	case <-completions:
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for completion")
 	}
@@ -773,11 +773,12 @@ func TestTrackerPoolShrink(t *testing.T) {
 	pool := newAsyncCallTrackerPool()
 	tracker := pool.create()
 	completions := make(chan int64, 1)
+	gate := newAsyncGate(0, completions)
 	impl := asyncReturning(types.Int(1), nil)
 
 	// Register more than trackerShrinkThreshold calls to trigger map reallocation
 	for i := int64(1); i <= trackerShrinkThreshold+10; i++ {
-		tracker.getOrCreate(i, "fn", "fn_int", []ref.Val{types.Int(i)}, impl, completions)
+		tracker.getOrCreate(i, "fn", "fn_int", []ref.Val{types.Int(i)}, impl, gate)
 	}
 
 	// Release the tracker; since size exceeds threshold, maps should be reallocated
@@ -790,7 +791,7 @@ func TestTrackerPoolShrink(t *testing.T) {
 	}
 
 	// Now register a small number of calls, release, and check that delete path works
-	tracker2.getOrCreate(1, "fn", "fn_int", []ref.Val{types.Int(1)}, impl, completions)
+	tracker2.getOrCreate(1, "fn", "fn_int", []ref.Val{types.Int(1)}, impl, gate)
 	pool.release(tracker2)
 
 	tracker3 := pool.create()
@@ -898,12 +899,11 @@ func TestAsyncWithTraceAndExhaustiveEval(t *testing.T) {
 loop:
 	for {
 		res = runPass()
-		if !types.IsUnknown(res) && frame.PendingAsyncCalls() == 0 {
+		if !types.IsUnknown(res) && frame.ActiveAsyncCalls() == 0 {
 			break loop
 		}
 		select {
-		case callID := <-completions:
-			frame.NotifyCompletion(callID)
+		case <-completions:
 		case <-deadline:
 			t.Fatal("timed out waiting for async result")
 		}
