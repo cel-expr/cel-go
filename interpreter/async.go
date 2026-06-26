@@ -328,7 +328,12 @@ func (t *asyncCallStateTracker) launch(ctx context.Context, acs *asyncCallState,
 		observer.OnCallStarted(acs.callID, acs.function, acs.overload, acs.argVals)
 	}
 	go func() {
-		defer gate.Complete(ctx, acs.callID)
+		defer func() {
+			if observer != nil {
+				observer.OnCallFinished(acs.callID, acs.function, acs.overload, acs.result)
+			}
+			gate.Complete(ctx, acs.callID)
+		}()
 
 		ch := acs.impl(ctx, acs.argVals...)
 		// Early terminate with a CEL error when an implementation returns an empty channel.
@@ -343,16 +348,13 @@ func (t *asyncCallStateTracker) launch(ctx context.Context, acs *asyncCallState,
 		select {
 		case r := <-ch:
 			acs.mu.Lock()
+			defer acs.mu.Unlock()
 			acs.result = r
-			acs.mu.Unlock()
-			if observer != nil {
-				observer.OnCallFinished(acs.callID, acs.function, acs.overload, r)
-			}
 		case <-ctx.Done():
 			// Evaluation context cancelled before the async operation completed.
-			if observer != nil {
-				observer.OnCallFinished(acs.callID, acs.function, acs.overload, types.WrapErr(context.Cause(ctx)))
-			}
+			acs.mu.Lock()
+			defer acs.mu.Unlock()
+			acs.result = types.WrapErr(context.Cause(ctx))
 		}
 	}()
 	return types.NewUnknown(acs.callID, nil)
