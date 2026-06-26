@@ -16,7 +16,9 @@ package interpreter
 
 import (
 	"context"
+	"errors"
 	"math"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -367,6 +369,74 @@ func TestAsyncObserverLifecycle(t *testing.T) {
 	}
 	if got := obs.finished.Load(); got != 1 {
 		t.Errorf("OnCallFinished called %d times, wanted 1", got)
+	}
+}
+
+func TestAsyncObserverOnCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancelCause(context.Background())
+	frame, closeFrame := newTestFrame(t, ctx)
+	defer closeFrame()
+
+	type finishedEvent struct {
+		callID   int64
+		function string
+		overload string
+		res      ref.Val
+	}
+	finishedChan := make(chan finishedEvent, 1)
+
+	obs := &recordingObserverWithCallback{
+		onFinished: func(callID int64, function, overload string, res ref.Val) {
+			finishedChan <- finishedEvent{callID, function, overload, res}
+		},
+	}
+	if err := frame.SetAsyncObserver(obs); err != nil {
+		t.Fatalf("SetAsyncObserver() failed: %v", err)
+	}
+
+	release := make(chan struct{})
+	defer close(release)
+	var live, maxLive atomic.Int32
+	impl := asyncControllable(release, &live, &maxLive)
+
+	res := frame.ComputeResult(1, "fn", "fn_int", impl, []ref.Val{types.Int(1)})
+	if !types.IsUnknown(res) {
+		t.Fatalf("ComputeResult() got %v, wanted Unknown", res)
+	}
+
+	cancelErr := errors.New("aborted by user request")
+	cancel(cancelErr)
+
+	select {
+	case event := <-finishedChan:
+		if event.callID != 1 {
+			t.Errorf("observer got callID = %d, wanted 1", event.callID)
+		}
+		if event.function != "fn" || event.overload != "fn_int" {
+			t.Errorf("observer got func/overload = %q/%q, wanted fn/fn_int", event.function, event.overload)
+		}
+		if !types.IsError(event.res) {
+			t.Errorf("observer result got %v, wanted error", event.res)
+		} else {
+			errVal := event.res.(*types.Err)
+			if !strings.Contains(errVal.Error(), "aborted by user request") {
+				t.Errorf("expected observer error to contain cause, got: %v", errVal)
+			}
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for observer completion notification on context cancel")
+	}
+}
+
+type recordingObserverWithCallback struct {
+	onFinished func(callID int64, function, overload string, res ref.Val)
+}
+
+func (o *recordingObserverWithCallback) OnCallStarted(callID int64, function, overload string, args []ref.Val) {}
+
+func (o *recordingObserverWithCallback) OnCallFinished(callID int64, function, overload string, res ref.Val) {
+	if o.onFinished != nil {
+		o.onFinished(callID, function, overload, res)
 	}
 }
 

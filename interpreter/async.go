@@ -350,6 +350,9 @@ func (t *asyncCallStateTracker) launch(ctx context.Context, acs *asyncCallState,
 			}
 		case <-ctx.Done():
 			// Evaluation context cancelled before the async operation completed.
+			if observer != nil {
+				observer.OnCallFinished(acs.callID, acs.function, acs.overload, types.WrapErr(context.Cause(ctx)))
+			}
 		}
 	}()
 	return types.NewUnknown(acs.callID, nil)
