@@ -17,6 +17,7 @@ package types
 import (
 	"fmt"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -51,6 +52,15 @@ const (
 	// Number of seconds between `9999-12-31T23:59:59.999999999Z` and the Unix epoch.
 	maxUnixTime int64 = 253402300799
 )
+
+// strictRFC3339Pattern gates the strings accepted by the `timestamp()` overload.
+// time.Parse accepts inputs that RFC 3339 forbids: a ',' fractional-second
+// separator, single-digit time fields, and numeric offsets whose hours exceed
+// 23 or minutes exceed 59. Those slip past unnoticed and shift the parsed
+// instant, so they are rejected before time.Parse runs. The remaining calendar
+// validation (month, day, leap year) is left to time.Parse.
+var strictRFC3339Pattern = regexp.MustCompile(
+	`^\d{4}-\d{2}-\d{2}[Tt]([01]\d|2[0-3]):[0-5]\d:([0-5]\d|60)(\.\d+)?([Zz]|[+-]([01]\d|2[0-3]):[0-5]\d)$`)
 
 // Add implements traits.Adder.Add.
 func (t Timestamp) Add(other ref.Val) ref.Val {
