@@ -109,12 +109,20 @@ const (
 	limitCodePointSize
 	// The number of attempts to recover from a parse error.
 	limitParseErrorRecovery
+	// The maximum nesting depth permitted for ASTs loaded outside the parser.
+	limitMaxASTDepth
 )
+
+// defaultMaxASTDepth mirrors the parser's default maxRecursionDepth (250) and
+// is applied to ASTs that enter through non-parser ingestion paths (e.g. via
+// ParsedExprToAst / CheckedExprToAst) when no explicit limit is configured.
+const defaultMaxASTDepth = 250
 
 var limitIDsToNames = map[limitID]string{
 	limitCodePointSize:       "cel.limit.expression_code_points",
 	limitParseErrorRecovery:  "cel.limit.parse_error_recovery",
 	limitParseRecursionDepth: "cel.limit.parse_recursion_depth",
+	limitMaxASTDepth:         "cel.limit.max_ast_depth",
 }
 
 func limitNameByID(id limitID) (string, bool) {
@@ -948,6 +956,18 @@ func ParserErrorRecoveryLimit(limit int) EnvOption {
 // Defaults are defined in the parser package. A negative value means unbounded.
 func ParserExpressionSizeLimit(limit int) EnvOption {
 	return setLimit(limitCodePointSize, limit)
+}
+
+// ExpressionNestingDepthLimit records the maximum nesting depth permitted for ASTs in the
+// environment configuration so that the value round-trips through env.Config export/import.
+//
+// ASTs loaded outside the parser (e.g. via ParsedExprToAst / CheckedExprToAst) bypass the
+// parser's recursion limit, so those conversion paths validate nesting depth against the
+// parser-matching default (250) to avoid a Go stack overflow during later checking or planning.
+// Embedders that fully control their AST inputs and want to skip the check can construct the AST
+// through the common/ast package directly rather than the cel conversion helpers.
+func ExpressionNestingDepthLimit(limit int) EnvOption {
+	return setLimit(limitMaxASTDepth, limit)
 }
 
 // EnableHiddenAccumulatorName sets the parser to use the identifier '@result' for accumulators

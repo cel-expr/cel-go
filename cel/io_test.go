@@ -317,6 +317,110 @@ func TestCheckedExprToAstMissingInfo(t *testing.T) {
 	}
 }
 
+// deepBoolExpr builds a synthetic deeply nested proto Expr by stacking `depth` unary `!` calls
+// on top of a boolean literal. A depth well above the 250 default but far below the Go stack
+// limit keeps the test itself from overflowing while still exercising the depth guard.
+func deepBoolExpr(depth int) *exprpb.Expr {
+	expr := &exprpb.Expr{
+		Id: 1,
+		ExprKind: &exprpb.Expr_ConstExpr{
+			ConstExpr: &exprpb.Constant{
+				ConstantKind: &exprpb.Constant_BoolValue{BoolValue: true},
+			},
+		},
+	}
+	for i := 0; i < depth; i++ {
+		expr = &exprpb.Expr{
+			Id: int64(i + 2),
+			ExprKind: &exprpb.Expr_CallExpr{
+				CallExpr: &exprpb.Expr_Call{
+					Function: operators.LogicalNot,
+					Args:     []*exprpb.Expr{expr},
+				},
+			},
+		}
+	}
+	return expr
+}
+
+func TestLoadedAstDepthLimit(t *testing.T) {
+	env, err := NewEnv()
+	if err != nil {
+		t.Fatalf("NewEnv() failed: %v", err)
+	}
+
+	// Sanity check: a shallow parsed expression still checks and plans clean.
+	shallow, iss := env.Parse("1 + 2")
+	if iss.Err() != nil {
+		t.Fatalf("Parse('1 + 2') failed: %v", iss.Err())
+	}
+	if _, iss := env.Check(shallow); iss.Err() != nil {
+		t.Fatalf("Check(shallow) failed: %v", iss.Err())
+	}
+	if _, err := env.Program(shallow); err != nil {
+		t.Fatalf("Program(shallow) failed: %v", err)
+	}
+
+	const depth = 300
+	deepExpr := deepBoolExpr(depth)
+
+	// ParsedExprToAst flags the over-deep AST at conversion time. Because the conversion helper
+	// has no error return, the violation is surfaced as a normal error when the AST is later
+	// planned or checked, rather than recursing into a Go stack overflow.
+	deepParsed := ParsedExprToAst(&exprpb.ParsedExpr{Expr: deepExpr})
+	if _, err := env.Program(deepParsed); err == nil {
+		t.Errorf("Program(deepParsed) expected an error, got nil")
+	} else if !strings.Contains(err.Error(), "maximum expression nesting depth") {
+		t.Errorf("Program(deepParsed) error = %v, want it to mention 'maximum expression nesting depth'", err)
+	}
+	if _, iss := env.Check(deepParsed); iss.Err() == nil {
+		t.Errorf("Check(deepParsed) expected an error, got nil")
+	} else if !strings.Contains(iss.Err().Error(), "maximum expression nesting depth") {
+		t.Errorf("Check(deepParsed) error = %v, want it to mention 'maximum expression nesting depth'", iss.Err())
+	}
+
+	// CheckedExprToAstWithSource returns the depth error directly since it has an error return.
+	if _, err := CheckedExprToAstWithSource(&exprpb.CheckedExpr{Expr: deepExpr}, nil); err == nil {
+		t.Errorf("CheckedExprToAstWithSource(deep) expected an error, got nil")
+	} else if !strings.Contains(err.Error(), "maximum expression nesting depth") {
+		t.Errorf("CheckedExprToAstWithSource(deep) error = %v, want it to mention 'maximum expression nesting depth'", err)
+	}
+
+	// Embedders in full control of their AST inputs can skip the check by building the AST through
+	// the common/ast package directly rather than the cel conversion helpers.
+	nativeExpr, err := celast.ProtoToExpr(deepExpr)
+	if err != nil {
+		t.Fatalf("celast.ProtoToExpr() failed: %v", err)
+	}
+	bypass := &Ast{impl: celast.NewAST(nativeExpr, celast.NewSourceInfo(nil))}
+	if _, err := env.Program(bypass); err != nil {
+		t.Errorf("Program(bypass) built directly via common/ast failed: %v", err)
+	}
+}
+
+func TestExpressionNestingDepthLimitConfigRoundTrip(t *testing.T) {
+	env, err := NewEnv(ExpressionNestingDepthLimit(128))
+	if err != nil {
+		t.Fatalf("NewEnv(ExpressionNestingDepthLimit(128)) failed: %v", err)
+	}
+	conf, err := env.ToConfig("depth-limit")
+	if err != nil {
+		t.Fatalf("env.ToConfig() failed: %v", err)
+	}
+	found := false
+	for _, limit := range conf.Limits {
+		if limit.Name == "cel.limit.max_ast_depth" {
+			found = true
+			if limit.Value != 128 {
+				t.Errorf("limit %q value = %d, wanted 128", limit.Name, limit.Value)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("env config limits %v missing 'cel.limit.max_ast_depth'", conf.Limits)
+	}
+}
+
 func TestRefValueToValue_Error(t *testing.T) {
 	_, err := RefValueToValue(types.NewErr("test error"))
 	if err == nil {
