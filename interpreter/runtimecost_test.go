@@ -134,6 +134,10 @@ func computeCost(t *testing.T, expr string, vars []*decls.VariableDecl, ctx Acti
 	if err != nil {
 		t.Fatalf("NewCostTracker() failed: %v", err)
 	}
+	costTracker, err = costTracker.Clone()
+	if err != nil {
+		t.Fatalf("checker.Clone() failed: %v", err)
+	}
 	checked, errs := checker.Check(parsed, s, env)
 	if len(errs.GetErrors()) != 0 {
 		t.Fatalf(`Failed to check expression "%s", error: %v`, expr, errs.GetErrors())

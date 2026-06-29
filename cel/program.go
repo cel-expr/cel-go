@@ -261,8 +261,16 @@ func newProgram(e *Env, a *ast.AST, opts []ProgramOption) (Program, error) {
 		if p.costLimit != nil {
 			costOpts = append(costOpts, interpreter.CostTrackerLimit(*p.costLimit))
 		}
+		// Creating a new cost tracker for each evaluation causes significant work that
+		// needs to be repeated for each evaluation even though the cost tracker is
+		// mostly read-only once constructed. Therefore it gets constructed
+		// once now and later a cheap clone is used for each evaluation.
+		tracker, err := interpreter.NewCostTracker(p.callCostEstimator, costOpts...)
+		if err != nil {
+			return nil, fmt.Errorf("construct cost tracker: %w", err)
+		}
 		trackerFactory := func() (*interpreter.CostTracker, error) {
-			return interpreter.NewCostTracker(p.callCostEstimator, costOpts...)
+			return tracker.Clone()
 		}
 		var observers []interpreter.PlannerOption
 		if p.evalOpts&(OptExhaustiveEval|OptTrackState) != 0 {
