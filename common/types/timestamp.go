@@ -17,6 +17,7 @@ package types
 import (
 	"fmt"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -51,6 +52,89 @@ const (
 	// Number of seconds between `9999-12-31T23:59:59.999999999Z` and the Unix epoch.
 	maxUnixTime int64 = 253402300799
 )
+
+// strictRFC3339Pattern gates the strings accepted by the `timestamp()` overload.
+// time.Parse accepts inputs that RFC 3339 forbids: a ',' fractional-second
+// separator, single-digit time fields, and numeric offsets whose hours exceed
+// 23 or minutes exceed 59. Those slip past unnoticed and shift the parsed
+// instant, so they are rejected before time.Parse runs. The remaining calendar
+// validation (month, day, leap year) is left to time.Parse.
+//
+// isStrictRFC3339 is the implementation used on the conversion path; the pattern
+// is retained as the reference the scan is conformance tested against.
+var strictRFC3339Pattern = regexp.MustCompile(
+	`^\d{4}-\d{2}-\d{2}[Tt]([01]\d|2[0-3]):[0-5]\d:([0-5]\d|60)(\.\d+)?([Zz]|[+-]([01]\d|2[0-3]):[0-5]\d)$`)
+
+// isStrictRFC3339 reports whether s matches strictRFC3339Pattern, hand-rolled to
+// keep the conversion path off the regexp engine and its per-call cost.
+func isStrictRFC3339(s string) bool {
+	// Shortest accepted form is "2006-01-02T15:04:05Z" (20 bytes): a 19-byte
+	// fixed-width date-time followed by at least a 'Z'/'z' zone.
+	if len(s) < 20 {
+		return false
+	}
+	// date: \d{4}-\d{2}-\d{2}
+	if !isDigit(s[0]) || !isDigit(s[1]) || !isDigit(s[2]) || !isDigit(s[3]) || s[4] != '-' ||
+		!isDigit(s[5]) || !isDigit(s[6]) || s[7] != '-' ||
+		!isDigit(s[8]) || !isDigit(s[9]) {
+		return false
+	}
+	// date/time separator [Tt]
+	if s[10] != 'T' && s[10] != 't' {
+		return false
+	}
+	// time: ([01]\d|2[0-3]):[0-5]\d:([0-5]\d|60)
+	if !isHour(s[11], s[12]) || s[13] != ':' || !isMinute(s[14], s[15]) || s[16] != ':' || !isSecond(s[17], s[18]) {
+		return false
+	}
+	rest := s[19:]
+	// optional fractional seconds (\.\d+)
+	if rest[0] == '.' {
+		rest = rest[1:]
+		n := 0
+		for n < len(rest) && isDigit(rest[n]) {
+			n++
+		}
+		if n == 0 {
+			return false
+		}
+		rest = rest[n:]
+	}
+	// zone: [Zz] | [+-]([01]\d|2[0-3]):[0-5]\d
+	if len(rest) == 1 {
+		return rest[0] == 'Z' || rest[0] == 'z'
+	}
+	if len(rest) == 6 && (rest[0] == '+' || rest[0] == '-') {
+		return isHour(rest[1], rest[2]) && rest[3] == ':' && isMinute(rest[4], rest[5])
+	}
+	return false
+}
+
+func isDigit(c byte) bool { return c >= '0' && c <= '9' }
+
+// isHour reports whether the two bytes form 00-23.
+func isHour(hi, lo byte) bool {
+	switch hi {
+	case '0', '1':
+		return isDigit(lo)
+	case '2':
+		return lo >= '0' && lo <= '3'
+	}
+	return false
+}
+
+// isMinute reports whether the two bytes form 00-59.
+func isMinute(hi, lo byte) bool {
+	return hi >= '0' && hi <= '5' && isDigit(lo)
+}
+
+// isSecond reports whether the two bytes form 00-60 (60 permits a leap second).
+func isSecond(hi, lo byte) bool {
+	if hi == '6' {
+		return lo == '0'
+	}
+	return isMinute(hi, lo)
+}
 
 // Add implements traits.Adder.Add.
 func (t Timestamp) Add(other ref.Val) ref.Val {
