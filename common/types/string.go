@@ -123,7 +123,7 @@ func (s String) ConvertToType(typeVal ref.Type) ref.Val {
 		}
 	case TimestampType:
 		str := s.Value().(string)
-		if !strictRFC3339Pattern.MatchString(str) {
+		if !isStrictRFC3339(str) {
 			return NewErr("invalid RFC 3339 timestamp %q", str)
 		}
 		if t, err := time.Parse(time.RFC3339, str); err == nil {

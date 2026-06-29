@@ -485,3 +485,44 @@ func TestTimestampGetMilliseconds(t *testing.T) {
 		t.Errorf("ts.getMilliseconds('America/Phoenix') got %v, wanted 1 ms", msTz)
 	}
 }
+
+func TestIsStrictRFC3339MatchesPattern(t *testing.T) {
+	// Exercise the hand-rolled scan against strictRFC3339Pattern, including the
+	// boundary cases for each field and a few well-formed timestamps. The two
+	// must agree on every input.
+	cases := []string{
+		"2025-01-01T12:34:56Z",
+		"2025-01-01T12:34:56z",
+		"2025-01-01t12:34:56Z",
+		"2025-01-01T12:34:56.123456789Z",
+		"2025-01-01T12:34:56.1Z",
+		"2025-01-01T00:00:00+00:00",
+		"2025-01-01T23:59:60-08:00",
+		"2025-01-01T12:34:56+14:00",
+		"2025-01-01T12:34:56+05:30",
+		"2025-01-01T20:00:00Z",
+		"2025-01-01T23:59:59Z",
+		// rejected forms
+		"2025-01-01T12:34:56,123Z",
+		"2025-01-01T1:34:56Z",
+		"2025-01-01T12:3:56Z",
+		"2025-01-01T12:34:5Z",
+		"2025-01-01T24:00:00Z",
+		"2025-01-01T12:60:00Z",
+		"2025-01-01T12:34:61Z",
+		"2025-01-01T12:34:56.Z",
+		"2025-01-01T12:34:56+24:00",
+		"2025-01-01T12:34:56+00:60",
+		"2025-01-01T12:34:56+0530",
+		"2025-01-01T12:34:56",
+		"2025-01-01 12:34:56Z",
+		"2025-1-01T12:34:56Z",
+		"",
+		"not-a-timestamp",
+	}
+	for _, s := range cases {
+		if got, want := isStrictRFC3339(s), strictRFC3339Pattern.MatchString(s); got != want {
+			t.Errorf("isStrictRFC3339(%q) = %v, strictRFC3339Pattern.MatchString = %v", s, got, want)
+		}
+	}
+}
