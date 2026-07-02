@@ -23,6 +23,7 @@ import (
 	"github.com/google/cel-go/common/ast"
 	"github.com/google/cel-go/common/containers"
 	"github.com/google/cel-go/common/decls"
+	"github.com/google/cel-go/common/operators"
 	"github.com/google/cel-go/common/stdlib"
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/parser"
@@ -219,6 +220,82 @@ func TestExprVisitor(t *testing.T) {
 			ast.PostOrderVisit(root, navVisitor)
 			if !reflect.DeepEqual(tc.postOrderIDs, postOrderExprIDs) {
 				t.Errorf("PostOrderVisit() got %v expressions, wanted %v", tc.postOrderIDs, postOrderExprIDs)
+			}
+		})
+	}
+}
+
+func TestExceedsDepth(t *testing.T) {
+	// Depths below reflect NavigableExpr.Depth() of each expression's deepest node, matching the
+	// maxDepth column of TestNavigateAST. ExceedsDepth reports true once a node reaches maxDepth,
+	// so an expression of depth D is flagged for every maxDepth <= D.
+	tests := []struct {
+		name     string
+		expr     string
+		maxDepth int
+		want     bool
+	}{
+		{name: "shallow below limit", expr: `'a' == 'b'`, maxDepth: 2, want: false},           // depth 1
+		{name: "shallow at limit", expr: `'a' == 'b'`, maxDepth: 1, want: true},               // depth 1
+		{name: "medium below limit", expr: `[1, 2, 3][0]`, maxDepth: 3, want: false},          // depth 2
+		{name: "medium at limit", expr: `[1, 2, 3][0]`, maxDepth: 2, want: true},              // depth 2
+		{name: "medium under limit", expr: `[1, 2, 3][0]`, maxDepth: 1, want: true},           // depth 2
+		{name: "deep under default", expr: `[true].exists(i, i)`, maxDepth: 250, want: false}, // depth 3
+		{name: "deep at limit", expr: `[true].exists(i, i)`, maxDepth: 3, want: true},         // depth 3
+		{name: "deep one above limit", expr: `[true].exists(i, i)`, maxDepth: 4, want: false}, // depth 3
+		{name: "disabled with zero", expr: `[true].exists(i, i)`, maxDepth: 0, want: false},
+		{name: "disabled with negative", expr: `[true].exists(i, i)`, maxDepth: -1, want: false},
+	}
+	for _, tst := range tests {
+		tc := tst
+		t.Run(tc.name, func(t *testing.T) {
+			checked := mustTypeCheck(t, tc.expr)
+			if got := ast.ExceedsDepth(checked, tc.maxDepth); got != tc.want {
+				t.Errorf("ExceedsDepth(%q, %d) = %v, wanted %v", tc.expr, tc.maxDepth, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestExceedsDepthNilSafety(t *testing.T) {
+	if ast.ExceedsDepth(nil, 250) {
+		t.Error("ExceedsDepth(nil, 250) = true, wanted false")
+	}
+	if ast.ExceedsDepth(ast.NewAST(nil, nil), 250) {
+		t.Error("ExceedsDepth(emptyAST, 250) = true, wanted false")
+	}
+}
+
+func TestExceedsDepthBoundedTraversal(t *testing.T) {
+	// Build a synthetic AST nested far deeper than the parser's recursion limit would ever produce.
+	// This is exactly the shape ExceedsDepth guards against, since such an AST can only enter through
+	// proto loading rather than the parser. Stacking depth unary '!' calls on a literal places the
+	// deepest node (the literal) at NavigableExpr.Depth() == depth.
+	const depth = 300
+	fac := ast.NewExprFactory()
+	expr := fac.NewLiteral(1, types.Bool(true))
+	for i := 0; i < depth; i++ {
+		expr = fac.NewCall(int64(i+2), operators.LogicalNot, expr)
+	}
+	deep := ast.NewAST(expr, ast.NewSourceInfo(nil))
+
+	tests := []struct {
+		name     string
+		maxDepth int
+		want     bool
+	}{
+		{name: "below the deepest node", maxDepth: 250, want: true},
+		// The traversal is bounded to maxDepth+1 levels, so it must still descend far enough to
+		// observe a node sitting exactly at maxDepth.
+		{name: "equal to the deepest node", maxDepth: depth, want: true},
+		{name: "one past the deepest node", maxDepth: depth + 1, want: false},
+		{name: "check disabled", maxDepth: 0, want: false},
+	}
+	for _, tst := range tests {
+		tc := tst
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ast.ExceedsDepth(deep, tc.maxDepth); got != tc.want {
+				t.Errorf("ExceedsDepth(deepAST(%d), %d) = %v, wanted %v", depth, tc.maxDepth, got, tc.want)
 			}
 		})
 	}
