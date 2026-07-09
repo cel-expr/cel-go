@@ -196,6 +196,8 @@ func estimateDecodeSize(sz checker.SizeEstimate) checker.SizeEstimate {
 	minVal := sz.Min * 3 / 4
 	maxVal := sz.Max * 3 / 4
 	return checker.SizeEstimate{Min: minVal, Max: maxVal}
+}
+
 func jsonEncodeValue(val ref.Val) (string, error) {
 	native, err := val.ConvertToNative(types.JSONValueType)
 	if err != nil {
