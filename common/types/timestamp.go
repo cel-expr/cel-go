@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/google/cel-go/common/overloads"
 	"github.com/google/cel-go/common/types/ref"
@@ -57,13 +58,14 @@ const (
 // time.Parse accepts inputs that RFC 3339 forbids: a ',' fractional-second
 // separator, single-digit time fields, and numeric offsets whose hours exceed
 // 23 or minutes exceed 59. Those slip past unnoticed and shift the parsed
-// instant, so they are rejected before time.Parse runs. The remaining calendar
-// validation (month, day, leap year) is left to time.Parse.
+// instant, so they are rejected before time.Parse runs. Month and day are held
+// to the grammar ranges 01-12 and 01-31; the remaining calendar validation
+// (day-of-month vs. month, leap years) is left to time.Parse.
 //
 // isStrictRFC3339 is the implementation used on the conversion path; the pattern
 // is retained as the reference the scan is conformance tested against.
 var strictRFC3339Pattern = regexp.MustCompile(
-	`^\d{4}-\d{2}-\d{2}[Tt]([01]\d|2[0-3]):[0-5]\d:([0-5]\d|60)(\.\d+)?([Zz]|[+-]([01]\d|2[0-3]):[0-5]\d)$`)
+	`^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])[Tt]([01]\d|2[0-3]):[0-5]\d:([0-5]\d|60)(\.\d+)?([Zz]|[+-]([01]\d|2[0-3]):[0-5]\d)$`)
 
 // isStrictRFC3339 reports whether s matches strictRFC3339Pattern, hand-rolled to
 // keep the conversion path off the regexp engine and its per-call cost.
@@ -73,22 +75,14 @@ func isStrictRFC3339(s string) bool {
 	if len(s) < 20 {
 		return false
 	}
-	// date: \d{4}-\d{2}-\d{2}
-	if !isDigit(s[0]) || !isDigit(s[1]) || !isDigit(s[2]) || !isDigit(s[3]) || s[4] != '-' ||
-		!isDigit(s[5]) || !isDigit(s[6]) || s[7] != '-' ||
-		!isDigit(s[8]) || !isDigit(s[9]) {
-		return false
-	}
-	// date/time separator [Tt]
-	if s[10] != 'T' && s[10] != 't' {
-		return false
-	}
-	// time: ([01]\d|2[0-3]):[0-5]\d:([0-5]\d|60)
-	if !isHour(s[11], s[12]) || s[13] != ':' || !isMinute(s[14], s[15]) || s[16] != ':' || !isSecond(s[17], s[18]) {
+	// full-date "T" partial-time
+	if !isYear(s[0:4]) || !isChar(s[4], '-') || !isMonth(s[5:7]) || !isChar(s[7], '-') || !isDay(s[8:10]) ||
+		!isChar(s[10], 't') ||
+		!isHour(s[11:13]) || !isChar(s[13], ':') || !isMinute(s[14:16]) || !isChar(s[16], ':') || !isSecond(s[17:19]) {
 		return false
 	}
 	rest := s[19:]
-	// optional fractional seconds (\.\d+)
+	// optional fractional seconds: "." 1*DIGIT
 	if rest[0] == '.' {
 		rest = rest[1:]
 		n := 0
@@ -100,41 +94,38 @@ func isStrictRFC3339(s string) bool {
 		}
 		rest = rest[n:]
 	}
-	// zone: [Zz] | [+-]([01]\d|2[0-3]):[0-5]\d
+	// time-offset: "Z" or ("+" / "-") time-hour ":" time-minute
 	if len(rest) == 1 {
-		return rest[0] == 'Z' || rest[0] == 'z'
+		return isChar(rest[0], 'z')
 	}
 	if len(rest) == 6 && (rest[0] == '+' || rest[0] == '-') {
-		return isHour(rest[1], rest[2]) && rest[3] == ':' && isMinute(rest[4], rest[5])
+		return isHour(rest[1:3]) && isChar(rest[3], ':') && isMinute(rest[4:6])
 	}
 	return false
 }
 
 func isDigit(c byte) bool { return c >= '0' && c <= '9' }
 
-// isHour reports whether the two bytes form 00-23.
-func isHour(hi, lo byte) bool {
-	switch hi {
-	case '0', '1':
-		return isDigit(lo)
-	case '2':
-		return lo >= '0' && lo <= '3'
-	}
-	return false
+// isChar reports whether got is want, case-insensitively; want must be lower case.
+func isChar(got, want byte) bool {
+	g, w := rune(got), rune(want)
+	return g == w || unicode.ToLower(g) == w
 }
 
-// isMinute reports whether the two bytes form 00-59.
-func isMinute(hi, lo byte) bool {
-	return hi >= '0' && hi <= '5' && isDigit(lo)
+// inRange reports whether s is all decimal digits and its value lies in [lo, hi].
+func inRange(s string, lo, hi uint64) bool {
+	u, err := strconv.ParseUint(s, 10, 64)
+	return err == nil && u >= lo && u <= hi
 }
 
-// isSecond reports whether the two bytes form 00-60 (60 permits a leap second).
-func isSecond(hi, lo byte) bool {
-	if hi == '6' {
-		return lo == '0'
-	}
-	return isMinute(hi, lo)
-}
+func isYear(s string) bool   { return inRange(s, 0, 9999) }
+func isMonth(s string) bool  { return inRange(s, 1, 12) }
+func isDay(s string) bool    { return inRange(s, 1, 31) }
+func isHour(s string) bool   { return inRange(s, 0, 23) }
+func isMinute(s string) bool { return inRange(s, 0, 59) }
+
+// isSecond permits 60 for a leap second.
+func isSecond(s string) bool { return inRange(s, 0, 60) }
 
 // Add implements traits.Adder.Add.
 func (t Timestamp) Add(other ref.Val) ref.Val {
