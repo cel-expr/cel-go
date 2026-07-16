@@ -70,6 +70,9 @@ type costTrackerFactory struct {
 // InitState produces a CostTracker and bundles it into an Activation in a way which is not visible
 // to expression evaluation.
 func (ct *costTrackerFactory) InitState(frame *ExecutionFrame) (any, error) {
+	if frame.ctx != nil && frame.ctx.costs != nil {
+		return frame.ctx.costs, nil
+	}
 	tracker, err := ct.factory()
 	if err != nil {
 		return nil, err

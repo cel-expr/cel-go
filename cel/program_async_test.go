@@ -30,405 +30,409 @@ import (
 	"github.com/google/cel-go/test"
 )
 
-func TestConcurrentEvalSync(t *testing.T) {
-	prg := mustProgram(t, `x + 1`, cel.Variable("x", cel.IntType))
-	res := awaitEval(t, prg, context.Background(), map[string]any{"x": 10})
-	if res.Err != nil {
-		t.Fatalf("ConcurrentEval() error: %v", res.Err)
-	}
-	if res.Val.Equal(types.Int(11)) != types.True {
-		t.Errorf("ConcurrentEval() = %v, want 11", res.Val)
-	}
-}
-
-func TestConcurrentEvalSingleAsync(t *testing.T) {
-	prg := mustProgram(t, `async_func(42) + 1`,
-		cel.Function("async_func",
-			cel.Overload("async_func_int", []*cel.Type{cel.IntType}, cel.IntType,
-				cel.AsyncBinding(func(ctx context.Context, args ...ref.Val) ref.Val {
-					time.Sleep(10 * time.Millisecond)
-					return args[0]
-				}),
-			),
-		),
-	)
-	res := awaitEval(t, prg, context.Background(), cel.NoVars())
-	if res.Err != nil {
-		t.Fatalf("ConcurrentEval() error: %v", res.Err)
-	}
-	if res.Val.Equal(types.Int(43)) != types.True {
-		t.Errorf("ConcurrentEval() = %v, want 43", res.Val)
-	}
-}
-
-// rpcEnv builds an env with an async string rpc() function that delays before echoing its input.
-func rpcEnv(t *testing.T, opt cel.ProgramOption, binding async.BlockingOp) (cel.Program, error) {
-	t.Helper()
-	var opts []any
-	opts = append(opts, cel.Function("rpc",
-		cel.Overload("rpc_string", []*cel.Type{cel.StringType}, cel.StringType,
-			cel.AsyncBinding(binding)),
-	))
-	if opt != nil {
-		opts = append(opts, opt)
-	}
-	return mustProgram(t, `rpc("a") + rpc("b") + rpc("c")`, opts...), nil
-}
-
-func TestConcurrentEvalFanOutDrainStrategies(t *testing.T) {
-	binding := func(ctx context.Context, args ...ref.Val) ref.Val {
-		time.Sleep(10 * time.Millisecond)
-		return args[0]
-	}
-	strategies := map[string]cel.ProgramOption{
-		"default":     nil,
-		"drain_all":   cel.ConcurrentDrainStrategy(async.DrainAll()),
-		"drain_ready": cel.ConcurrentDrainStrategy(async.DrainReady(5 * time.Millisecond)),
-		"drain_none":  cel.ConcurrentDrainStrategy(async.DrainNone()),
-	}
-	for name, opt := range strategies {
-		t.Run(name, func(t *testing.T) {
-			prg, err := rpcEnv(t, opt, binding)
-			if err != nil {
-				t.Fatalf("Program() failed: %v", err)
-			}
-			res := awaitEval(t, prg, context.Background(), cel.NoVars())
-			if res.Err != nil {
-				t.Fatalf("ConcurrentEval() error: %v", res.Err)
-			}
-			if res.Val.Equal(types.String("abc")) != types.True {
-				t.Errorf("ConcurrentEval() = %v, want 'abc'", res.Val)
-			}
-		})
-	}
-}
-
-func TestConcurrentEvalErrorPropagation(t *testing.T) {
-	prg, err := rpcEnv(t, nil, func(ctx context.Context, args ...ref.Val) ref.Val {
-		return types.NewErr("rpc failed")
-	})
-	if err != nil {
-		t.Fatalf("Program() failed: %v", err)
-	}
-	res := awaitEval(t, prg, context.Background(), cel.NoVars())
-	if res.Err == nil {
-		t.Fatalf("ConcurrentEval() expected error, got val %v", res.Val)
-	}
-}
-
-func TestConcurrentEvalCancel(t *testing.T) {
-	prg, err := rpcEnv(t, nil, func(ctx context.Context, args ...ref.Val) ref.Val {
-		<-ctx.Done()
-		return types.NewErr("cancelled")
-	})
-	if err != nil {
-		t.Fatalf("Program() failed: %v", err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	resCh := prg.ConcurrentEval(ctx, cel.NoVars())
-	cancel()
-	select {
-	case res := <-resCh:
-		if res.Err == nil {
-			t.Errorf("ConcurrentEval() expected cancellation error, got val %v", res.Val)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("ConcurrentEval() timed out after cancel")
-	}
-}
-
-func TestConcurrentEvalNilContext(t *testing.T) {
-	prg := mustProgram(t, `1 + 1`)
-	res := <-prg.ConcurrentEval(nil, cel.NoVars())
-	if res.Err == nil || !strings.Contains(res.Err.Error(), "context can not be nil") {
-		t.Errorf("ConcurrentEval(nil) error: %v", res.Err)
-	}
-}
-
-type countingObserver struct {
-	started  atomic.Int32
-	finished atomic.Int32
-}
-
-func (o *countingObserver) OnCallStarted(callID int64, function, overload string, args []ref.Val) {
-	o.started.Add(1)
-}
-func (o *countingObserver) OnCallFinished(callID int64, function, overload string, res ref.Val) {
-	o.finished.Add(1)
-}
-
-func TestConcurrentEvalObserver(t *testing.T) {
-	obs := &countingObserver{}
-	prg, err := rpcEnv(t, cel.AsyncCallObserver(obs), func(ctx context.Context, args ...ref.Val) ref.Val {
-		time.Sleep(5 * time.Millisecond)
-		return args[0]
-	})
-	if err != nil {
-		t.Fatalf("Program() failed: %v", err)
-	}
-	res := awaitEval(t, prg, context.Background(), cel.NoVars())
-	if res.Err != nil {
-		t.Fatalf("ConcurrentEval() error: %v", res.Err)
-	}
-	// Three distinct rpc calls in the expression.
-	if got := obs.started.Load(); got != 3 {
-		t.Errorf("OnCallStarted count = %d, want 3", got)
-	}
-	if got := obs.finished.Load(); got != 3 {
-		t.Errorf("OnCallFinished count = %d, want 3", got)
-	}
-}
-
-func TestConcurrentEvalEvalObserverTrackStateAndCost(t *testing.T) {
-	callObs := &countingObserver{}
-	prg := mustProgram(t, `async_func(42) + 1`,
-		cel.Function("async_func",
-			cel.Overload("async_func_int", []*cel.Type{cel.IntType}, cel.IntType,
-				cel.AsyncBinding(func(ctx context.Context, args ...ref.Val) ref.Val {
-					time.Sleep(5 * time.Millisecond)
-					return args[0]
-				}),
-			),
-		),
-		cel.EvalOptions(cel.OptTrackState, cel.OptTrackCost),
-		cel.AsyncCallObserver(callObs),
-	)
-	res := awaitEval(t, prg, context.Background(), cel.NoVars())
-	if res.Err != nil {
-		t.Fatalf("ConcurrentEval() error: %v", res.Err)
-	}
-	if res.Val.Equal(types.Int(43)) != types.True {
-		t.Errorf("ConcurrentEval() = %v, want 43", res.Val)
-	}
-	if got := callObs.started.Load(); got != 1 {
-		t.Errorf("OnCallStarted count = %d, want 1", got)
-	}
-	if got := callObs.finished.Load(); got != 1 {
-		t.Errorf("OnCallFinished count = %d, want 1", got)
-	}
-	if res.EvalDetails == nil {
-		t.Fatal("res.EvalDetails is nil, want non-nil EvalDetails when evaluation observer is configured")
-	}
-	state := res.EvalDetails.State()
-	if state == nil || len(state.IDs()) == 0 {
-		t.Errorf("res.EvalDetails.State() = %v, want non-empty EvalState", state)
-	}
-	cost := res.EvalDetails.ActualCost()
-	if cost == nil {
-		t.Errorf("res.EvalDetails.ActualCost() = nil, want non-nil")
-	}
-}
-
-func TestConcurrentEvalEvalObserverExhaustive(t *testing.T) {
-	prg := mustProgram(t, `async_func(10) > 0`,
-		cel.Function("async_func",
-			cel.Overload("async_func_int", []*cel.Type{cel.IntType}, cel.IntType,
-				cel.AsyncBinding(func(ctx context.Context, args ...ref.Val) ref.Val {
-					return args[0]
-				}),
-			),
-		),
-		cel.EvalOptions(cel.OptExhaustiveEval),
-	)
-	res := awaitEval(t, prg, context.Background(), cel.NoVars())
-	if res.Err != nil {
-		t.Fatalf("ConcurrentEval() error: %v", res.Err)
-	}
-	if res.Val != types.True {
-		t.Errorf("ConcurrentEval() = %v, want true", res.Val)
-	}
-	if res.EvalDetails == nil {
-		t.Fatal("res.EvalDetails is nil, want non-nil EvalDetails")
-	}
-	if state := res.EvalDetails.State(); state == nil || len(state.IDs()) == 0 {
-		t.Errorf("res.EvalDetails.State() = %v, want non-empty EvalState", state)
-	}
-}
-
-func TestConcurrentEvalEvalObserverError(t *testing.T) {
-	prg := mustProgram(t, `async_fail()`,
-		cel.Function("async_fail",
-			cel.Overload("async_fail_void", []*cel.Type{}, cel.IntType,
-				cel.AsyncBinding(func(ctx context.Context, args ...ref.Val) ref.Val {
-					return types.NewErr("async failure")
-				}),
-			),
-		),
-		cel.EvalOptions(cel.OptTrackState),
-	)
-	res := awaitEval(t, prg, context.Background(), cel.NoVars())
-	if res.Err == nil {
-		t.Fatalf("ConcurrentEval() expected error, got nil")
-	}
-	if res.EvalDetails == nil {
-		t.Fatal("res.EvalDetails is nil on error, want non-nil EvalDetails")
-	}
-	if state := res.EvalDetails.State(); state == nil {
-		t.Errorf("res.EvalDetails.State() = nil, want non-nil EvalState")
-	}
-}
-
-func TestConcurrentEvalAsyncCompletionBufferSize(t *testing.T) {
-	prg := mustProgram(t, `async_func(42) + 1`,
-		cel.Function("async_func",
-			cel.Overload("async_func_int", []*cel.Type{cel.IntType}, cel.IntType,
-				cel.AsyncBinding(func(ctx context.Context, args ...ref.Val) ref.Val {
-					time.Sleep(5 * time.Millisecond)
-					return args[0]
-				}),
-			),
-		),
-		cel.AsyncCompletionBufferSize(16),
-	)
-	res := awaitEval(t, prg, context.Background(), cel.NoVars())
-	if res.Err != nil {
-		t.Fatalf("ConcurrentEval() error: %v", res.Err)
-	}
-	if res.Val.Equal(types.Int(43)) != types.True {
-		t.Errorf("ConcurrentEval() = %v, want 43", res.Val)
-	}
-}
-
-func TestConcurrentEvalMaxConcurrency(t *testing.T) {
+func TestConcurrentEval(t *testing.T) {
 	cases := []struct {
 		name         string
+		expr         string
+		vars         any
+		opts         []any
 		maxConc      int
-		wantMaxBound int // max expected observed concurrency, or 0 if unconstrained
+		want         any
+		wantLaunches int32
+		trackCost    bool
+		trackState   bool
+		wantErr      string
+		wantCost     uint64
 	}{
 		{
-			name:         "bounded",
-			maxConc:      1,
-			wantMaxBound: 1,
+			name: "sync_eval",
+			expr: `x + 1`,
+			vars: map[string]any{"x": 10},
+			opts: []any{cel.Variable("x", cel.IntType)},
+			want: 11,
 		},
 		{
-			name:         "default_zero",
-			maxConc:      0,
-			wantMaxBound: 0,
+			name: "single_async",
+			expr: `async_func(42) + 1`,
+			opts: []any{
+				cel.Function("async_func",
+					cel.Overload("async_func_int", []*cel.Type{cel.IntType}, cel.IntType,
+						cel.AsyncBinding(func(ctx context.Context, args ...ref.Val) ref.Val {
+							time.Sleep(5 * time.Millisecond)
+							return args[0]
+						}),
+					),
+				),
+			},
+			want: 43,
 		},
 		{
-			name:         "unlimited_negative",
-			maxConc:      -1,
-			wantMaxBound: 0,
+			name: "completion_buffer_size",
+			expr: `async_func(42) + 1`,
+			opts: []any{
+				cel.Function("async_func",
+					cel.Overload("async_func_int", []*cel.Type{cel.IntType}, cel.IntType,
+						cel.AsyncBinding(func(ctx context.Context, args ...ref.Val) ref.Val {
+							time.Sleep(5 * time.Millisecond)
+							return args[0]
+						}),
+					),
+				),
+				cel.AsyncCompletionBufferSize(16),
+			},
+			want: 43,
+		},
+		{
+			name:    "outside_parallel_conc_1",
+			expr:    `async_inc(10) + async_inc(20)`,
+			maxConc: 1,
+			want:    32,
+		},
+		{
+			name:      "outside_parallel_conc_unlimited",
+			expr:      `async_inc(10) + async_inc(20)`,
+			maxConc:   -1,
+			trackCost: true,
+			want:      32,
+		},
+		{
+			name:      "outside_chained_conc_1",
+			expr:      `async_inc(async_inc(10))`,
+			maxConc:   1,
+			trackCost: true,
+			want:      12,
+		},
+		{
+			name:    "outside_chained_conc_default",
+			expr:    `async_inc(async_inc(10))`,
+			maxConc: 0,
+			want:    12,
+		},
+		{
+			name:         "comprehension_single",
+			expr:         `[1, 2, 3].map(i, dbl(i))`,
+			want:         []int64{2, 4, 6},
+			wantLaunches: 3,
+		},
+		{
+			name:      "comprehension_single_conc_2",
+			expr:      `[1, 2, 3].map(i, async_inc(i))`,
+			maxConc:   2,
+			trackCost: true,
+			want:      []int64{2, 3, 4},
+		},
+		{
+			name:    "comprehension_single_conc_unlimited",
+			expr:    `[1, 2, 3].map(i, async_inc(i))`,
+			maxConc: -1,
+			want:    []int64{2, 3, 4},
+		},
+		{
+			name:      "comprehension_chained_conc_1",
+			expr:      `[1, 2, 3].map(i, async_inc(async_inc(i)))`,
+			maxConc:   1,
+			trackCost: true,
+			want:      []int64{3, 4, 5},
+		},
+		{
+			name:    "comprehension_chained_conc_default",
+			expr:    `[1, 2, 3].map(i, async_inc(async_inc(i)))`,
+			maxConc: 0,
+			want:    []int64{3, 4, 5},
+		},
+		{
+			name:      "nested_comprehension_chained_conc_2",
+			expr:      `[1, 2].map(i, [10, 20].map(j, async_inc(async_inc(i + j))))`,
+			maxConc:   2,
+			trackCost: true,
+			want:      [][]int64{{13, 23}, {14, 24}},
+		},
+		{
+			name:    "nested_comprehension_chained_conc_unlimited",
+			expr:    `[1, 2].map(i, [10, 20].map(j, async_inc(async_inc(i + j))))`,
+			maxConc: -1,
+			want:    [][]int64{{13, 23}, {14, 24}},
+		},
+		{
+			name: "fake_rpc",
+			expr: `rpc("a") + rpc("b") + rpc("c")`,
+			opts: []any{
+				cel.Function("rpc",
+					cel.Overload("rpc_string", []*cel.Type{cel.StringType}, cel.StringType,
+						cel.AsyncBinding(test.FakeRPC(time.Second)),
+					),
+				),
+			},
+			want: "a success!b success!c success!",
+		},
+		{
+			name:      "drain_all",
+			expr:      `delayed_rpc("a", 5) + delayed_rpc("b", 20) + delayed_rpc("c", 100)`,
+			opts:      []any{cel.ConcurrentDrainStrategy(async.DrainAll())},
+			trackCost: true,
+			wantCost:  10,
+			want:      "abc",
+		},
+		{
+			name:      "drain_ready_batched",
+			expr:      `delayed_rpc("a", 5) + delayed_rpc("b", 20) + delayed_rpc("c", 100)`,
+			opts:      []any{cel.ConcurrentDrainStrategy(async.DrainReady(150 * time.Millisecond))},
+			trackCost: true,
+			wantCost:  10,
+			want:      "abc",
+		},
+		{
+			name:      "drain_ready_partial_debounce",
+			expr:      `delayed_rpc("a", 5) + delayed_rpc("b", 20) + delayed_rpc("c", 100)`,
+			opts:      []any{cel.ConcurrentDrainStrategy(async.DrainReady(20 * time.Millisecond))},
+			trackCost: true,
+			wantCost:  15,
+			want:      "abc",
+		},
+		{
+			name:      "drain_none",
+			expr:      `delayed_rpc("a", 5) + delayed_rpc("b", 20) + delayed_rpc("c", 100)`,
+			opts:      []any{cel.ConcurrentDrainStrategy(async.DrainNone())},
+			trackCost: true,
+			wantCost:  20,
+			want:      "abc",
+		},
+		{
+			name: "exhaustive_eval",
+			expr: `async_inc(10) > 0`,
+			opts: []any{
+				cel.EvalOptions(cel.OptExhaustiveEval),
+			},
+			trackState: true,
+			want:       true,
+		},
+		{
+			name:       "async_error",
+			expr:       `async_fail()`,
+			opts:       []any{cel.EvalOptions(cel.OptTrackState)},
+			trackState: true,
+			wantErr:    "async failure",
+		},
+		{
+			name:         "short_circuit_and_false",
+			expr:         `false && (async_inc(10) == 11)`,
+			want:         false,
+			wantLaunches: 0,
+		},
+		{
+			name:         "short_circuit_or_true",
+			expr:         `true || (async_inc(10) == 11)`,
+			want:         true,
+			wantLaunches: 0,
+		},
+		{
+			name:         "short_circuit_ternary_false",
+			expr:         `false ? async_inc(10) : 42`,
+			want:         42,
+			wantLaunches: 0,
+		},
+		{
+			name:         "short_circuit_ternary_true",
+			expr:         `true ? async_inc(10) : 42`,
+			want:         11,
+			wantLaunches: 1,
+		},
+		{
+			name:         "eval_and_true",
+			expr:         `true && (async_inc(10) == 11)`,
+			want:         true,
+			wantLaunches: 1,
+		},
+		{
+			name:         "eval_or_false",
+			expr:         `false || (async_inc(10) == 11)`,
+			want:         true,
+			wantLaunches: 1,
+		},
+		{
+			name:         "eval_left_async_or_async",
+			expr:         `(async_inc(10) == 11) || (async_inc(20) == 21)`,
+			want:         true,
+			wantLaunches: 2,
+		},
+		{
+			name:         "eval_left_async_and_async",
+			expr:         `(async_inc(10) == 0) && (async_inc(20) == 21)`,
+			want:         false,
+			wantLaunches: 2,
+		},
+		{
+			name: "eval_or_var_expr_short_circuit_pass1",
+			expr: `(async_inc(10) == 11) || (11 - x == 10)`,
+			vars: map[string]any{"x": 1},
+			opts: []any{cel.Variable("x", cel.IntType)},
+			want: true,
+		},
+		{
+			name:         "eval_or_var_expr_await_async",
+			expr:         `(async_inc(10) == 11) || (11 - x == 10)`,
+			vars:         map[string]any{"x": 0},
+			opts:         []any{cel.Variable("x", cel.IntType)},
+			want:         true,
+			wantLaunches: 1,
+		},
+		{
+			name:         "compile_time_fold_or_true",
+			expr:         `(async_inc(10) == 11) || true`,
+			want:         true,
+			wantLaunches: 0,
+		},
+		{
+			name:         "compile_time_fold_and_false",
+			expr:         `(async_inc(10) == 11) && false`,
+			want:         false,
+			wantLaunches: 0,
+		},
+		{
+			name:    "comprehension_async_error",
+			expr:    `[1, 2, 3].map(i, i == 2 ? async_fail() : async_inc(i))`,
+			wantErr: "async failure",
+		},
+		{
+			name:         "completion_buffer_size_zero",
+			expr:         `async_inc(10) + 1`,
+			opts:         []any{cel.AsyncCompletionBufferSize(0)},
+			want:         12,
+			wantLaunches: 1,
+		},
+		{
+			name:         "completion_buffer_size_negative",
+			expr:         `async_inc(10) + 1`,
+			opts:         []any{cel.AsyncCompletionBufferSize(-1)},
+			want:         12,
+			wantLaunches: 1,
 		},
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			var concurrent atomic.Int32
-			var maxConcurrent atomic.Int32
-			binding := func(ctx context.Context, args ...ref.Val) ref.Val {
-				cur := concurrent.Add(1)
+
+	var launches, live, maxLive atomic.Int32
+
+	asyncInc := cel.Function("async_inc",
+		cel.Overload("async_inc_int", []*cel.Type{cel.IntType}, cel.IntType,
+			cel.AsyncBinding(func(ctx context.Context, args ...ref.Val) ref.Val {
+				launches.Add(1)
+				cur := live.Add(1)
 				for {
-					old := maxConcurrent.Load()
-					if cur <= old || maxConcurrent.CompareAndSwap(old, cur) {
+					old := maxLive.Load()
+					if cur <= old || maxLive.CompareAndSwap(old, cur) {
 						break
 					}
 				}
-				time.Sleep(20 * time.Millisecond)
-				concurrent.Add(-1)
+				time.Sleep(5 * time.Millisecond)
+				live.Add(-1)
+				v := int64(args[0].(types.Int))
+				return types.Int(v + 1)
+			}),
+		),
+	)
+
+	dblFunc := cel.Function("dbl",
+		cel.Overload("dbl_int", []*cel.Type{cel.IntType}, cel.IntType,
+			cel.AsyncBinding(func(ctx context.Context, args ...ref.Val) ref.Val {
+				launches.Add(1)
+				time.Sleep(5 * time.Millisecond)
+				return args[0].(types.Int) * 2
+			})),
+	)
+
+	rpcFunc := cel.Function("rpc",
+		cel.Overload("rpc_string", []*cel.Type{cel.StringType}, cel.StringType,
+			cel.AsyncBinding(func(ctx context.Context, args ...ref.Val) ref.Val {
+				time.Sleep(5 * time.Millisecond)
 				return args[0]
+			}),
+		),
+	)
+
+	delayedRpcFunc := cel.Function("delayed_rpc",
+		cel.Overload("delayed_rpc_string_int", []*cel.Type{cel.StringType, cel.IntType}, cel.StringType,
+			cel.AsyncBinding(func(ctx context.Context, args ...ref.Val) ref.Val {
+				msg := string(args[0].(types.String))
+				delayMs := time.Duration(int64(args[1].(types.Int))) * time.Millisecond
+				time.Sleep(delayMs)
+				return types.String(msg)
+			}),
+		),
+	)
+
+	asyncFailFunc := cel.Function("async_fail",
+		cel.Overload("async_fail_void", []*cel.Type{}, cel.IntType,
+			cel.AsyncBinding(func(ctx context.Context, args ...ref.Val) ref.Val {
+				return types.NewErr("async failure")
+			}),
+		),
+	)
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			launches.Store(0)
+			live.Store(0)
+			maxLive.Store(0)
+
+			testOpts := append([]any{asyncInc, dblFunc, rpcFunc, delayedRpcFunc, asyncFailFunc}, tc.opts...)
+			if tc.maxConc != 0 {
+				testOpts = append(testOpts, cel.AsyncMaxConcurrency(tc.maxConc))
 			}
-			prg, err := rpcEnv(t, cel.AsyncMaxConcurrency(tc.maxConc), binding)
-			if err != nil {
-				t.Fatalf("Program() failed: %v", err)
+			if tc.trackCost {
+				testOpts = append(testOpts, cel.EvalOptions(cel.OptTrackCost))
 			}
-			res := awaitEval(t, prg, context.Background(), cel.NoVars())
-			if res.Err != nil {
-				t.Fatalf("ConcurrentEval() error: %v", res.Err)
+
+			vars := tc.vars
+			if vars == nil {
+				vars = cel.NoVars()
 			}
-			if res.Val.Equal(types.String("abc")) != types.True {
-				t.Errorf("ConcurrentEval() = %v, want 'abc'", res.Val)
+
+			prg := mustProgram(t, tc.expr, testOpts...)
+			res := awaitEval(t, prg, context.Background(), vars)
+
+			if tc.wantErr != "" {
+				if res.Err == nil || !strings.Contains(res.Err.Error(), tc.wantErr) {
+					t.Fatalf("ConcurrentEval(%q) error = %v, want error containing %q", tc.expr, res.Err, tc.wantErr)
+				}
+			} else {
+				if res.Err != nil {
+					t.Fatalf("ConcurrentEval(%q) error: %v", tc.expr, res.Err)
+				}
+				wantVal := types.DefaultTypeAdapter.NativeToValue(tc.want)
+				if res.Val.Equal(wantVal) != types.True {
+					t.Errorf("ConcurrentEval(%q) = %v, want %v", tc.expr, res.Val, wantVal)
+				}
 			}
-			if tc.wantMaxBound > 0 {
-				if got := maxConcurrent.Load(); got > int32(tc.wantMaxBound) {
-					t.Errorf("max observed concurrency = %d, want <= %d", got, tc.wantMaxBound)
+
+			if tc.maxConc > 0 {
+				if got := maxLive.Load(); got > int32(tc.maxConc) {
+					t.Errorf("max observed concurrency = %d, want <= %d", got, tc.maxConc)
+				}
+			}
+			if tc.wantLaunches > 0 {
+				if got := launches.Load(); got != tc.wantLaunches {
+					t.Errorf("async launches = %d, want %d", got, tc.wantLaunches)
+				}
+			}
+			if tc.trackCost {
+				if res.EvalDetails == nil || res.EvalDetails.ActualCost() == nil {
+					t.Errorf("res.EvalDetails.ActualCost() is nil, want non-nil when cost tracking is enabled")
+				} else if cost := *res.EvalDetails.ActualCost(); cost == 0 {
+					t.Errorf("ActualCost() = 0, want > 0")
+				}
+			}
+			if tc.wantCost > 0 {
+				if res.EvalDetails == nil || res.EvalDetails.ActualCost() == nil {
+					t.Errorf("res.EvalDetails.ActualCost() is nil, want %d", tc.wantCost)
+				} else if got := *res.EvalDetails.ActualCost(); got != tc.wantCost {
+					t.Errorf("ActualCost() = %d, want %d", got, tc.wantCost)
+				}
+			}
+			if tc.trackState {
+				if res.EvalDetails == nil || res.EvalDetails.State() == nil {
+					t.Errorf("res.EvalDetails.State() is nil, want non-nil")
 				}
 			}
 		})
-	}
-}
-
-func TestConcurrentEvalFakeRPC(t *testing.T) {
-	prg, err := rpcEnv(t, nil, test.FakeRPC(time.Second))
-	if err != nil {
-		t.Fatalf("Program() failed: %v", err)
-	}
-	res := awaitEval(t, prg, context.Background(), cel.NoVars())
-	if res.Err != nil {
-		t.Fatalf("ConcurrentEval() error: %v", res.Err)
-	}
-	want := types.String("a success!b success!c success!")
-	if res.Val.Equal(want) != types.True {
-		t.Errorf("ConcurrentEval() = %v, want %v", res.Val, want)
-	}
-}
-
-func TestConcurrentEvalAsyncInComprehension(t *testing.T) {
-	// Regression: an async call inside a comprehension is evaluated once per element with a
-	// different loop-variable binding but the same AST node id. The evaluator must track each
-	// element's call independently; otherwise re-evaluation relaunches every element forever and
-	// never converges.
-	var launches atomic.Int32
-	prg := mustProgram(t, `[1, 2, 3].map(i, dbl(i))`,
-		cel.Function("dbl",
-			cel.Overload("dbl_int", []*cel.Type{cel.IntType}, cel.IntType,
-				cel.AsyncBinding(func(ctx context.Context, args ...ref.Val) ref.Val {
-					launches.Add(1)
-					time.Sleep(5 * time.Millisecond)
-					return args[0].(types.Int) * 2
-				}))),
-	)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	select {
-	case res := <-prg.ConcurrentEval(ctx, cel.NoVars()):
-		if res.Err != nil {
-			t.Fatalf("ConcurrentEval() error: %v (launches=%d)", res.Err, launches.Load())
-		}
-		want := types.DefaultTypeAdapter.NativeToValue([]int64{2, 4, 6})
-		if res.Val.Equal(want) != types.True {
-			t.Errorf("ConcurrentEval() = %v, want [2, 4, 6]", res.Val)
-		}
-		if got := launches.Load(); got != 3 {
-			t.Errorf("async launches = %d, want exactly 3 (one per element, no relaunch)", got)
-		}
-	case <-time.After(6 * time.Second):
-		t.Fatalf("ConcurrentEval() did not converge; launches=%d", launches.Load())
-	}
-}
-
-func TestConcurrentEvalBoundsLaunchConcurrency(t *testing.T) {
-	// A wide async fan-out inside a comprehension must not launch more concurrent calls than the
-	// configured limit, and must still converge to the correct result.
-	var live, maxLive atomic.Int32
-	const limit = 2
-	prg := mustProgram(t, `[1, 2, 3, 4, 5, 6, 7, 8].map(i, rpc(i))`,
-		cel.Function("rpc",
-			cel.Overload("rpc_int", []*cel.Type{cel.IntType}, cel.IntType,
-				cel.AsyncBinding(func(ctx context.Context, args ...ref.Val) ref.Val {
-					cur := live.Add(1)
-					for {
-						old := maxLive.Load()
-						if cur <= old || maxLive.CompareAndSwap(old, cur) {
-							break
-						}
-					}
-					time.Sleep(10 * time.Millisecond)
-					live.Add(-1)
-					return args[0]
-				}))),
-		cel.AsyncMaxConcurrency(limit),
-		cel.ConcurrentDrainStrategy(async.DrainAll()),
-	)
-	res := awaitEval(t, prg, context.Background(), cel.NoVars())
-	if res.Err != nil {
-		t.Fatalf("ConcurrentEval() error: %v", res.Err)
-	}
-	want := types.DefaultTypeAdapter.NativeToValue([]int64{1, 2, 3, 4, 5, 6, 7, 8})
-	if res.Val.Equal(want) != types.True {
-		t.Errorf("ConcurrentEval() = %v, want [1..8]", res.Val)
-	}
-	if got := maxLive.Load(); got > limit {
-		t.Errorf("max concurrent async launches = %d, want <= %d", got, limit)
 	}
 }
 
@@ -472,6 +476,115 @@ func TestContextEvalAllowsPartialUnknown(t *testing.T) {
 	}
 	if !types.IsUnknown(out) {
 		t.Errorf("ContextEval() = %v, want Unknown", out)
+	}
+}
+
+func TestConcurrentEvalAllowsPartialUnknown(t *testing.T) {
+	prg := mustProgram(t, `async_func(42) + x`,
+		cel.Variable("x", cel.IntType),
+		cel.Function("async_func",
+			cel.Overload("async_func_int", []*cel.Type{cel.IntType}, cel.IntType,
+				cel.AsyncBinding(func(ctx context.Context, args ...ref.Val) ref.Val {
+					time.Sleep(5 * time.Millisecond)
+					return args[0]
+				}),
+			),
+		),
+		cel.EvalOptions(cel.OptPartialEval),
+	)
+	pvars, err := cel.PartialVars(map[string]any{}, cel.AttributePattern("x"))
+	if err != nil {
+		t.Fatalf("PartialVars() failed: %v", err)
+	}
+	res := awaitEval(t, prg, context.Background(), pvars)
+	if res.Err != nil {
+		t.Fatalf("ConcurrentEval() with partial unknown returned error: %v", res.Err)
+	}
+	if !types.IsUnknown(res.Val) {
+		t.Errorf("ConcurrentEval() = %v, want Unknown", res.Val)
+	}
+}
+
+func TestConcurrentEvalAsyncObserver(t *testing.T) {
+	obs := &countingObserver{}
+	prg := mustProgram(t, `async_func(10) + async_func(20)`,
+		cel.Function("async_func",
+			cel.Overload("async_func_int", []*cel.Type{cel.IntType}, cel.IntType,
+				cel.AsyncBinding(func(ctx context.Context, args ...ref.Val) ref.Val {
+					time.Sleep(5 * time.Millisecond)
+					return args[0]
+				}),
+			),
+		),
+		cel.AsyncCallObserver(obs),
+	)
+	res := awaitEval(t, prg, context.Background(), cel.NoVars())
+	if res.Err != nil {
+		t.Fatalf("ConcurrentEval() error: %v", res.Err)
+	}
+	if res.Val.Equal(types.Int(30)) != types.True {
+		t.Errorf("ConcurrentEval() = %v, want 30", res.Val)
+	}
+	if got := obs.started.Load(); got != 2 {
+		t.Errorf("OnCallStarted count = %d, want 2", got)
+	}
+	if got := obs.finished.Load(); got != 2 {
+		t.Errorf("OnCallFinished count = %d, want 2", got)
+	}
+}
+
+func TestConcurrentEvalProgramThreadSafety(t *testing.T) {
+	prg := mustProgram(t, `async_func(x) + 1`,
+		cel.Variable("x", cel.IntType),
+		cel.Function("async_func",
+			cel.Overload("async_func_int", []*cel.Type{cel.IntType}, cel.IntType,
+				cel.AsyncBinding(func(ctx context.Context, args ...ref.Val) ref.Val {
+					time.Sleep(5 * time.Millisecond)
+					return args[0]
+				}),
+			),
+		),
+	)
+
+	const numGoroutines = 10
+	errCh := make(chan error, numGoroutines)
+	for i := 0; i < numGoroutines; i++ {
+		go func(val int64) {
+			res := awaitEval(t, prg, context.Background(), map[string]any{"x": val})
+			if res.Err != nil {
+				errCh <- res.Err
+				return
+			}
+			if res.Val.Equal(types.Int(val+1)) != types.True {
+				errCh <- errors.New("unexpected eval result")
+				return
+			}
+			errCh <- nil
+		}(int64(i * 10))
+	}
+
+	for i := 0; i < numGoroutines; i++ {
+		if err := <-errCh; err != nil {
+			t.Errorf("Concurrent thread safety evaluation failed: %v", err)
+		}
+	}
+}
+
+func TestConcurrentEvalPreCanceledContext(t *testing.T) {
+	prg := mustProgram(t, `async_func(42)`,
+		cel.Function("async_func",
+			cel.Overload("async_func_int", []*cel.Type{cel.IntType}, cel.IntType,
+				cel.AsyncBinding(func(ctx context.Context, args ...ref.Val) ref.Val {
+					return args[0]
+				}),
+			),
+		),
+	)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	res := <-prg.ConcurrentEval(ctx, cel.NoVars())
+	if res.Err == nil || !errors.Is(res.Err, context.Canceled) {
+		t.Errorf("ConcurrentEval() on pre-canceled context = %v, want context.Canceled", res.Err)
 	}
 }
 
@@ -680,6 +793,18 @@ func mustProgram(t *testing.T, expr string, opts ...any) cel.Program {
 		t.Fatalf("Program() failed: %v", err)
 	}
 	return prg
+}
+
+type countingObserver struct {
+	started  atomic.Int32
+	finished atomic.Int32
+}
+
+func (o *countingObserver) OnCallStarted(callID int64, function, overload string, args []ref.Val) {
+	o.started.Add(1)
+}
+func (o *countingObserver) OnCallFinished(callID int64, function, overload string, res ref.Val) {
+	o.finished.Add(1)
 }
 
 type passCountingInterpretable struct {

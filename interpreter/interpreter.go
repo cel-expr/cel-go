@@ -127,6 +127,9 @@ type evalStateFactory struct {
 // InitState produces an EvalState instance and bundles it into the ExecutionFrame in a way which is
 // not visible to expression evaluation.
 func (et *evalStateFactory) InitState(frame *ExecutionFrame) (any, error) {
+	if frame.ctx != nil && frame.ctx.state != nil {
+		return frame.ctx.state, nil
+	}
 	state := et.factory()
 	if frame.ctx == nil {
 		frame.ctx = evalContextPool.Get().(*evalContext)
