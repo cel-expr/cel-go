@@ -24,6 +24,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoregistry"
 	"google.golang.org/protobuf/types/dynamicpb"
 
+	"github.com/google/cel-go/cel/async"
 	"github.com/google/cel-go/checker"
 	"github.com/google/cel-go/common/containers"
 	"github.com/google/cel-go/common/decls"
@@ -739,6 +740,47 @@ func EvalOptions(opts ...EvalOption) ProgramOption {
 func InterruptCheckFrequency(checkFrequency uint) ProgramOption {
 	return func(p *prog) (*prog, error) {
 		p.interruptCheckFrequency = checkFrequency
+		return p, nil
+	}
+}
+
+// AsyncCallObserver sets the observer for monitoring asynchronous function calls during ConcurrentEval.
+func AsyncCallObserver(observer async.Observer) ProgramOption {
+	return func(p *prog) (*prog, error) {
+		p.asyncObserver = observer
+		return p, nil
+	}
+}
+
+// AsyncCompletionBufferSize sets the size of the buffer for the async completion channel.
+// By default, the channel is unbuffered.
+func AsyncCompletionBufferSize(size int) ProgramOption {
+	return func(p *prog) (*prog, error) {
+		p.asyncCompletionBufferSize = size
+		return p, nil
+	}
+}
+
+// AsyncMaxConcurrency sets the maximum number of concurrently launched async calls during
+// ConcurrentEval. This bounds the number of in-flight async goroutines, so a wide fan-out (such
+// as an async call inside a comprehension over a large list) cannot exhaust memory.
+//
+// A value of 0 (unset) applies a built-in default bound. A positive value sets an explicit bound.
+// A negative value disables the limiter (unbounded launches) and should only be used when
+// concurrency is bounded by other means.
+func AsyncMaxConcurrency(maxConcurrency int) ProgramOption {
+	return func(p *prog) (*prog, error) {
+		p.asyncMaxConcurrency = maxConcurrency
+		return p, nil
+	}
+}
+
+// ConcurrentDrainStrategy configures the strategy for when to re-evaluate the program
+// during a ConcurrentEval call after receiving asynchronous completion signals.
+// By default, the program re-evaluates immediately after every completion.
+func ConcurrentDrainStrategy(strategy async.DrainStrategy) ProgramOption {
+	return func(p *prog) (*prog, error) {
+		p.drainStrategy = strategy
 		return p, nil
 	}
 }

@@ -12,6 +12,7 @@ go_library(
     importpath = "github.com/google/cel-go/cel/async",
     visibility = ["//visibility:public"],
     deps = [
+        "//common/functions:go_default_library",
         "//interpreter:go_default_library",
     ],
 )
