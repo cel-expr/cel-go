@@ -262,11 +262,12 @@ func TestConcurrentEval(t *testing.T) {
 			wantLaunches: 2,
 		},
 		{
-			name: "eval_or_var_expr_short_circuit_pass1",
-			expr: `(async_inc(10) == 11) || (11 - x == 10)`,
-			vars: map[string]any{"x": 1},
-			opts: []any{cel.Variable("x", cel.IntType)},
-			want: true,
+			name:         "eval_or_var_expr_short_circuit_pass1",
+			expr:         `(async_inc(10) == 11) || (11 - x == 10)`,
+			vars:         map[string]any{"x": 1},
+			opts:         []any{cel.Variable("x", cel.IntType)},
+			want:         true,
+			wantLaunches: 1,
 		},
 		{
 			name:         "eval_or_var_expr_await_async",
@@ -309,69 +310,65 @@ func TestConcurrentEval(t *testing.T) {
 		},
 	}
 
-	var launches, live, maxLive atomic.Int32
-
-	asyncInc := cel.Function("async_inc",
-		cel.Overload("async_inc_int", []*cel.Type{cel.IntType}, cel.IntType,
-			cel.AsyncBinding(func(ctx context.Context, args ...ref.Val) ref.Val {
-				launches.Add(1)
-				cur := live.Add(1)
-				for {
-					old := maxLive.Load()
-					if cur <= old || maxLive.CompareAndSwap(old, cur) {
-						break
-					}
-				}
-				time.Sleep(5 * time.Millisecond)
-				live.Add(-1)
-				v := int64(args[0].(types.Int))
-				return types.Int(v + 1)
-			}),
-		),
-	)
-
-	dblFunc := cel.Function("dbl",
-		cel.Overload("dbl_int", []*cel.Type{cel.IntType}, cel.IntType,
-			cel.AsyncBinding(func(ctx context.Context, args ...ref.Val) ref.Val {
-				launches.Add(1)
-				time.Sleep(5 * time.Millisecond)
-				return args[0].(types.Int) * 2
-			})),
-	)
-
-	rpcFunc := cel.Function("rpc",
-		cel.Overload("rpc_string", []*cel.Type{cel.StringType}, cel.StringType,
-			cel.AsyncBinding(func(ctx context.Context, args ...ref.Val) ref.Val {
-				time.Sleep(5 * time.Millisecond)
-				return args[0]
-			}),
-		),
-	)
-
-	delayedRpcFunc := cel.Function("delayed_rpc",
-		cel.Overload("delayed_rpc_string_int", []*cel.Type{cel.StringType, cel.IntType}, cel.StringType,
-			cel.AsyncBinding(func(ctx context.Context, args ...ref.Val) ref.Val {
-				msg := string(args[0].(types.String))
-				delayMs := time.Duration(int64(args[1].(types.Int))) * time.Millisecond
-				time.Sleep(delayMs)
-				return types.String(msg)
-			}),
-		),
-	)
-
-	asyncFailFunc := cel.Function("async_fail",
-		cel.Overload("async_fail_void", []*cel.Type{}, cel.IntType,
-			cel.AsyncBinding(func(ctx context.Context, args ...ref.Val) ref.Val {
-				return types.NewErr("async failure")
-			}),
-		),
-	)
-
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			launches.Store(0)
-			live.Store(0)
-			maxLive.Store(0)
+			var launches, live, maxLive atomic.Int32
+
+			asyncInc := cel.Function("async_inc",
+				cel.Overload("async_inc_int", []*cel.Type{cel.IntType}, cel.IntType,
+					cel.AsyncBinding(func(ctx context.Context, args ...ref.Val) ref.Val {
+						launches.Add(1)
+						cur := live.Add(1)
+						for {
+							old := maxLive.Load()
+							if cur <= old || maxLive.CompareAndSwap(old, cur) {
+								break
+							}
+						}
+						time.Sleep(5 * time.Millisecond)
+						live.Add(-1)
+						v := int64(args[0].(types.Int))
+						return types.Int(v + 1)
+					}),
+				),
+			)
+
+			dblFunc := cel.Function("dbl",
+				cel.Overload("dbl_int", []*cel.Type{cel.IntType}, cel.IntType,
+					cel.AsyncBinding(func(ctx context.Context, args ...ref.Val) ref.Val {
+						launches.Add(1)
+						time.Sleep(5 * time.Millisecond)
+						return args[0].(types.Int) * 2
+					})),
+			)
+
+			rpcFunc := cel.Function("rpc",
+				cel.Overload("rpc_string", []*cel.Type{cel.StringType}, cel.StringType,
+					cel.AsyncBinding(func(ctx context.Context, args ...ref.Val) ref.Val {
+						time.Sleep(5 * time.Millisecond)
+						return args[0]
+					}),
+				),
+			)
+
+			delayedRpcFunc := cel.Function("delayed_rpc",
+				cel.Overload("delayed_rpc_string_int", []*cel.Type{cel.StringType, cel.IntType}, cel.StringType,
+					cel.AsyncBinding(func(ctx context.Context, args ...ref.Val) ref.Val {
+						msg := string(args[0].(types.String))
+						delayMs := time.Duration(int64(args[1].(types.Int))) * time.Millisecond
+						time.Sleep(delayMs)
+						return types.String(msg)
+					}),
+				),
+			)
+
+			asyncFailFunc := cel.Function("async_fail",
+				cel.Overload("async_fail_void", []*cel.Type{}, cel.IntType,
+					cel.AsyncBinding(func(ctx context.Context, args ...ref.Val) ref.Val {
+						return types.NewErr("async failure")
+					}),
+				),
+			)
 
 			testOpts := append([]any{asyncInc, dblFunc, rpcFunc, delayedRpcFunc, asyncFailFunc}, tc.opts...)
 			if tc.maxConc != 0 {
@@ -548,7 +545,7 @@ func TestConcurrentEvalProgramThreadSafety(t *testing.T) {
 
 	const numGoroutines = 10
 	errCh := make(chan error, numGoroutines)
-	for i := 0; i < numGoroutines; i++ {
+	for i := range numGoroutines {
 		go func(val int64) {
 			res := awaitEval(t, prg, context.Background(), map[string]any{"x": val})
 			if res.Err != nil {
@@ -563,7 +560,7 @@ func TestConcurrentEvalProgramThreadSafety(t *testing.T) {
 		}(int64(i * 10))
 	}
 
-	for i := 0; i < numGoroutines; i++ {
+	for range numGoroutines {
 		if err := <-errCh; err != nil {
 			t.Errorf("Concurrent thread safety evaluation failed: %v", err)
 		}
