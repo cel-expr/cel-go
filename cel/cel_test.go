@@ -2037,7 +2037,7 @@ func TestPartialVars(t *testing.T) {
 				interpreter.NewAttributePattern("x"),
 				interpreter.NewAttributePattern("y"),
 			},
-			out: types.NewUnknown(1, types.NewAttributeTrail("x")),
+			out: types.MergeUnknowns(types.NewUnknown(1, types.NewAttributeTrail("x")), types.NewUnknown(4, types.NewAttributeTrail("y"))),
 		},
 		{
 			in: map[string]any{"x": "10"},
@@ -2079,7 +2079,7 @@ func TestPartialVars(t *testing.T) {
 			in:         map[string]any{},
 			unk:        []*interpreter.AttributePattern{},
 			out:        types.NewErr("no such attribute: x"),
-			partialOut: types.NewUnknown(1, types.NewAttributeTrail("x")),
+			partialOut: types.MergeUnknowns(types.NewUnknown(1, types.NewAttributeTrail("x")), types.NewUnknown(4, types.NewAttributeTrail("y"))),
 		},
 	}
 	for i, tst := range tests {

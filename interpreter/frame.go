@@ -233,16 +233,33 @@ func (f *ExecutionFrame) CheckInterrupt() bool {
 
 // ComputeResult tracks and computes the result of the given asynchronous function.
 //
-// The first invocation for a given (node id, args) tuple launches the call and returns an
+// The first invocation for a given (node id, args) tuple registers the call state and returns an
 // Unknown which references the call's unique callID. Subsequent invocations return the cached
-// result once the call has completed.
+// result once the call has completed. Launching background execution is deferred to post-execution
+// dispatch via DispatchPendingAsyncCalls.
 func (f *ExecutionFrame) ComputeResult(id int64, function, overload string, impl functions.AsyncOp, argVals []ref.Val) ref.Val {
 	if f.ctx == nil || f.ctx.asyncCalls == nil {
 		return types.NewErrWithNodeID(id, "asynchronous function calls require concurrent evaluation and cannot be resolved by a synchronous Eval")
 	}
 	t := f.ctx.asyncCalls
 	acs := t.getOrCreate(id, function, overload, argVals, impl, f.ctx.gate)
-	return t.launch(f.ctx.ctx, acs, f.ctx.observer)
+	if res := acs.ResultOrUnknown(); res != nil {
+		return res
+	}
+	return types.NewUnknown(acs.callID, nil)
+}
+
+// DispatchPendingAsyncCalls launches pending asynchronous calls for the specified required call IDs.
+func (f *ExecutionFrame) DispatchPendingAsyncCalls(ctx context.Context, callIDs []int64) {
+	if f.ctx == nil || f.ctx.asyncCalls == nil {
+		return
+	}
+	t := f.ctx.asyncCalls
+	for _, callID := range callIDs {
+		if acs := t.getByID(callID); acs != nil {
+			t.launch(ctx, acs, f.ctx.observer)
+		}
+	}
 }
 
 // ActiveAsyncCalls returns the number of async function calls that have been launched

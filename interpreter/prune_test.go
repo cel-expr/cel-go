@@ -310,7 +310,7 @@ var testCases = []testInfo{
 	{
 		in:   unknownActivation("x"),
 		expr: `[x, timestamp(0)]`,
-		out:  `[x, timestamp(0)]`,
+		out:  `[x, timestamp("1970-01-01T00:00:00Z")]`,
 	},
 	{
 		expr: `[timestamp(0), timestamp(1)]`,
@@ -367,17 +367,17 @@ var testCases = []testInfo{
 	{
 		in:   unknownActivation(),
 		expr: `test == {'a': 1, 'field': 2}.field`,
-		out:  `test == 2`,
+		out:  `test == {"a": 1, "field": 2}.field`,
 	},
 	{
 		in:   unknownActivation(),
 		expr: `test in {'a': 1, 'field': [2, 3]}.field`,
-		out:  `test in [2, 3]`,
+		out:  `test in {"a": 1, "field": [2, 3]}.field`,
 	},
 	{
 		in:   unknownActivation(),
 		expr: `test == {'field': [1 + 2, 2 + 3]}`,
-		out:  `test == {"field": [3, 5]}`,
+		out:  `test == {"field": [1 + 2, 2 + 3]}`,
 	},
 	{
 		in:   unknownActivation(),

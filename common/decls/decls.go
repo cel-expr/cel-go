@@ -317,8 +317,12 @@ func (f *FunctionDecl) HasLateBinding() bool {
 	if f == nil {
 		return false
 	}
+	if f.singleton != nil && f.singleton.Async != nil {
+		return true
+	}
 	for _, oID := range f.overloadOrdinals {
-		if f.overloads[oID].HasLateBinding() {
+		o := f.overloads[oID]
+		if o.HasLateBinding() {
 			return true
 		}
 	}
@@ -707,7 +711,7 @@ func (o *OverloadDecl) HasLateBinding() bool {
 	if o == nil {
 		return false
 	}
-	return o.hasLateBinding
+	return o.hasLateBinding || o.asyncOp != nil
 }
 
 // OperandTrait returns the trait mask of the first operand to the overload call, e.g.
@@ -871,6 +875,8 @@ func matchRuntimeArgType(nonStrict, disableTypeGuards bool, argType *types.Type,
 	if nonStrict && (disableTypeGuards || types.IsUnknownOrError(arg)) {
 		return true
 	}
+	// Note, early returns and unknown aggregation happen in the interpretable.go file; however, this check is here
+	// for defense in depth or for scenarios where someone manipulates bindings to offer their own dispatch logic.
 	if types.IsUnknownOrError(arg) {
 		return false
 	}

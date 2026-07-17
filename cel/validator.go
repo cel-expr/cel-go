@@ -15,6 +15,7 @@
 package cel
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"regexp"
@@ -284,8 +285,9 @@ func evalCall(env *Env, call, arg ast.Expr) error {
 	if err != nil {
 		return err
 	}
-	_, _, err = prg.Eval(NoVars())
-	return err
+	resCh := prg.ConcurrentEval(context.Background(), NoVars())
+	res := <-resCh
+	return res.Err
 }
 
 func compileRegex(_ *Env, _, arg ast.Expr) error {

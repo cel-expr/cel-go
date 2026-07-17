@@ -15,6 +15,7 @@
 package cel
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -176,11 +177,12 @@ func evaluateExpr(ctx *OptimizerContext, a *ast.AST, navigableExpr ast.Navigable
 	if err != nil {
 		return nil, err
 	}
-	out, _, err := prg.Eval(partialActivation)
-	if err != nil || types.IsUnknown(out) {
+	resCh := prg.ConcurrentEval(context.Background(), partialActivation)
+	res := <-resCh
+	if res.Err != nil || types.IsUnknown(res.Val) {
 		return nil, errCannotFold
 	}
-	return out, nil
+	return res.Val, nil
 }
 
 func isLateBoundFunctionCall(ctx *OptimizerContext, expr ast.Expr) bool {

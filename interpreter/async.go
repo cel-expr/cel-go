@@ -99,14 +99,16 @@ func (fn *evalAsyncFunc) Eval(vars Activation) ref.Val {
 // Exec implements the InterpretableV2 interface method.
 func (fn *evalAsyncFunc) Exec(frame *ExecutionFrame) ref.Val {
 	argVals := make([]ref.Val, len(fn.args))
-	// Early return if any argument to the function is unknown or error.
+	var unk *types.Unknown
 	for i, arg := range fn.args {
 		argVals[i] = arg.Exec(frame)
-		// TODO: early return only on errors, aggregate unknowns and validate
-		// whether any argument is unknown before proceeding with the call.
-		if types.IsUnknownOrError(argVals[i]) {
+		if types.IsError(argVals[i]) {
 			return argVals[i]
 		}
+		unk, _ = types.MaybeMergeUnknowns(argVals[i], unk)
+	}
+	if unk != nil {
+		return unk
 	}
 	result := frame.ComputeResult(fn.ID(), fn.Function(), fn.OverloadID(), fn.impl, argVals)
 	return types.LabelErrNode(fn.id, result)
@@ -287,6 +289,30 @@ func (acs *asyncCallState) Overload() string {
 	return acs.overload
 }
 
+// ResultOrUnknown returns the cached result if the call has completed, an Unknown
+// with the call ID if pending, or nil if the call has not been started.
+func (acs *asyncCallState) ResultOrUnknown() ref.Val {
+	if acs == nil {
+		return nil
+	}
+	acs.mu.RLock()
+	defer acs.mu.RUnlock()
+	if acs.result == nil && acs.started {
+		return types.NewUnknown(acs.callID, nil)
+	}
+	return acs.result
+}
+
+// SetResult sets the completed result for an asynchronous function call.
+func (acs *asyncCallState) SetResult(res ref.Val) {
+	if acs == nil {
+		return
+	}
+	acs.mu.Lock()
+	defer acs.mu.Unlock()
+	acs.result = res
+}
+
 // launch returns a call's cached result, or starts the call (subject to the launch limiter) and
 // returns an Unknown referencing its callID while the result is pending.
 //
@@ -298,17 +324,9 @@ func (acs *asyncCallState) Overload() string {
 // The slot is held by the launched goroutine and released when it exits, so the number of live
 // async goroutines is bounded by the semaphore capacity.
 func (t *asyncCallStateTracker) launch(ctx context.Context, acs *asyncCallState, observer AsyncObserver) ref.Val {
-	acs.mu.RLock()
-	res := acs.result
-	started := acs.started
-	acs.mu.RUnlock()
-	if res != nil {
+	if res := acs.ResultOrUnknown(); res != nil {
 		return res
 	}
-	if started {
-		return types.NewUnknown(acs.callID, nil)
-	}
-
 	gate := acs.gate
 	if !gate.TryAcquire() {
 		return types.NewUnknown(acs.callID, nil)
@@ -330,7 +348,7 @@ func (t *asyncCallStateTracker) launch(ctx context.Context, acs *asyncCallState,
 	go func() {
 		defer func() {
 			if observer != nil {
-				observer.OnCallFinished(acs.callID, acs.function, acs.overload, acs.result)
+				observer.OnCallFinished(acs.callID, acs.function, acs.overload, acs.ResultOrUnknown())
 			}
 			gate.Complete(ctx, acs.callID)
 		}()
@@ -338,23 +356,17 @@ func (t *asyncCallStateTracker) launch(ctx context.Context, acs *asyncCallState,
 		ch := acs.impl(ctx, acs.argVals...)
 		// Early terminate with a CEL error when an implementation returns an empty channel.
 		if ch == nil {
-			acs.mu.Lock()
-			defer acs.mu.Unlock()
-			acs.result = types.NewErrFromString(
-				fmt.Sprintf("function %s returned an empty channel", acs.function))
+			acs.SetResult(types.NewErrFromString(
+				fmt.Sprintf("function %s returned an empty channel", acs.function)))
 			return
 		}
 		// Wait for the async computation to finish or for the context to be cancelled.
 		select {
 		case r := <-ch:
-			acs.mu.Lock()
-			defer acs.mu.Unlock()
-			acs.result = r
+			acs.SetResult(r)
 		case <-ctx.Done():
 			// Evaluation context cancelled before the async operation completed.
-			acs.mu.Lock()
-			defer acs.mu.Unlock()
-			acs.result = types.WrapErr(context.Cause(ctx))
+			acs.SetResult(types.WrapErr(context.Cause(ctx)))
 		}
 	}()
 	return types.NewUnknown(acs.callID, nil)

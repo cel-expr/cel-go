@@ -542,6 +542,9 @@ func (p *prog) ConcurrentEval(ctx context.Context, input any) <-chan EvalResult 
 				return
 			}
 
+			// Post-execution dispatch: launch only the async calls required by the unknown result.
+			frame.DispatchPendingAsyncCalls(ctx, unk.IDs())
+
 			// The result depends on one or more unresolved async calls. Wait for completions and
 			// re-evaluate according to the configured drain strategy.
 			var batch []async.Call

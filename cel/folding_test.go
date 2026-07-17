@@ -15,6 +15,7 @@
 package cel
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"sort"
@@ -574,6 +575,10 @@ func TestConstantFoldingCallsWithSideEffects(t *testing.T) {
 			expr:   `noImpl(3)`,
 			folded: "noImpl(3)",
 		},
+		{
+			expr:   `asyncFunc(3)`,
+			folded: `asyncFunc(3)`,
+		},
 	}
 	e, err := NewEnv(
 		OptionalTypes(),
@@ -592,6 +597,12 @@ func TestConstantFoldingCallsWithSideEffects(t *testing.T) {
 			Overload("noImpl_int_int",
 				[]*Type{IntType},
 				IntType)),
+		Function("asyncFunc",
+			Overload("asyncFunc_int_int",
+				[]*Type{IntType},
+				IntType, AsyncBinding(func(ctx context.Context, args ...ref.Val) ref.Val {
+					return args[0]
+				}))),
 	)
 	if err != nil {
 		t.Fatalf("NewEnv() failed: %v", err)

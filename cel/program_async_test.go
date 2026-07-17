@@ -267,7 +267,7 @@ func TestConcurrentEval(t *testing.T) {
 			vars:         map[string]any{"x": 1},
 			opts:         []any{cel.Variable("x", cel.IntType)},
 			want:         true,
-			wantLaunches: 1,
+			wantLaunches: 0,
 		},
 		{
 			name:         "eval_or_var_expr_await_async",
