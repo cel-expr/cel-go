@@ -73,6 +73,36 @@ func testData(t testing.TB) []testCase {
 			out:  types.False,
 		},
 		{
+			name: "double_lt_nan",
+			expr: `0.0/0.0 < 1.0`,
+			out:  types.False,
+		},
+		{
+			name: "double_nan_lt",
+			expr: `1.0 < 0.0/0.0`,
+			out:  types.False,
+		},
+		{
+			name: "double_nan_le_nan",
+			expr: `0.0/0.0 <= 0.0/0.0`,
+			out:  types.False,
+		},
+		{
+			name: "double_gt_nan",
+			expr: `0.0/0.0 > 1.0`,
+			out:  types.False,
+		},
+		{
+			name: "double_nan_gt",
+			expr: `1.0 > 0.0/0.0`,
+			out:  types.False,
+		},
+		{
+			name: "double_nan_ge_nan",
+			expr: `0.0/0.0 >= 0.0/0.0`,
+			out:  types.False,
+		},
+		{
 			name: "and_false_1st",
 			expr: `false && true`,
 			out:  types.False,
