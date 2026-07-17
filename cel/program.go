@@ -487,7 +487,7 @@ func (p *prog) resolveCompletionBufferSize() int {
 func (p *prog) ConcurrentEval(ctx context.Context, input any) <-chan EvalResult {
 	resCh := make(chan EvalResult, 1)
 	if ctx == nil {
-		resCh <- EvalResult{Err: fmt.Errorf("context can not be nil")}
+		resCh <- EvalResult{Err: errors.New("context can not be nil")}
 		close(resCh)
 		return resCh
 	}

@@ -34,6 +34,7 @@ type Call = interpreter.AsyncCall
 // interpreter.AsyncObserver for details.
 type Observer = interpreter.AsyncObserver
 
+// BlockingOp is a blocking asynchronous function operation.
 type BlockingOp = functions.BlockingAsyncOp
 
 // DrainAction dictates what ConcurrentEval should do after inspecting completions.
