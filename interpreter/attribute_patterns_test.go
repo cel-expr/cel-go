@@ -336,3 +336,199 @@ func genAttr(fac AttributeFactory, a attr) Attribute {
 	}
 	return attr
 }
+
+func TestAttributePattern_LocallyBound(t *testing.T) {
+	reg := newTestRegistry(t)
+	fac := NewPartialAttributeFactory(containers.DefaultContainer, reg, reg)
+
+	// Create a partial activation that designates "x" and "y" as unknown.
+	partAct, err := NewPartialActivation(EmptyActivation(), NewAttributePattern("x"), NewAttributePattern("y"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	frame := mustNewExecutionFrame(t, partAct)
+	defer frame.Close()
+
+	// Create folder (representing a local scope for variable "x" only)
+	fold := &evalFold{
+		iterVar: "x",
+		adapter: types.DefaultTypeAdapter,
+	}
+	fld := newFolder(fold, frame)
+	defer releaseFolder(fld)
+
+	// Push onto the frame stack to simulate local variable scope
+	frame1 := frame.Push(fld)
+	defer frame1.Pop()
+
+	// 1. Resolve attribute matching "x".
+	// Because "x" is locally bound in fld, it should not resolve to types.Unknown.
+	attrX := fac.AbsoluteAttribute(1, "x")
+	valX, err := attrX.Resolve(frame1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, isUnk := valX.(*types.Unknown); isUnk {
+		t.Errorf("Resolve(x) got unknown, wanted value (since x is locally bound)")
+	}
+
+	// 2. Resolve attribute matching "y".
+	// Because "y" is NOT locally bound in any local scope layer, it should resolve to types.Unknown.
+	attrY := fac.AbsoluteAttribute(2, "y")
+	valY, err := attrY.Resolve(frame1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, isUnk := valY.(*types.Unknown); !isUnk {
+		t.Errorf("Resolve(y) got %v, wanted types.Unknown (since y is not locally bound)", valY)
+	}
+}
+
+func TestQualifierValueEquals(t *testing.T) {
+	tests := []struct {
+		name      string
+		qualifier interface {
+			QualifierValueEquals(any) bool
+		}
+		cases []struct {
+			input any
+			want  bool
+		}
+	}{
+		{
+			name:      "fieldQualifier",
+			qualifier: &fieldQualifier{Name: "foo"},
+			cases: []struct {
+				input any
+				want  bool
+			}{
+				{input: "foo", want: true},
+				{input: "bar", want: false},
+				{input: 123, want: false},
+				{input: true, want: false},
+				{input: nil, want: false},
+			},
+		},
+		{
+			name:      "stringQualifier",
+			qualifier: &stringQualifier{value: "hello"},
+			cases: []struct {
+				input any
+				want  bool
+			}{
+				{input: "hello", want: true},
+				{input: "world", want: false},
+				{input: 123, want: false},
+				{input: nil, want: false},
+			},
+		},
+		{
+			name:      "boolQualifier",
+			qualifier: &boolQualifier{value: true},
+			cases: []struct {
+				input any
+				want  bool
+			}{
+				{input: true, want: true},
+				{input: false, want: false},
+				{input: "true", want: false},
+				{input: 1, want: false},
+				{input: nil, want: false},
+			},
+		},
+		{
+			name:      "intQualifier",
+			qualifier: &intQualifier{celValue: types.Int(42)},
+			cases: []struct {
+				input any
+				want  bool
+			}{
+				{input: int64(42), want: true},
+				{input: int32(42), want: true},
+				{input: uint64(42), want: true},
+				{input: float64(42.0), want: true},
+				{input: types.Int(42), want: true},
+				{input: types.Double(42.0), want: true},
+				{input: int64(100), want: false},
+				{input: "42", want: false},
+				{input: nil, want: false},
+			},
+		},
+		{
+			name:      "uintQualifier",
+			qualifier: &uintQualifier{celValue: types.Uint(100)},
+			cases: []struct {
+				input any
+				want  bool
+			}{
+				{input: uint64(100), want: true},
+				{input: int64(100), want: true},
+				{input: float64(100.0), want: true},
+				{input: types.Uint(100), want: true},
+				{input: uint64(50), want: false},
+				{input: "100", want: false},
+				{input: nil, want: false},
+			},
+		},
+		{
+			name:      "doubleQualifier",
+			qualifier: &doubleQualifier{celValue: types.Double(3.14)},
+			cases: []struct {
+				input any
+				want  bool
+			}{
+				{input: float64(3.14), want: true},
+				{input: types.Double(3.14), want: true},
+				{input: float64(2.71), want: false},
+				{input: int64(3), want: false},
+				{input: "3.14", want: false},
+				{input: nil, want: false},
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, c := range tc.cases {
+				if got := tc.qualifier.QualifierValueEquals(c.input); got != c.want {
+					t.Errorf("%s.QualifierValueEquals(%v (%T)) = %t, wanted %t", tc.name, c.input, c.input, got, c.want)
+				}
+			}
+		})
+	}
+}
+
+func TestPartialAttributeFactory_MaybeAttributeGloballyNamespaced(t *testing.T) {
+	reg := newTestRegistry(t)
+	fac := NewPartialAttributeFactory(containers.DefaultContainer, reg, reg)
+	dotAttr := fac.MaybeAttribute(10, ".global_var")
+	if dotAttr == nil {
+		t.Error("MaybeAttribute(.global_var) got nil")
+	}
+}
+
+func TestPartialAttributeFactory_ResolveUnknownQualifier(t *testing.T) {
+	reg := newTestRegistry(t)
+	fac := NewPartialAttributeFactory(containers.DefaultContainer, reg, reg)
+	partVars, _ := NewPartialActivation(
+		map[string]any{"a": map[string]any{"b": 1}},
+		NewAttributePattern("a").QualString("b"))
+	a := fac.AbsoluteAttribute(1, "a")
+	b, _ := fac.NewQualifier(nil, 2, "b", false)
+	a.AddQualifier(b)
+	val, err := a.Resolve(partVars)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unkVal, ok := val.(*types.Unknown)
+	if !ok {
+		t.Fatalf("Resolve(a.b) got %v (%T), wanted *types.Unknown", val, val)
+	}
+	unkAttr := types.NewAttributeTrail("a")
+	types.QualifyAttribute[string](unkAttr, "b")
+	wantUnk := types.NewUnknown(2, unkAttr)
+	if !wantUnk.Contains(unkVal) {
+		t.Errorf("Resolve(a.b) got unknown %v, wanted %v", unkVal, wantUnk)
+	}
+}

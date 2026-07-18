@@ -130,3 +130,75 @@ func TestAsPartialActivation(t *testing.T) {
 		t.Error("AsPartialActivation() failed, did not find parent partial activation")
 	}
 }
+
+func TestIsLocalVariableNested(t *testing.T) {
+	parentAct := EmptyActivation()
+	frame := mustNewExecutionFrame(t, parentAct)
+	defer frame.Close()
+
+	// Outer comprehension scope (e.g. fold1)
+	fold1 := &evalFold{
+		accuVar:  "accu1",
+		iterVar:  "iter1",
+		iterVar2: "iter1_2",
+	}
+	fld1 := newFolder(fold1, frame)
+	defer releaseFolder(fld1)
+
+	// Push outer scope
+	frame1 := frame.Push(fld1)
+	defer frame1.Pop()
+
+	// Inner comprehension scope (e.g. fold2)
+	fold2 := &evalFold{
+		accuVar: "accu2",
+		iterVar: "iter2",
+	}
+	fld2 := newFolder(fold2, frame1)
+	defer releaseFolder(fld2)
+
+	// Push inner scope
+	frame2 := frame1.Push(fld2)
+	defer frame2.Pop()
+
+	// Verify localVariableHolder implementations and recursive checks
+	tests := []struct {
+		name      string
+		varName   string
+		wantLocal bool
+	}{
+		{"inner accu", "accu2", true},
+		{"inner iter", "iter2", true},
+		{"outer accu", "accu1", true},
+		{"outer iter", "iter1", true},
+		{"outer iter2", "iter1_2", true},
+		{"global var", "x", false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := frame2.IsLocalVariable(tc.varName); got != tc.wantLocal {
+				t.Errorf("IsLocalVariable(%q) = %t, wanted %t", tc.varName, got, tc.wantLocal)
+			}
+		})
+	}
+}
+
+func TestActivation_NewActivationNilInput(t *testing.T) {
+	if _, err := NewActivation(nil); err == nil {
+		t.Error("NewActivation(nil) wanted error, got nil")
+	}
+}
+
+func TestPartialActivation_NewPartialActivationNilInput(t *testing.T) {
+	if _, err := NewPartialActivation(nil); err == nil {
+		t.Error("NewPartialActivation(nil) wanted error, got nil")
+	}
+}
+
+func TestAsPartialActivation_NonPartialActivation(t *testing.T) {
+	standardAct, _ := NewActivation(map[string]any{"a": 1})
+	if _, found := AsPartialActivation(standardAct); found {
+		t.Error("AsPartialActivation(standardAct) wanted false, got true")
+	}
+}

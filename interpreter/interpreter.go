@@ -113,6 +113,12 @@ type activationWrapper interface {
 	Unwrap() Activation
 }
 
+// localVariableHolder identifies an Activation scope that holds local variables and supports testing
+// whether a variable name is local to this scope.
+type localVariableHolder interface {
+	IsLocalVariable(name string) bool
+}
+
 // evalStateFactory holds a reference to a factory function that produces an EvalState instance.
 type evalStateFactory struct {
 	factory func() EvalState

@@ -1602,6 +1602,26 @@ func (f *folder) Unwrap() Activation {
 	return f.frame.parent
 }
 
+// IsLocalVariable reports whether the variable name is locally bound by the folder scope.
+func (f *folder) IsLocalVariable(name string) bool {
+	if name == f.accuVar {
+		return true
+	}
+	if !f.computeResult && (name == f.iterVar || name == f.iterVar2) {
+		return true
+	}
+	parent := f.Parent()
+	if parent == nil {
+		return false
+	}
+	if varHolder, ok := parent.(localVariableHolder); ok {
+		if varHolder.IsLocalVariable(name) {
+			return true
+		}
+	}
+	return false
+}
+
 // UnknownAttributePatterns implements the PartialActivation interface returning the unknown patterns
 // if they were provided to the input activation, or an empty set if the proxied activation is not partial.
 func (f *folder) UnknownAttributePatterns() []*AttributePattern {

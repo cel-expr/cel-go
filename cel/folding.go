@@ -15,7 +15,9 @@
 package cel
 
 import (
+	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/google/cel-go/common/ast"
 	"github.com/google/cel-go/common/operators"
@@ -102,9 +104,9 @@ func (opt *constantFoldingOptimizer) Optimize(ctx *OptimizerContext, a *ast.AST)
 			}
 			// Otherwise, assume all context is needed to evaluate the expression.
 			err := opt.tryFold(ctx, a, fold)
-			// Ignore errors for identifiers, since there is no guarantee that the environment
+			// Ignore errors for identifiers or subexpressions that cannot be folded, since there is no guarantee that the environment
 			// has a value for them.
-			if err != nil && fold.Kind() != ast.IdentKind {
+			if err != nil && fold.Kind() != ast.IdentKind && !errors.Is(err, errCannotFold) {
 				ctx.ReportErrorAtID(fold.ID(), "constant-folding evaluation failed: %v", err.Error())
 				return a
 			}
@@ -142,30 +144,53 @@ func (opt *constantFoldingOptimizer) Optimize(ctx *OptimizerContext, a *ast.AST)
 	return a
 }
 
+var errCannotFold = errors.New("subexpression cannot be folded")
+
 // tryFold attempts to evaluate a sub-expression to a literal.
 //
 // If the evaluation succeeds, the input expr value will be modified to become a literal, otherwise
 // the method will return an error.
 func (opt *constantFoldingOptimizer) tryFold(ctx *OptimizerContext, a *ast.AST, expr ast.Expr) error {
-	// Assume all context is needed to evaluate the expression.
-	subAST := &Ast{
-		impl: ast.NewCheckedAST(ast.NewAST(expr, a.SourceInfo()), a.TypeMap(), a.ReferenceMap()),
-	}
-	prg, err := ctx.Program(subAST)
-	if err != nil {
-		return err
-	}
 	activation := opt.knownValues
 	if activation == nil {
 		activation = NoVars()
 	}
-	out, _, err := prg.Eval(activation)
+	navExpr := expr.(ast.NavigableExpr)
+	out, err := evaluateExpr(ctx, a, navExpr, activation)
 	if err != nil {
 		return err
 	}
 	// Update the fold expression to be a literal.
 	ctx.UpdateExpr(expr, ctx.NewLiteral(out))
 	return nil
+}
+
+func evaluateExpr(ctx *OptimizerContext, a *ast.AST, navigableExpr ast.NavigableExpr, activation Activation) (ref.Val, error) {
+	partialActivation, err := ctx.PartialVars(activation)
+	if err != nil {
+		return nil, err
+	}
+	subAST := &Ast{
+		impl: ast.NewCheckedAST(ast.NewAST(navigableExpr, a.SourceInfo()), a.TypeMap(), a.ReferenceMap()),
+	}
+	prg, err := ctx.Program(subAST)
+	if err != nil {
+		return nil, err
+	}
+	out, _, err := prg.Eval(partialActivation)
+	if err != nil {
+		if strings.Contains(err.Error(), "no such attribute") {
+			return nil, errCannotFold
+		}
+		return nil, err
+	}
+	if types.IsUnknown(out) {
+		return nil, errCannotFold
+	}
+	if types.IsError(out) {
+		return nil, fmt.Errorf("%v", out)
+	}
+	return out, nil
 }
 
 func isLateBoundFunctionCall(ctx *OptimizerContext, expr ast.Expr) bool {
@@ -207,11 +232,17 @@ func maybePruneBranches(ctx *OptimizerContext, expr ast.NavigableExpr) bool {
 			return true
 		}
 		needle := args[0]
-		if needle.Kind() == ast.LiteralKind && haystack.Kind() == ast.ListKind {
-			needleValue := needle.AsLiteral()
+		if (needle.Kind() == ast.LiteralKind || needle.Kind() == ast.IdentKind) && haystack.Kind() == ast.ListKind {
+			needleIsLit := needle.Kind() == ast.LiteralKind
+			needleLitVal := needle.AsLiteral()
+			needleIdentVal := needle.AsIdent()
 			list := haystack.AsList()
-			for _, e := range list.Elements() {
-				if e.Kind() == ast.LiteralKind && e.AsLiteral().Equal(needleValue) == types.True {
+			for _, elem := range list.Elements() {
+				if needleIsLit && elem.Kind() == ast.LiteralKind && elem.AsLiteral().Equal(needleLitVal) == types.True {
+					ctx.UpdateExpr(expr, ctx.NewLiteral(types.True))
+					return true
+				}
+				if !needleIsLit && elem.Kind() == ast.IdentKind && elem.AsIdent() == needleIdentVal {
 					ctx.UpdateExpr(expr, ctx.NewLiteral(types.True))
 					return true
 				}
@@ -285,9 +316,9 @@ func pruneOptionalListElements(ctx *OptimizerContext, e ast.Expr) {
 	updatedElems := []ast.Expr{}
 	updatedIndices := []int32{}
 	newOptIndex := -1
-	for _, e := range elems {
+	for i, e := range elems {
 		newOptIndex++
-		if !l.IsOptional(int32(newOptIndex)) {
+		if !l.IsOptional(int32(i)) {
 			updatedElems = append(updatedElems, e)
 			continue
 		}
@@ -554,17 +585,33 @@ func constantCallMatcher(e ast.NavigableExpr) bool {
 			return true
 		}
 	}
+	if fnName == operators.Equals || fnName == operators.NotEquals {
+		if hasComprehensionVar(e) {
+			return false
+		}
+		if isExprConstantOfKind(children[0], types.BoolType) || isExprConstantOfKind(children[1], types.BoolType) {
+			return true
+		}
+	}
 	if fnName == operators.In {
+		if hasComprehensionVar(e) {
+			return false
+		}
 		haystack := children[1]
 		if haystack.Kind() == ast.ListKind && haystack.AsList().Size() == 0 {
 			return true
 		}
 		needle := children[0]
-		if needle.Kind() == ast.LiteralKind && haystack.Kind() == ast.ListKind {
-			needleValue := needle.AsLiteral()
+		if (needle.Kind() == ast.LiteralKind || needle.Kind() == ast.IdentKind) && haystack.Kind() == ast.ListKind {
+			needleIsLit := needle.Kind() == ast.LiteralKind
+			needleLitVal := needle.AsLiteral()
+			needleIdentVal := needle.AsIdent()
 			list := haystack.AsList()
-			for _, e := range list.Elements() {
-				if e.Kind() == ast.LiteralKind && e.AsLiteral().Equal(needleValue) == types.True {
+			for _, elem := range list.Elements() {
+				if needleIsLit && elem.Kind() == ast.LiteralKind && elem.AsLiteral().Equal(needleLitVal) == types.True {
+					return true
+				}
+				if !needleIsLit && elem.Kind() == ast.IdentKind && elem.AsIdent() == needleIdentVal {
 					return true
 				}
 			}
@@ -577,6 +624,31 @@ func constantCallMatcher(e ast.NavigableExpr) bool {
 		}
 	}
 	return true
+}
+
+func isExprConstantOfKind(e ast.Expr, t *types.Type) bool {
+	return e.Kind() == ast.LiteralKind && e.AsLiteral().Type() == t
+}
+
+func hasComprehensionVar(e ast.NavigableExpr) bool {
+	idents := ast.MatchDescendants(e, ast.KindMatcher(ast.IdentKind))
+	for _, identNode := range idents {
+		identName := identNode.AsIdent()
+		curr := identNode
+		parent, found := curr.Parent()
+		for found {
+			if parent.Kind() == ast.ComprehensionKind {
+				compre := parent.AsComprehension()
+				if (compre.AccuVar() == identName || compre.IterVar() == identName || compre.IterVar2() == identName) &&
+					curr.ID() != compre.IterRange().ID() && curr.ID() != compre.AccuInit().ID() {
+					return true
+				}
+			}
+			curr = parent
+			parent, found = parent.Parent()
+		}
+	}
+	return false
 }
 
 func isNestedComprehension(e ast.NavigableExpr) bool {

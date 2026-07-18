@@ -1479,3 +1479,33 @@ func TestQualifyIfPresent(t *testing.T) {
 		})
 	}
 }
+
+func TestAttribute_StringRepresentation(t *testing.T) {
+	reg := newTestRegistry(t)
+	cont := containers.DefaultContainer
+	fac := NewAttributeFactory(cont, reg, reg)
+
+	abs := fac.AbsoluteAttribute(1, "a.b")
+	maybe := fac.MaybeAttribute(2, "c")
+	rel := fac.RelativeAttribute(3, NewConstValue(1, types.String("d")))
+	cond := fac.ConditionalAttribute(4, NewConstValue(1, types.True), abs, maybe)
+	trail := types.NewAttributeTrail("x")
+
+	tests := []struct {
+		name     string
+		stringer fmt.Stringer
+	}{
+		{name: "absoluteAttribute", stringer: abs.(fmt.Stringer)},
+		{name: "maybeAttribute", stringer: maybe.(fmt.Stringer)},
+		{name: "relativeAttribute", stringer: rel.(fmt.Stringer)},
+		{name: "conditionalAttribute", stringer: cond.(fmt.Stringer)},
+		{name: "AttributeTrail", stringer: trail},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if str := tc.stringer.String(); str == "" {
+				t.Errorf("%s.String() returned empty string", tc.name)
+			}
+		})
+	}
+}

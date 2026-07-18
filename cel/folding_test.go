@@ -15,6 +15,7 @@
 package cel
 
 import (
+	"errors"
 	"reflect"
 	"sort"
 	"strings"
@@ -24,8 +25,10 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/google/cel-go/common/ast"
+	"github.com/google/cel-go/common/operators"
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
+	"github.com/google/cel-go/interpreter"
 
 	proto3pb "github.com/google/cel-go/test/proto3pb"
 	exprpb "google.golang.org/genproto/googleapis/api/expr/v1alpha1"
@@ -118,6 +121,14 @@ func TestConstantFoldingOptimizer(t *testing.T) {
 			folded: `[1, 2, 3].map(i, [1, 2, 3].map(j, i * j).filter(k, k % 2 == x))`,
 		},
 		{
+			expr:   `[(x - 1 > 3) ? 1 : 2].all(x, x < .x)`,
+			folded: `[(x - 1 > 3) ? 1 : 2].all(x, x < .x)`,
+		},
+		{
+			expr:   `[(x - 1 > 3) ? (x - 1) : 5].exists(x, x - 1 > 3)`,
+			folded: `[(x - 1 > 3) ? (x - 1) : 5].exists(x, x - 1 > 3)`,
+		},
+		{
 			expr:   `[{}, {"a": 1}, {"b": 2}].filter(m, has(m.a))`,
 			folded: `[{"a": 1}]`,
 		},
@@ -150,6 +161,10 @@ func TestConstantFoldingOptimizer(t *testing.T) {
 			folded: `[?x]`,
 		},
 		{
+			expr:   `[?optional.of(1), ?x]`,
+			folded: `[1, ?x]`,
+		},
+		{
 			expr:   `[1, x, ?optional.ofNonZeroValue(0), ?x.?y]`,
 			folded: `[1, x, ?x.?y]`,
 		},
@@ -176,6 +191,26 @@ func TestConstantFoldingOptimizer(t *testing.T) {
 		{
 			expr:   `false ? x + 'world' : 'hello' + 'world'`,
 			folded: `"helloworld"`,
+		},
+		{
+			expr:   `x == true`,
+			folded: `x == true`,
+		},
+		{
+			expr:   `true == x`,
+			folded: `true == x`,
+		},
+		{
+			expr:   `x != false`,
+			folded: `x != false`,
+		},
+		{
+			expr:   `false != x`,
+			folded: `false != x`,
+		},
+		{
+			expr:   `x ? 1 + 2 : 3 + 4`,
+			folded: `x ? 3 : 7`,
 		},
 		{
 			expr:   `true && x`,
@@ -326,12 +361,142 @@ func TestConstantFoldingOptimizer(t *testing.T) {
 				"o": &proto3pb.TestAllTypes{RepeatedInt32: []int32{1, 2, 3}},
 			},
 		},
+		{
+			expr:   `false || x || false || y`,
+			folded: `x || y`,
+		},
+		{
+			expr:   `true ? (false ? x + 1 : x + 2) : x`,
+			folded: `x + 2`,
+		},
+		{
+			expr:   `false ? x : (true ? x + 1 : x + 2)`,
+			folded: `x + 1`,
+		},
+		{
+			expr:   `1 in []`,
+			folded: `false`,
+		},
+		{
+			expr:   `x in [1, 2, x]`,
+			folded: `true`,
+		},
+		{
+			expr:   `[1, 2].filter(x, x in [1, 2])`,
+			folded: `[1, 2]`,
+		},
+		{
+			expr:   `5 in [1, x, y, 5]`,
+			folded: `true`,
+		},
+		{
+			expr:   `!(5 in [1, x, y, 5])`,
+			folded: `false`,
+		},
+		{
+			expr:   `[1, ?optional.of(3)]`,
+			folded: `[1, 3]`,
+		},
+		{
+			expr:   `[1, optional.of(3)]`,
+			folded: `[1, optional.of(3)]`,
+		},
+		{
+			expr:   `[?optional.of(1 + 2 + 3)]`,
+			folded: `[6]`,
+		},
+		{
+			expr:   `[?optional.of(3)]`,
+			folded: `[3]`,
+		},
+		{
+			expr:   `[?optional.of(x)]`,
+			folded: `[?optional.of(x)]`,
+		},
+		{
+			expr:   `[?optional.ofNonZeroValue(3)]`,
+			folded: `[3]`,
+		},
+		{
+			expr:   `[optional.of(1 + 2 + 3)]`,
+			folded: `[optional.of(6)]`,
+		},
+		{
+			expr:   `[optional.of(x)]`,
+			folded: `[optional.of(x)]`,
+		},
+		{
+			expr:   `[optional.ofNonZeroValue(1 + 2 + 3)]`,
+			folded: `[optional.of(6)]`,
+		},
+		{
+			expr:   `[optional.ofNonZeroValue(3)]`,
+			folded: `[optional.of(3)]`,
+		},
+		{
+			expr:   `{?1: optional.none()}`,
+			folded: `{}`,
+		},
+		{
+			expr:   `google.expr.proto3.test.TestAllTypes{single_int64: 1 + 2 + 3 + x}`,
+			folded: `google.expr.proto3.test.TestAllTypes{single_int64: 6 + x}`,
+		},
+		{
+			expr:   `google.expr.proto3.test.TestAllTypes{single_nested_message: google.expr.proto3.test.TestAllTypes.NestedMessage{bb: 42}}.single_nested_message.bb`,
+			folded: `42`,
+		},
+		{
+			expr:   `{"a": 1}["a"]`,
+			folded: `1`,
+		},
+		{
+			expr:   `{"a": {"b": 2}}["a"]["b"]`,
+			folded: `2`,
+		},
+		{
+			expr:   `{"hello": "world"}.?hello`,
+			folded: `optional.of("world")`,
+		},
+		{
+			expr:   `[1] + [2] + [3]`,
+			folded: `[1, 2, 3]`,
+		},
+		{
+			expr:   `[?optional.none(), 2]`,
+			folded: `[2]`,
+		},
+		{
+			expr:   `[1] + [?optional.of(2)] + [3]`,
+			folded: `[1, 2, 3]`,
+		},
+		{
+			expr:   `[1] + [x]`,
+			folded: `[1] + [x]`,
+		},
+
+		{
+			expr:   `duration("1h") - duration("60m")`,
+			folded: `duration("0s")`,
+		},
+		{
+			expr:   `timestamp("1970-01-01T00:15:00Z") - timestamp("1970-01-01T00:00:10Z")`,
+			folded: `duration("890s")`,
+		},
+		{
+			expr:   `timestamp("2000-01-01T00:02:03.2123Z") + duration("25h2m32s42ms53us29ns")`,
+			folded: `timestamp("2000-01-02T01:04:35.254353029Z")`,
+		},
+		{
+			expr:   `[1 + 1, 1 + 2].exists(i, i < 10)`,
+			folded: `true`,
+		},
 	}
 	e, err := NewEnv(
 		OptionalTypes(),
 		EnableMacroCallTracking(),
 		Types(&proto3pb.TestAllTypes{}),
 		Variable("x", DynType),
+		Variable("y", DynType),
 		// work around different package convention in piper vs github.
 		// google.expr.proto3.test.ImportedGlobalEnum.IMPORT_BAZ
 		Constant("c", IntType, types.Int(2)),
@@ -919,3 +1084,145 @@ func (x int64Slice) Swap(i, j int) { x[i], x[j] = x[j], x[i] }
 
 // Sort is a convenience method: x.Sort() calls Sort(x).
 func (x int64Slice) Sort() { sort.Sort(x) }
+
+func TestConstantFoldingOption_FoldKnownValuesNilInput(t *testing.T) {
+	opt, err := FoldKnownValues(nil)(&constantFoldingOptimizer{})
+	if err != nil || opt.knownValues == nil {
+		t.Errorf("FoldKnownValues(nil) failed: %v", err)
+	}
+}
+
+func TestNewConstantFoldingOptimizer_OptionErrorPropagation(t *testing.T) {
+	errOpt := func(opt *constantFoldingOptimizer) (*constantFoldingOptimizer, error) {
+		return nil, errors.New("option error")
+	}
+	if _, err := NewConstantFoldingOptimizer(errOpt); err == nil {
+		t.Error("NewConstantFoldingOptimizer(errOpt) wanted error, got nil")
+	}
+}
+
+func TestConstantFoldingOptimizer_EvaluateExpr(t *testing.T) {
+	partAct, err := interpreter.NewPartialActivation(
+		interpreter.EmptyActivation(),
+		interpreter.NewAttributePattern("x"))
+	if err != nil {
+		t.Fatalf("NewPartialActivation() failed: %v", err)
+	}
+	unknownValAct, err := NewActivation(map[string]any{
+		"x": types.NewUnknown(1, types.NewAttributeTrail("x")),
+	})
+	if err != nil {
+		t.Fatalf("NewActivation() failed: %v", err)
+	}
+
+	tests := []struct {
+		name     string
+		expr     string
+		vars     []EnvOption
+		act      Activation
+		wantFold string
+		wantErr  string
+	}{
+		{
+			name:     "missing attribute",
+			expr:     "x + 1",
+			vars:     []EnvOption{Variable("x", IntType)},
+			act:      partAct,
+			wantFold: "x + 1",
+		},
+		{
+			name:     "unknown value",
+			expr:     "x + 1",
+			vars:     []EnvOption{Variable("x", IntType)},
+			act:      unknownValAct,
+			wantFold: "x + 1",
+		},
+		{
+			name:    "evaluation error",
+			expr:    "1 / 0",
+			wantErr: "division by zero",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env, err := NewEnv(tt.vars...)
+			if err != nil {
+				t.Fatalf("NewEnv() failed: %v", err)
+			}
+			var foldOpts []ConstantFoldingOption
+			if tt.act != nil {
+				foldOpts = append(foldOpts, FoldKnownValues(tt.act))
+			}
+			folder, err := NewConstantFoldingOptimizer(foldOpts...)
+			if err != nil {
+				t.Fatalf("NewConstantFoldingOptimizer() failed: %v", err)
+			}
+			opt, err := NewStaticOptimizer(folder)
+			if err != nil {
+				t.Fatalf("NewStaticOptimizer() failed: %v", err)
+			}
+			ast, iss := env.Compile(tt.expr)
+			if iss.Err() != nil {
+				t.Fatalf("Compile() failed: %v", iss.Err())
+			}
+			optimized, iss := opt.Optimize(env, ast)
+			if tt.wantErr != "" {
+				if iss.Err() == nil {
+					t.Fatalf("Optimize(%q) wanted error containing %q, got nil", tt.expr, tt.wantErr)
+				}
+				if !strings.Contains(iss.Err().Error(), tt.wantErr) {
+					t.Errorf("Optimize(%q) got %v, wanted error containing %q", tt.expr, iss.Err(), tt.wantErr)
+				}
+				return
+			}
+			if iss.Err() != nil {
+				t.Fatalf("Optimize() failed: %v", iss.Err())
+			}
+			folded, err := AstToString(optimized)
+			if err != nil {
+				t.Fatalf("AstToString() failed: %v", err)
+			}
+			if folded != tt.wantFold {
+				t.Errorf("got %q, wanted %q", folded, tt.wantFold)
+			}
+		})
+	}
+}
+
+type testVariadicLogicOptimizer struct{}
+
+func (t *testVariadicLogicOptimizer) Optimize(ctx *OptimizerContext, a *ast.AST) *ast.AST {
+	call := ctx.NewCall(operators.LogicalAnd, ctx.NewIdent("x"), ctx.NewLiteral(types.True), ctx.NewIdent("y"))
+	return ctx.NewAST(call)
+}
+
+func TestConstantFoldingOptimizer_VariadicShortcircuitLogic(t *testing.T) {
+	env, err := NewEnv(Variable("x", BoolType), Variable("y", BoolType))
+	if err != nil {
+		t.Fatalf("NewEnv() failed: %v", err)
+	}
+	folder, err := NewConstantFoldingOptimizer()
+	if err != nil {
+		t.Fatalf("NewConstantFoldingOptimizer() failed: %v", err)
+	}
+	opt, err := NewStaticOptimizer(&testVariadicLogicOptimizer{}, folder)
+	if err != nil {
+		t.Fatalf("NewStaticOptimizer() failed: %v", err)
+	}
+	parsed, iss := env.Parse("x && y")
+	if iss.Err() != nil {
+		t.Fatalf("Parse() failed: %v", iss.Err())
+	}
+	optimized, iss := opt.Optimize(env, parsed)
+	if iss.Err() != nil {
+		t.Fatalf("Optimize() failed: %v", iss.Err())
+	}
+	folded, err := AstToString(optimized)
+	if err != nil {
+		t.Fatalf("AstToString() failed: %v", err)
+	}
+	if folded != "x && y" {
+		t.Errorf("got %q, wanted %q", folded, "x && y")
+	}
+}

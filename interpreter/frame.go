@@ -196,6 +196,20 @@ func (f *ExecutionFrame) Unwrap() Activation {
 	return f.Activation
 }
 
+// IsLocalVariable reports whether the variable name is locally bound in the frame.
+func (f *ExecutionFrame) IsLocalVariable(name string) bool {
+	if holder, ok := f.Activation.(localVariableHolder); ok {
+		if holder.IsLocalVariable(name) {
+			return true
+		}
+	}
+	// Search parent scopes
+	if f.parent != nil {
+		return f.parent.IsLocalVariable(name)
+	}
+	return false
+}
+
 // CheckInterrupt returns whether the evaluation has been interrupted.
 func (f *ExecutionFrame) CheckInterrupt() bool {
 	if f.ctx == nil {
