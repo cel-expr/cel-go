@@ -17,7 +17,6 @@ package cel
 import (
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/google/cel-go/common/ast"
 	"github.com/google/cel-go/common/operators"
@@ -178,17 +177,8 @@ func evaluateExpr(ctx *OptimizerContext, a *ast.AST, navigableExpr ast.Navigable
 		return nil, err
 	}
 	out, _, err := prg.Eval(partialActivation)
-	if err != nil {
-		if strings.Contains(err.Error(), "no such attribute") {
-			return nil, errCannotFold
-		}
-		return nil, err
-	}
-	if types.IsUnknown(out) {
+	if err != nil || types.IsUnknown(out) {
 		return nil, errCannotFold
-	}
-	if types.IsError(out) {
-		return nil, fmt.Errorf("%v", out)
 	}
 	return out, nil
 }

@@ -18,7 +18,6 @@ import (
 	"errors"
 	"reflect"
 	"sort"
-	"strings"
 	"testing"
 
 	"google.golang.org/protobuf/encoding/prototext"
@@ -554,7 +553,6 @@ func TestConstantFoldingCallsWithSideEffects(t *testing.T) {
 	tests := []struct {
 		expr   string
 		folded string
-		error  string
 	}{
 		{
 			expr:   `noSideEffect(3)`,
@@ -573,8 +571,8 @@ func TestConstantFoldingCallsWithSideEffects(t *testing.T) {
 			folded: `true`,
 		},
 		{
-			expr:  `noImpl(3)`,
-			error: `constant-folding evaluation failed: no such overload: noImpl`,
+			expr:   `noImpl(3)`,
+			folded: "noImpl(3)",
 		},
 	}
 	e, err := NewEnv(
@@ -614,14 +612,6 @@ func TestConstantFoldingCallsWithSideEffects(t *testing.T) {
 				t.Fatalf("NewStaticOptimizer() failed: %v", err)
 			}
 			optimized, iss := opt.Optimize(e, checked)
-			if tc.error != "" {
-				if iss.Err() == nil {
-					t.Errorf("got nil, wanted error containing %q", tc.error)
-				} else if !strings.Contains(iss.Err().Error(), tc.error) {
-					t.Errorf("got %q, wanted error containing %q", iss.Err().Error(), tc.error)
-				}
-				return
-			}
 			if iss.Err() != nil {
 				t.Fatalf("Optimize() generated an invalid AST: %v", iss.Err())
 			}
@@ -1121,7 +1111,6 @@ func TestConstantFoldingOptimizer_EvaluateExpr(t *testing.T) {
 		vars     []EnvOption
 		act      Activation
 		wantFold string
-		wantErr  string
 	}{
 		{
 			name:     "missing attribute",
@@ -1138,9 +1127,14 @@ func TestConstantFoldingOptimizer_EvaluateExpr(t *testing.T) {
 			wantFold: "x + 1",
 		},
 		{
-			name:    "evaluation error",
-			expr:    "1 / 0",
-			wantErr: "division by zero",
+			name:     "evaluation error division by zero",
+			expr:     "1 / 0",
+			wantFold: "1 / 0",
+		},
+		{
+			name:     "evaluation error index out of bounds",
+			expr:     "[1, 2][5]",
+			wantFold: "[1, 2][5]",
 		},
 	}
 
@@ -1167,15 +1161,6 @@ func TestConstantFoldingOptimizer_EvaluateExpr(t *testing.T) {
 				t.Fatalf("Compile() failed: %v", iss.Err())
 			}
 			optimized, iss := opt.Optimize(env, ast)
-			if tt.wantErr != "" {
-				if iss.Err() == nil {
-					t.Fatalf("Optimize(%q) wanted error containing %q, got nil", tt.expr, tt.wantErr)
-				}
-				if !strings.Contains(iss.Err().Error(), tt.wantErr) {
-					t.Errorf("Optimize(%q) got %v, wanted error containing %q", tt.expr, iss.Err(), tt.wantErr)
-				}
-				return
-			}
 			if iss.Err() != nil {
 				t.Fatalf("Optimize() failed: %v", iss.Err())
 			}
