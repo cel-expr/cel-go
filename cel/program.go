@@ -454,7 +454,7 @@ func (p *prog) newAsyncFrame(ctx context.Context, input any) (*interpreter.Execu
 // defaultAsyncMaxConcurrency bounds the number of concurrently launched async calls when the
 // program does not configure AsyncMaxConcurrency. It exists so that a wide fan-out (e.g. an async
 // call inside a comprehension over a large list) cannot spawn an unbounded number of goroutines.
-const defaultAsyncMaxConcurrency = 1000
+const defaultAsyncMaxConcurrency = 100
 
 // resolveAsyncMaxConcurrency maps the configured concurrency to the effective launch limit:
 //   - 0 (unset): apply defaultAsyncMaxConcurrency.
@@ -494,6 +494,17 @@ func (p *prog) ConcurrentEval(ctx context.Context, input any) <-chan EvalResult 
 
 	go func() {
 		defer close(resCh)
+		// Ensure concurrent eval handles panic / recovery properly
+		defer func() {
+			if r := recover(); r != nil {
+				switch t := r.(type) {
+				case interpreter.EvalCancelledError:
+					resCh <- EvalResult{Err: t}
+				default:
+					resCh <- EvalResult{Err: fmt.Errorf("internal error: %v", r)}
+				}
+			}
+		}()
 
 		frame, err := p.newAsyncFrame(ctx, input)
 		if err != nil {

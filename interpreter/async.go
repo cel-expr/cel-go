@@ -362,7 +362,12 @@ func (t *asyncCallStateTracker) launch(ctx context.Context, acs *asyncCallState,
 		}
 		// Wait for the async computation to finish or for the context to be cancelled.
 		select {
-		case r := <-ch:
+		case r, ok := <-ch:
+			if !ok {
+				acs.SetResult(types.NewErrFromString(
+					fmt.Sprintf("function %s returned an empty channel", acs.function)))
+				return
+			}
 			acs.SetResult(r)
 		case <-ctx.Done():
 			// Evaluation context cancelled before the async operation completed.

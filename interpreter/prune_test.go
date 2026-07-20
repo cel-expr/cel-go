@@ -364,25 +364,49 @@ var testCases = []testInfo{
 		expr: `[1+3, 2+2, 3+1, four]`,
 		out:  `[4, 4, 4, four]`,
 	},
+	// Since `undef` is not actually declared, these prune calls early exit
+	// as there is no logical operator available to absorb the error.
 	{
 		in:   unknownActivation(),
-		expr: `test == {'a': 1, 'field': 2}.field`,
-		out:  `test == {"a": 1, "field": 2}.field`,
+		expr: `undef == {'a': 1, 'field': 2}.field`,
+		out:  `undef == {"a": 1, "field": 2}.field`,
 	},
 	{
 		in:   unknownActivation(),
-		expr: `test in {'a': 1, 'field': [2, 3]}.field`,
-		out:  `test in {"a": 1, "field": [2, 3]}.field`,
+		expr: `undef in {'a': 1, 'field': [2, 3]}.field`,
+		out:  `undef in {"a": 1, "field": [2, 3]}.field`,
 	},
 	{
 		in:   unknownActivation(),
-		expr: `test == {'field': [1 + 2, 2 + 3]}`,
-		out:  `test == {"field": [1 + 2, 2 + 3]}`,
+		expr: `undef == {'field': [1 + 2, 2 + 3]}`,
+		out:  `undef == {"field": [1 + 2, 2 + 3]}`,
 	},
 	{
 		in:   unknownActivation(),
-		expr: `test in {'a': 1, 'field': [test, 3]}.field`,
-		out:  `test in {"a": 1, "field": [test, 3]}.field`,
+		expr: `undef in {'a': 1, 'field': [undef, 3]}.field`,
+		out:  `undef in {"a": 1, "field": [undef, 3]}.field`,
+	},
+	// These expressions are effectively identical to the ones above,
+	// but use a declared variable 'def'
+	{
+		in:   unknownActivation("def"),
+		expr: `def == {'a': 1, 'field': 2}.field`,
+		out:  `def == 2`,
+	},
+	{
+		in:   unknownActivation("def"),
+		expr: `def in {'a': 1, 'field': [2, 3]}.field`,
+		out:  `def in [2, 3]`,
+	},
+	{
+		in:   unknownActivation("def"),
+		expr: `def == {'field': [1 + 2, 2 + 3]}`,
+		out:  `def == {"field": [3, 5]}`,
+	},
+	{
+		in:   unknownActivation("def"),
+		expr: `def in {'a': 1, 'field': [def, 3]}.field`,
+		out:  `def in {"a": 1, "field": [def, 3]}.field`,
 	},
 	{
 		in:   partialActivation(map[string]any{"foo": "bar"}, "r.attr"),

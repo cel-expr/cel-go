@@ -177,6 +177,10 @@ func evaluateExpr(ctx *OptimizerContext, a *ast.AST, navigableExpr ast.Navigable
 	if err != nil {
 		return nil, err
 	}
+	// Folding will not attempt to call async functions which are all marked as late-bound,
+	// but the presence of such functions requires the use of `ConcurrentEval` in order to
+	// avoid an early return error which blocks async functions from running in `Eval` and
+	// `ContextEval` call paths.
 	resCh := prg.ConcurrentEval(context.Background(), partialActivation)
 	res := <-resCh
 	if res.Err != nil || types.IsUnknown(res.Val) {

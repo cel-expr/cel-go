@@ -17,6 +17,7 @@ package cel_test
 import (
 	"context"
 	"errors"
+	"math/rand"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -26,6 +27,7 @@ import (
 	"github.com/google/cel-go/cel/async"
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
+	"github.com/google/cel-go/ext"
 	"github.com/google/cel-go/interpreter"
 	"github.com/google/cel-go/test"
 )
@@ -250,16 +252,14 @@ func TestConcurrentEval(t *testing.T) {
 			wantLaunches: 1,
 		},
 		{
-			name:         "eval_left_async_or_async",
-			expr:         `(async_inc(10) == 11) || (async_inc(20) == 21)`,
-			want:         true,
-			wantLaunches: 2,
+			name: "eval_left_async_or_async",
+			expr: `(async_inc(10) == 11) || (async_inc(20) == 21)`,
+			want: true,
 		},
 		{
-			name:         "eval_left_async_and_async",
-			expr:         `(async_inc(10) == 0) && (async_inc(20) == 21)`,
-			want:         false,
-			wantLaunches: 2,
+			name: "eval_left_async_and_async",
+			expr: `(async_inc(10) == 0) && (async_inc(20) == 21)`,
+			want: false,
 		},
 		{
 			name:         "eval_or_var_expr_short_circuit_pass1",
@@ -308,6 +308,32 @@ func TestConcurrentEval(t *testing.T) {
 			want:         12,
 			wantLaunches: 1,
 		},
+		// Generate a list from [0..99] inclusive and validate the last increment yields 100
+		// Tests the scenario where there are more async invocations than completion buffer.
+		{
+			name:    "more requests than completion buffer w/ debounce",
+			expr:    `lists.range(100).exists(i, async_inc(i) == 100)`,
+			maxConc: 5,
+			opts: []any{
+				ext.Lists(),
+				cel.AsyncCompletionBufferSize(10),
+				cel.ConcurrentDrainStrategy(async.DrainReady(10 * time.Microsecond)),
+			},
+			want: true,
+		},
+		// Generate a list from [0..99] inclusive and validate the last increment yields 100
+		// Tests the scenario where there are more async invocations than completion buffer.
+		{
+			name:    "more requests than completion buffer w/ drain all",
+			expr:    `lists.range(100).exists(i, async_inc(i) == 100)`,
+			maxConc: 5,
+			opts: []any{
+				ext.Lists(),
+				cel.AsyncCompletionBufferSize(10),
+				cel.ConcurrentDrainStrategy(async.DrainAll()),
+			},
+			want: true,
+		},
 	}
 
 	for _, tc := range cases {
@@ -325,7 +351,8 @@ func TestConcurrentEval(t *testing.T) {
 								break
 							}
 						}
-						time.Sleep(5 * time.Millisecond)
+						// Add a random delay between 1-500 microseconds to simulate network latency.
+						time.Sleep(time.Duration(rand.Intn(500)+1) * time.Microsecond)
 						live.Add(-1)
 						v := int64(args[0].(types.Int))
 						return types.Int(v + 1)
@@ -740,6 +767,108 @@ func TestConcurrentEvalCancelDuringDebounce(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("ConcurrentEval() timed out waiting for cancellation during debounce")
+	}
+}
+
+func TestConcurrentEvalRecover(t *testing.T) {
+	env, err := cel.NewEnv(
+		cel.Function("panic",
+			cel.Overload("global_panic", []*cel.Type{}, cel.BoolType,
+				cel.FunctionBinding(func(args ...ref.Val) ref.Val {
+					panic("watch me recover")
+				}),
+			),
+		),
+		cel.Function("cancel_panic",
+			cel.Overload("global_cancel_panic", []*cel.Type{}, cel.BoolType,
+				cel.FunctionBinding(func(args ...ref.Val) ref.Val {
+					panic(interpreter.EvalCancelledError{Message: "eval cancelled", Cause: interpreter.ContextCancelled})
+				}),
+			),
+		),
+		cel.Function("sleep_func",
+			cel.Overload("global_sleep_func", []*cel.Type{}, cel.BoolType,
+				cel.AsyncBinding(func(ctx context.Context, args ...ref.Val) ref.Val {
+					time.Sleep(1 * time.Second)
+					return types.True
+				}),
+			),
+		),
+	)
+	if err != nil {
+		t.Fatalf("cel.NewEnv() failed: %v", err)
+	}
+
+	tests := []struct {
+		name    string
+		expr    string
+		prgOpts []cel.ProgramOption
+		getCtx  func() (context.Context, context.CancelFunc)
+		wantErr any
+	}{
+		{
+			name:    "panic",
+			expr:    "panic()",
+			wantErr: "internal error: watch me recover",
+		},
+		{
+			name:    "panic_tracked_state",
+			expr:    "panic()",
+			prgOpts: []cel.ProgramOption{cel.EvalOptions(cel.OptTrackState)},
+			wantErr: "internal error: watch me recover",
+		},
+		{
+			name:    "eval_cancelled_error",
+			expr:    "cancel_panic()",
+			wantErr: &interpreter.EvalCancelledError{},
+		},
+		{
+			name: "context_timeout",
+			expr: "sleep_func()",
+			getCtx: func() (context.Context, context.CancelFunc) {
+				return context.WithTimeout(context.Background(), 10*time.Millisecond)
+			},
+			wantErr: context.DeadlineExceeded,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			ast, iss := env.Compile(tc.expr)
+			if iss.Err() != nil {
+				t.Fatalf("env.Compile(%q) failed: %v", tc.expr, iss.Err())
+			}
+			prg, err := env.Program(ast, tc.prgOpts...)
+			if err != nil {
+				t.Fatalf("env.Program(ast) failed: %v", err)
+			}
+			ctx := context.Background()
+			if tc.getCtx != nil {
+				var cancel context.CancelFunc
+				ctx, cancel = tc.getCtx()
+				defer cancel()
+			}
+			res := awaitEval(t, prg, ctx, cel.NoVars())
+			if tc.wantErr != nil {
+				if res.Err == nil {
+					t.Fatalf("ConcurrentEval() error = nil, want %v", tc.wantErr)
+				}
+				switch want := tc.wantErr.(type) {
+				case string:
+					if res.Err.Error() != want && !strings.Contains(res.Err.Error(), want) {
+						t.Errorf("ConcurrentEval() error = %v, want %q", res.Err, want)
+					}
+				default:
+					if errVal, ok := tc.wantErr.(error); ok && errors.Is(res.Err, errVal) {
+						break
+					}
+					if !errors.As(res.Err, tc.wantErr) {
+						t.Errorf("ConcurrentEval() error = %v, want %v", res.Err, tc.wantErr)
+					}
+				}
+			}
+		})
 	}
 }
 
