@@ -15,6 +15,8 @@
 package interpreter
 
 import (
+	"reflect"
+
 	"github.com/google/cel-go/common/overloads"
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
@@ -273,4 +275,109 @@ func maybeOptimizeSetMembership(i InterpretableV2, inlist InterpretableCall) (In
 		arg:      lhs,
 		valueSet: valueSet,
 	}, nil
+}
+
+// decLateBinding creates an InterpretableDecorator that is configured
+// with the given options and transforms the Interpretable created by
+// the planner with wrappers around function call nodes to defer the
+// selection of the overload at evaluation time.
+func decLateBinding(options ...LateBindCallOption) InterpretableDecorator {
+
+	// initialise the configuration with the known types
+	// of injectors.
+	config := defaultInjectors(&lateBindConfig{
+		injectors: map[reflect.Type]OverloadInjector{},
+	})
+	// add any other options to the configuration
+	for _, option := range options {
+		config = option(config)
+	}
+	// make sure that the cache is clean
+	config.cache = map[int64]Interpretable{}
+
+	// return the decorator.
+	return func(interpretable Interpretable) (Interpretable, error) {
+
+		return lateBind(config, interpretable)
+	}
+}
+
+// lateBind implements the late binding decoration behaviour. The function
+// uses a configuration to maintain a map of injectors that can be used to
+// replicate and reconfigure InterpretableCall nodes with a runtime version
+// of the matching overload identifier.
+func lateBind(config *lateBindConfig, i Interpretable) (Interpretable, error) {
+
+	if i == nil {
+		return nil, nil
+	}
+
+	// have we already seen the interpretable, this is more of a safety
+	// guard than anything else, which may happen because evalWatchXXX
+	// structs wrap other Intepretable implementation, which may have been
+	// already processed based on the order of decorators.
+	id := i.ID()
+	if _, seen := config.cache[id]; seen {
+		return i, nil
+	}
+
+	// we need to make sure that we process nodes that wrap other
+	// nodes that have the same identifiers. Therefore, we add the
+	// node only when we complete this scope, otherwise the recursion
+	// won't do anything on a node wrapping another.
+	defer func() {
+		// store the interpretable in the cache.
+		config.cache[id] = i
+	}()
+
+	switch interpretable := i.(type) {
+
+	case InterpretableCall:
+
+		switch evalCall := interpretable.(type) {
+
+		// we don't want to override the standard equality and
+		// and non equality behaviour.
+		case *evalEq:
+		case *evalNe:
+		// we don't want to double down on our own late binding
+		// in case we have multiple late bind calls options in
+		// planner.
+		case *evalLateBind:
+			return i, nil
+
+		// all the other implementations of InterpretableCall are
+		// not supported. We could rely on a default behaviour,
+		// which relies only on InterpretableCall, but we wont be
+		// executing possibly additional logic that is implemented
+		// in the Eval method.
+		default:
+
+			evalType := reflect.TypeOf(evalCall)
+
+			injector, found := config.injectors[evalType]
+			if !found {
+				return nil, UnknownCallNodeError(id, evalCall)
+			}
+
+			return &evalLateBind{
+				target:         evalCall,
+				injectOverload: injector,
+				flags:          config.flags,
+			}, nil
+		}
+
+	case *evalWatch:
+
+		mapped, err := lateBind(config, interpretable.Interpretable)
+		if err != nil {
+			return nil, err
+		}
+		interpretable.Interpretable = mapped
+
+		return interpretable, nil
+	}
+
+	// all the other cases aren't relevant.
+	return i, nil
 }

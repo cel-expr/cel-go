@@ -218,6 +218,13 @@ func CompileRegexConstants(regexOptimizations ...*RegexOptimization) PlannerOpti
 	return CustomDecoratorV2(decRegexOptimizer(regexOptimizations...))
 }
 
+// LateBindCalls returns a PlannerOption that allows for mutating
+// the Intepretable with injections for replacing at evaluation
+// time the bindings to the function calls.
+func LateBindCalls(options ...LateBindCallOption) PlannerOption {
+	return CustomDecorator(decLateBinding(options...))
+}
+
 type exprInterpreter struct {
 	dispatcher  Dispatcher
 	container   *containers.Container
