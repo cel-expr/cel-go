@@ -522,7 +522,7 @@ func (opt *constantFoldingOptimizer) constantExprMatcher(ctx *OptimizerContext, 
 		sel := e.AsSelect() // guaranteed to be a navigable value
 		return constantMatcher(sel.Operand().(ast.NavigableExpr))
 	case ast.IdentKind:
-		return opt.knownValues != nil && a.ReferenceMap()[e.ID()] != nil
+		return opt.knownValues != nil && a.ReferenceMap()[e.ID()] != nil && !hasComprehensionVar(e)
 	case ast.ComprehensionKind:
 		if isNestedComprehension(e) {
 			return false
@@ -534,6 +534,9 @@ func (opt *constantFoldingOptimizer) constantExprMatcher(ctx *OptimizerContext, 
 				nested := e.AsComprehension()
 				vars[nested.AccuVar()] = true
 				vars[nested.IterVar()] = true
+				if nested.IterVar2() != "" {
+					vars[nested.IterVar2()] = true
+				}
 			}
 			if e.Kind() == ast.IdentKind && !vars[e.AsIdent()] {
 				constantExprs = false

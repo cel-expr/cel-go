@@ -337,3 +337,107 @@ func optimizerEnv(t *testing.T) *cel.Env {
 	}
 	return e
 }
+
+func TestConstantFoldingOptimizerTwoVar(t *testing.T) {
+	tests := []struct {
+		expr        string
+		folded      string
+		knownValues map[string]any
+	}{
+		{
+			expr:   `[1 + 1, 1 + 2].all(i, v, i < 10 && v < 10)`,
+			folded: `true`,
+		},
+		{
+			expr:   `[1 + 1, 1 + 2].all(i, v, i < 10 && v < x)`,
+			folded: `[2, 3].all(i, v, i < 10 && v < x)`,
+		},
+		{
+			expr:   `[1, 2, 3].transformList(i, v, i + v)`,
+			folded: `[1, 3, 5]`,
+		},
+		{
+			expr:   `{'a': 1, 'b': 2}.all(k, v, v > 0)`,
+			folded: `true`,
+		},
+		{
+			expr:   `v > 0 && [1 + 1, 1 + 2].all(i, v, i < 10 && v < 10)`,
+			folded: `v > 0`,
+		},
+		{
+			expr:   `[1 + 1, 1 + 2].all(i, v, i < 10 && v < 10) && v > 0`,
+			folded: `v > 0`,
+		},
+		{
+			expr:   `[1, 2, 3].transformList(i, v, i + v + k)`,
+			folded: `[1, 2, 3].transformList(i, v, i + v + k)`,
+		},
+		{
+			expr:   `l.transformList(i, v, i + v)`,
+			folded: `l.transformList(i, v, i + v)`,
+		},
+		{
+			expr:   `v > 0 && [1 + 1, 1 + 2].all(i, v, i < 10 && v < 10)`,
+			folded: `true`,
+			knownValues: map[string]any{
+				"v": 5,
+			},
+		},
+		{
+			expr:   `[1 + 1, 1 + 2].all(i, v, i < 10 && v < .v)`,
+			folded: `true`,
+			knownValues: map[string]any{
+				"v": 10,
+			},
+		},
+	}
+	e, err := cel.NewEnv(
+		cel.OptionalTypes(),
+		cel.EnableMacroCallTracking(),
+		ext.TwoVarComprehensions(),
+		cel.Variable("x", cel.IntType),
+		cel.Variable("v", cel.IntType),
+		cel.Variable("i", cel.IntType),
+		cel.Variable("k", cel.IntType),
+		cel.Variable("l", cel.ListType(cel.IntType)),
+	)
+	if err != nil {
+		t.Fatalf("NewEnv() failed: %v", err)
+	}
+	for _, tst := range tests {
+		tc := tst
+		t.Run(tc.expr, func(t *testing.T) {
+			checked, iss := e.Compile(tc.expr)
+			if iss.Err() != nil {
+				t.Fatalf("Compile() failed: %v", iss.Err())
+			}
+			var foldingOpts []cel.ConstantFoldingOption
+			if tc.knownValues != nil {
+				knownValues, err := cel.NewActivation(tc.knownValues)
+				if err != nil {
+					t.Fatalf("NewActivation() failed: %v", err)
+				}
+				foldingOpts = append(foldingOpts, cel.FoldKnownValues(knownValues))
+			}
+			folder, err := cel.NewConstantFoldingOptimizer(foldingOpts...)
+			if err != nil {
+				t.Fatalf("NewConstantFoldingOptimizer() failed: %v", err)
+			}
+			opt, err := cel.NewStaticOptimizer(folder)
+			if err != nil {
+				t.Fatalf("NewStaticOptimizer() failed: %v", err)
+			}
+			optimized, iss := opt.Optimize(e, checked)
+			if iss.Err() != nil {
+				t.Fatalf("Optimize() generated an invalid AST: %v", iss.Err())
+			}
+			folded, err := cel.AstToString(optimized)
+			if err != nil {
+				t.Fatalf("AstToString() failed: %v", err)
+			}
+			if folded != tc.folded {
+				t.Errorf("got %q, wanted %q", folded, tc.folded)
+			}
+		})
+	}
+}
