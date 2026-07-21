@@ -343,6 +343,7 @@ func TestConcurrentEval(t *testing.T) {
 				ext.Lists(),
 				cel.AsyncCompletionBufferSize(1),
 				cel.AsyncMaxConcurrency(2),
+				cel.ConcurrentDrainStrategy(async.DrainNone()),
 			},
 			want:      true,
 			leakCheck: true,
