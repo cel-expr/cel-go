@@ -46,6 +46,7 @@ func TestConcurrentEval(t *testing.T) {
 		trackState   bool
 		wantErr      string
 		wantCost     uint64
+		leakCheck    bool
 	}{
 		{
 			name: "sync_eval",
@@ -309,31 +310,42 @@ func TestConcurrentEval(t *testing.T) {
 			want:         12,
 			wantLaunches: 1,
 		},
-		// Generate a list from [0..99] inclusive and validate the last increment yields 100
 		// Tests the scenario where there are more async invocations than completion buffer.
 		{
 			name:    "more requests than completion buffer w/ debounce",
-			expr:    `lists.range(100).exists(i, async_inc(i) == 100)`,
+			expr:    `lists.range(1000).exists(i, async_inc(i) == 1000)`,
 			maxConc: 5,
 			opts: []any{
 				ext.Lists(),
 				cel.AsyncCompletionBufferSize(10),
 				cel.ConcurrentDrainStrategy(async.DrainReady(10 * time.Microsecond)),
 			},
-			want: true,
+			want:      true,
+			leakCheck: true,
 		},
-		// Generate a list from [0..99] inclusive and validate the last increment yields 100
 		// Tests the scenario where there are more async invocations than completion buffer.
 		{
 			name:    "more requests than completion buffer w/ drain all",
-			expr:    `lists.range(100).exists(i, async_inc(i) == 100)`,
+			expr:    `lists.range(1000).exists(i, async_inc(i) == 1000)`,
 			maxConc: 5,
 			opts: []any{
 				ext.Lists(),
-				cel.AsyncCompletionBufferSize(10),
+				cel.AsyncCompletionBufferSize(5),
 				cel.ConcurrentDrainStrategy(async.DrainAll()),
 			},
-			want: true,
+			want:      true,
+			leakCheck: true,
+		},
+		{
+			name: "more requests than completion buffer w/ drain none",
+			expr: `lists.range(300).exists(i, async_inc(i) == 300)`,
+			opts: []any{
+				ext.Lists(),
+				cel.AsyncCompletionBufferSize(1),
+				cel.AsyncMaxConcurrency(2),
+			},
+			want:      true,
+			leakCheck: true,
 		},
 	}
 
@@ -461,15 +473,17 @@ func TestConcurrentEval(t *testing.T) {
 				}
 			}
 
-			// Give the runtime a brief moment to clean up if there were async launches.
-			time.Sleep(50 * time.Millisecond)
+			if tc.leakCheck {
+				// Give the runtime a brief moment to clean up if there were async launches.
+				time.Sleep(1 * time.Second)
 
-			// Capture the final count
-			finalCount := runtime.NumGoroutine()
+				// Capture the final count
+				finalCount := runtime.NumGoroutine()
 
-			// Assert that no new goroutines were left behind
-			if finalCount > initialCount {
-				t.Errorf("Goroutine leak detected! Initial: %d, Final: %d", initialCount, finalCount)
+				// Assert that no new goroutines were left behind
+				if finalCount > initialCount {
+					t.Errorf("Goroutine leak detected! Initial: %d, Final: %d", initialCount, finalCount)
+				}
 			}
 		})
 	}

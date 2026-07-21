@@ -215,7 +215,7 @@ func newProgram(e *Env, a *ast.AST, opts []ProgramOption) (Program, error) {
 		plannerOptions: []interpreter.PlannerOption{},
 		dispatcher:     disp,
 		costOptions:    []interpreter.CostTrackerOption{},
-		drainStrategy:  async.DrainNone(),
+		drainStrategy:  async.DrainReady(100 * time.Microsecond),
 	}
 
 	// Configure the program via the ProgramOption values.
@@ -554,7 +554,7 @@ func (p *prog) ConcurrentEval(ctx context.Context, input any) <-chan EvalResult 
 			}
 
 			// Post-execution dispatch: launch only the async calls required by the unknown result.
-			frame.DispatchPendingAsyncCalls(ctx, unk.IDs())
+			frame.DispatchPendingAsyncCalls(unk.IDs())
 
 			// The result depends on one or more unresolved async calls. Wait for completions and
 			// re-evaluate according to the configured drain strategy.

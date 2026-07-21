@@ -72,7 +72,7 @@ func awaitResult(t *testing.T, frame *ExecutionFrame, completions <-chan int64, 
 			return res
 		}
 		if unk, ok := res.(*types.Unknown); ok {
-			frame.DispatchPendingAsyncCalls(context.Background(), unk.IDs())
+			frame.DispatchPendingAsyncCalls(unk.IDs())
 		}
 		select {
 		case <-completions:
@@ -404,7 +404,7 @@ func TestAsyncObserverOnCancellation(t *testing.T) {
 
 	res := frame.ComputeResult(1, "fn", "fn_int", impl, []ref.Val{types.Int(1)})
 	if unk, ok := res.(*types.Unknown); ok {
-		frame.DispatchPendingAsyncCalls(ctx, unk.IDs())
+		frame.DispatchPendingAsyncCalls(unk.IDs())
 	}
 	if !types.IsUnknown(res) {
 		t.Fatalf("ComputeResult() got %v, wanted Unknown", res)
@@ -438,7 +438,8 @@ type recordingObserverWithCallback struct {
 	onFinished func(callID int64, function, overload string, res ref.Val)
 }
 
-func (o *recordingObserverWithCallback) OnCallStarted(callID int64, function, overload string, args []ref.Val) {}
+func (o *recordingObserverWithCallback) OnCallStarted(callID int64, function, overload string, args []ref.Val) {
+}
 
 func (o *recordingObserverWithCallback) OnCallFinished(callID int64, function, overload string, res ref.Val) {
 	if o.onFinished != nil {
@@ -496,7 +497,7 @@ func TestLaunchAdmissionAndBounding(t *testing.T) {
 		for i := range total {
 			res := frame.ComputeResult(int64(i+1), "fn", "fn_int", impl, []ref.Val{types.Int(int64(i))})
 			if unk, ok := res.(*types.Unknown); ok {
-				frame.DispatchPendingAsyncCalls(ctx, unk.IDs())
+				frame.DispatchPendingAsyncCalls(unk.IDs())
 			}
 		}
 	}
@@ -550,7 +551,7 @@ func TestLaunchUnlimitedWhenNoSemaphore(t *testing.T) {
 	for i := 0; i < total; i++ {
 		res := frame.ComputeResult(int64(i+1), "fn", "fn_int", impl, []ref.Val{types.Int(int64(i))})
 		if unk, ok := res.(*types.Unknown); ok {
-			frame.DispatchPendingAsyncCalls(ctx, unk.IDs())
+			frame.DispatchPendingAsyncCalls(unk.IDs())
 		}
 	}
 	if got := frame.ActiveAsyncCalls(); got != total {
@@ -580,7 +581,7 @@ func TestAsyncCallStateCancellation(t *testing.T) {
 	}
 	res := frame.ComputeResult(1, "fn", "fn_int", blocking, []ref.Val{types.Int(1)})
 	if unk, ok := res.(*types.Unknown); ok {
-		frame.DispatchPendingAsyncCalls(ctx, unk.IDs())
+		frame.DispatchPendingAsyncCalls(unk.IDs())
 	}
 	if !types.IsUnknown(res) {
 		t.Fatalf("ComputeResult() = %v, wanted Unknown while pending", res)
@@ -708,7 +709,7 @@ func TestExecutionFrameChildSharesAsyncContext(t *testing.T) {
 	// A call launched from the child frame must be visible through the shared parent tracker.
 	resChild := child.ComputeResult(1, "fn", "fn_int", asyncReturning(types.Int(5), nil), []ref.Val{types.Int(1)})
 	if unk, ok := resChild.(*types.Unknown); ok {
-		child.DispatchPendingAsyncCalls(ctx, unk.IDs())
+		child.DispatchPendingAsyncCalls(unk.IDs())
 	}
 	if got := child.ActiveAsyncCalls(); got != base+1 {
 		t.Errorf("child ActiveAsyncCalls() after launch = %d, wanted %d", got, base+1)
@@ -798,7 +799,7 @@ func TestEvalAsyncFuncLifecycle(t *testing.T) {
 		t.Errorf("Exec() first call got %v, wanted Unknown", res)
 	}
 	if unk, ok := res.(*types.Unknown); ok {
-		frame.DispatchPendingAsyncCalls(ctx, unk.IDs())
+		frame.DispatchPendingAsyncCalls(unk.IDs())
 	}
 
 	// Now await completion and re-evaluate
@@ -993,7 +994,7 @@ loop:
 			break loop
 		}
 		if unk, ok := res.(*types.Unknown); ok {
-			frame.DispatchPendingAsyncCalls(ctx, unk.IDs())
+			frame.DispatchPendingAsyncCalls(unk.IDs())
 		}
 		select {
 		case <-completions:

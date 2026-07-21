@@ -250,14 +250,14 @@ func (f *ExecutionFrame) ComputeResult(id int64, function, overload string, impl
 }
 
 // DispatchPendingAsyncCalls launches pending asynchronous calls for the specified required call IDs.
-func (f *ExecutionFrame) DispatchPendingAsyncCalls(ctx context.Context, callIDs []int64) {
+func (f *ExecutionFrame) DispatchPendingAsyncCalls(callIDs []int64) {
 	if f.ctx == nil || f.ctx.asyncCalls == nil {
 		return
 	}
 	t := f.ctx.asyncCalls
 	for _, callID := range callIDs {
 		if acs := t.getByID(callID); acs != nil {
-			t.launch(ctx, acs, f.ctx.observer)
+			t.launch(f.ctx.ctx, acs, f.ctx.observer)
 		}
 	}
 }
