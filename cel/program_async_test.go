@@ -348,6 +348,19 @@ func TestConcurrentEval(t *testing.T) {
 			want:      true,
 			leakCheck: true,
 		},
+		// Tests the scenario where there are more async invocations than completion buffer across two different comprehensions.
+		{
+			name: "chained comprehensions with drain none",
+			expr: `lists.range(300).map(i, async_inc(i) * 2).exists(j, j == 600)`,
+			opts: []any{
+				ext.Lists(),
+				cel.AsyncCompletionBufferSize(4),
+				cel.AsyncMaxConcurrency(2),
+				cel.ConcurrentDrainStrategy(async.DrainNone()),
+			},
+			want:      true,
+			leakCheck: true,
+		},
 	}
 
 	for _, tc := range cases {
