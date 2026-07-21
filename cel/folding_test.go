@@ -16,6 +16,7 @@ package cel
 
 import (
 	"errors"
+	"math"
 	"reflect"
 	"sort"
 	"testing"
@@ -378,6 +379,10 @@ func TestConstantFoldingOptimizer(t *testing.T) {
 		},
 		{
 			expr:   `x in [1, 2, x]`,
+			folded: `x in [1, 2, x]`,
+		},
+		{
+			expr:   `i in [1, 2, i]`,
 			folded: `true`,
 		},
 		{
@@ -496,6 +501,7 @@ func TestConstantFoldingOptimizer(t *testing.T) {
 		Types(&proto3pb.TestAllTypes{}),
 		Variable("x", DynType),
 		Variable("y", DynType),
+		Variable("i", IntType),
 		// work around different package convention in piper vs github.
 		// google.expr.proto3.test.ImportedGlobalEnum.IMPORT_BAZ
 		Constant("c", IntType, types.Int(2)),
@@ -544,6 +550,45 @@ func TestConstantFoldingOptimizer(t *testing.T) {
 			}
 			if folded != tc.folded {
 				t.Errorf("got %q, wanted %q", folded, tc.folded)
+			}
+		})
+	}
+}
+
+func TestConstantFoldingInListNaN(t *testing.T) {
+	env, err := NewEnv(Variable("x", DynType), Variable("d", DoubleType))
+	if err != nil {
+		t.Fatalf("NewEnv() failed: %v", err)
+	}
+	folder, err := NewConstantFoldingOptimizer()
+	if err != nil {
+		t.Fatalf("NewConstantFoldingOptimizer() failed: %v", err)
+	}
+	opt, err := NewStaticOptimizer(folder)
+	if err != nil {
+		t.Fatalf("NewStaticOptimizer() failed: %v", err)
+	}
+	vars := map[string]any{"x": types.Double(math.NaN()), "d": math.NaN()}
+	for _, expr := range []string{`x in [1, 2, x]`, `d in [d]`} {
+		t.Run(expr, func(t *testing.T) {
+			checked, iss := env.Compile(expr)
+			if iss.Err() != nil {
+				t.Fatalf("Compile() failed: %v", iss.Err())
+			}
+			optimized, iss := opt.Optimize(env, checked)
+			if iss.Err() != nil {
+				t.Fatalf("Optimize() generated an invalid AST: %v", iss.Err())
+			}
+			prg, err := env.Program(optimized)
+			if err != nil {
+				t.Fatalf("Program() failed: %v", err)
+			}
+			out, _, err := prg.Eval(vars)
+			if err != nil {
+				t.Fatalf("Eval() failed: %v", err)
+			}
+			if out != types.False {
+				t.Errorf("got %v, wanted false since NaN is not equal to itself", out)
 			}
 		})
 	}

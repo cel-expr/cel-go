@@ -222,7 +222,7 @@ func maybePruneBranches(ctx *OptimizerContext, expr ast.NavigableExpr) bool {
 			return true
 		}
 		needle := args[0]
-		if (needle.Kind() == ast.LiteralKind || needle.Kind() == ast.IdentKind) && haystack.Kind() == ast.ListKind {
+		if (needle.Kind() == ast.LiteralKind || isSelfEqualIdent(needle)) && haystack.Kind() == ast.ListKind {
 			needleIsLit := needle.Kind() == ast.LiteralKind
 			needleLitVal := needle.AsLiteral()
 			needleIdentVal := needle.AsIdent()
@@ -595,7 +595,7 @@ func constantCallMatcher(e ast.NavigableExpr) bool {
 			return true
 		}
 		needle := children[0]
-		if (needle.Kind() == ast.LiteralKind || needle.Kind() == ast.IdentKind) && haystack.Kind() == ast.ListKind {
+		if (needle.Kind() == ast.LiteralKind || isSelfEqualIdent(needle)) && haystack.Kind() == ast.ListKind {
 			needleIsLit := needle.Kind() == ast.LiteralKind
 			needleLitVal := needle.AsLiteral()
 			needleIdentVal := needle.AsIdent()
@@ -617,6 +617,34 @@ func constantCallMatcher(e ast.NavigableExpr) bool {
 		}
 	}
 	return true
+}
+
+// isSelfEqualIdent indicates whether the expression is an identifier whose static type
+// guarantees that its runtime value is equal to itself.
+//
+// Matching an identifier against a list element by name only proves list membership when the
+// value the name resolves to is self-equal. A double may be NaN, which is not equal to itself,
+// and the dyn, aggregate, and abstract types may all hold a NaN at runtime, so the check is
+// limited to the scalar types which cannot.
+func isSelfEqualIdent(e ast.Expr) bool {
+	if e.Kind() != ast.IdentKind {
+		return false
+	}
+	nav, ok := e.(ast.NavigableExpr)
+	if !ok {
+		return false
+	}
+	t := nav.Type()
+	if t == nil {
+		return false
+	}
+	switch t.Kind() {
+	case types.BoolKind, types.BytesKind, types.DurationKind, types.IntKind,
+		types.NullTypeKind, types.StringKind, types.TimestampKind, types.UintKind:
+		return true
+	default:
+		return false
+	}
 }
 
 func isExprConstantOfKind(e ast.Expr, t *types.Type) bool {
