@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"math/rand"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -60,7 +61,7 @@ func TestConcurrentEval(t *testing.T) {
 				cel.Function("async_func",
 					cel.Overload("async_func_int", []*cel.Type{cel.IntType}, cel.IntType,
 						cel.AsyncBinding(func(ctx context.Context, args ...ref.Val) ref.Val {
-							time.Sleep(5 * time.Millisecond)
+							time.Sleep(1 * time.Millisecond)
 							return args[0]
 						}),
 					),
@@ -75,7 +76,7 @@ func TestConcurrentEval(t *testing.T) {
 				cel.Function("async_func",
 					cel.Overload("async_func_int", []*cel.Type{cel.IntType}, cel.IntType,
 						cel.AsyncBinding(func(ctx context.Context, args ...ref.Val) ref.Val {
-							time.Sleep(5 * time.Millisecond)
+							time.Sleep(1 * time.Millisecond)
 							return args[0]
 						}),
 					),
@@ -169,7 +170,7 @@ func TestConcurrentEval(t *testing.T) {
 		},
 		{
 			name:      "drain_all",
-			expr:      `delayed_rpc("a", 5) + delayed_rpc("b", 20) + delayed_rpc("c", 100)`,
+			expr:      `delayed_rpc("a", 1) + delayed_rpc("b", 2) + delayed_rpc("c", 10)`,
 			opts:      []any{cel.ConcurrentDrainStrategy(async.DrainAll())},
 			trackCost: true,
 			wantCost:  10,
@@ -177,23 +178,23 @@ func TestConcurrentEval(t *testing.T) {
 		},
 		{
 			name:      "drain_ready_batched",
-			expr:      `delayed_rpc("a", 5) + delayed_rpc("b", 20) + delayed_rpc("c", 100)`,
-			opts:      []any{cel.ConcurrentDrainStrategy(async.DrainReady(150 * time.Millisecond))},
+			expr:      `delayed_rpc("a", 1) + delayed_rpc("b", 2) + delayed_rpc("c", 10)`,
+			opts:      []any{cel.ConcurrentDrainStrategy(async.DrainReady(15 * time.Millisecond))},
 			trackCost: true,
 			wantCost:  10,
 			want:      "abc",
 		},
 		{
 			name:      "drain_ready_partial_debounce",
-			expr:      `delayed_rpc("a", 5) + delayed_rpc("b", 20) + delayed_rpc("c", 100)`,
-			opts:      []any{cel.ConcurrentDrainStrategy(async.DrainReady(20 * time.Millisecond))},
+			expr:      `delayed_rpc("a", 1) + delayed_rpc("b", 2) + delayed_rpc("c", 10)`,
+			opts:      []any{cel.ConcurrentDrainStrategy(async.DrainReady(2 * time.Millisecond))},
 			trackCost: true,
 			wantCost:  15,
 			want:      "abc",
 		},
 		{
 			name:      "drain_none",
-			expr:      `delayed_rpc("a", 5) + delayed_rpc("b", 20) + delayed_rpc("c", 100)`,
+			expr:      `delayed_rpc("a", 1) + delayed_rpc("b", 2) + delayed_rpc("c", 10)`,
 			opts:      []any{cel.ConcurrentDrainStrategy(async.DrainNone())},
 			trackCost: true,
 			wantCost:  20,
@@ -364,7 +365,7 @@ func TestConcurrentEval(t *testing.T) {
 				cel.Overload("dbl_int", []*cel.Type{cel.IntType}, cel.IntType,
 					cel.AsyncBinding(func(ctx context.Context, args ...ref.Val) ref.Val {
 						launches.Add(1)
-						time.Sleep(5 * time.Millisecond)
+						time.Sleep(1 * time.Millisecond)
 						return args[0].(types.Int) * 2
 					})),
 			)
@@ -372,7 +373,7 @@ func TestConcurrentEval(t *testing.T) {
 			rpcFunc := cel.Function("rpc",
 				cel.Overload("rpc_string", []*cel.Type{cel.StringType}, cel.StringType,
 					cel.AsyncBinding(func(ctx context.Context, args ...ref.Val) ref.Val {
-						time.Sleep(5 * time.Millisecond)
+						time.Sleep(1 * time.Millisecond)
 						return args[0]
 					}),
 				),
@@ -411,6 +412,9 @@ func TestConcurrentEval(t *testing.T) {
 			}
 
 			prg := mustProgram(t, tc.expr, testOpts...)
+
+			// Count the active goroutines
+			initialCount := runtime.NumGoroutine()
 			res := awaitEval(t, prg, context.Background(), vars)
 
 			if tc.wantErr != "" {
@@ -455,6 +459,17 @@ func TestConcurrentEval(t *testing.T) {
 				if res.EvalDetails == nil || res.EvalDetails.State() == nil {
 					t.Errorf("res.EvalDetails.State() is nil, want non-nil")
 				}
+			}
+
+			// Give the runtime a brief moment to clean up if there were async launches.
+			time.Sleep(50 * time.Millisecond)
+
+			// Capture the final count
+			finalCount := runtime.NumGoroutine()
+
+			// Assert that no new goroutines were left behind
+			if finalCount > initialCount {
+				t.Errorf("Goroutine leak detected! Initial: %d, Final: %d", initialCount, finalCount)
 			}
 		})
 	}
