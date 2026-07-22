@@ -382,10 +382,6 @@ func TestConstantFoldingOptimizer(t *testing.T) {
 			folded: `x in [1, 2, x]`,
 		},
 		{
-			expr:   `i in [1, 2, i]`,
-			folded: `true`,
-		},
-		{
 			expr:   `[1, 2].filter(x, x in [1, 2])`,
 			folded: `[1, 2]`,
 		},
@@ -501,7 +497,6 @@ func TestConstantFoldingOptimizer(t *testing.T) {
 		Types(&proto3pb.TestAllTypes{}),
 		Variable("x", DynType),
 		Variable("y", DynType),
-		Variable("i", IntType),
 		// work around different package convention in piper vs github.
 		// google.expr.proto3.test.ImportedGlobalEnum.IMPORT_BAZ
 		Constant("c", IntType, types.Int(2)),
@@ -555,35 +550,109 @@ func TestConstantFoldingOptimizer(t *testing.T) {
 	}
 }
 
-func TestConstantFoldingInListNaN(t *testing.T) {
-	env, err := NewEnv(Variable("x", DynType), Variable("d", DoubleType))
+// TestConstantFoldingInListIdent checks which identifier needles may be matched against a list
+// element by name.
+//
+// The rewrite is only sound when the identifier's static type guarantees that its runtime value
+// is equal to itself. A NaN double is not, so any type which can carry a NaN must be left alone:
+// the vars case of each such entry evaluates the optimized program with a NaN binding and expects
+// the same result the unoptimized expression produces.
+func TestConstantFoldingInListIdent(t *testing.T) {
+	nan := math.NaN()
+	tests := []struct {
+		expr   string
+		folded string
+		// vars, when set, is evaluated against the optimized AST and must yield false.
+		vars map[string]any
+	}{
+		// Scalar types which cannot hold a NaN.
+		{expr: `b in [b]`, folded: `true`},
+		{expr: `by in [by]`, folded: `true`},
+		{expr: `du in [du]`, folded: `true`},
+		{expr: `i in [1, 2, i]`, folded: `true`},
+		{expr: `n in [n]`, folded: `true`},
+		{expr: `s in [s]`, folded: `true`},
+		{expr: `ts in [ts]`, folded: `true`},
+		{expr: `ty in [ty]`, folded: `true`},
+		{expr: `u in [u]`, folded: `true`},
+		// Aggregate types compare element-wise, so they are self-equal exactly when their type
+		// parameters are.
+		{expr: `li in [li]`, folded: `true`},
+		{expr: `lli in [lli]`, folded: `true`},
+		{expr: `msi in [msi]`, folded: `true`},
+		{expr: `ld in [ld]`, folded: `ld in [ld]`, vars: map[string]any{"ld": []float64{nan}}},
+		{expr: `lx in [lx]`, folded: `lx in [lx]`, vars: map[string]any{"lx": []any{nan}}},
+		{expr: `msd in [msd]`, folded: `msd in [msd]`, vars: map[string]any{"msd": map[string]float64{"a": nan}}},
+		// Doubles and dyn may be a NaN directly.
+		{expr: `d in [d]`, folded: `d in [d]`, vars: map[string]any{"d": nan}},
+		{expr: `x in [1, 2, x]`, folded: `x in [1, 2, x]`, vars: map[string]any{"x": types.Double(nan)}},
+		// Abstract and struct types are left alone as their contents are not inspected.
+		{expr: `oi in [oi]`, folded: `oi in [oi]`},
+		{expr: `o in [o]`, folded: `o in [o]`},
+		// Literal needles use CEL equality rather than a name match, so they are unaffected.
+		{expr: `1 in [1, 2]`, folded: `true`},
+		{expr: `1.0 in [d, 1.0]`, folded: `true`},
+	}
+	env, err := NewEnv(
+		OptionalTypes(),
+		Types(&proto3pb.TestAllTypes{}),
+		Variable("b", BoolType),
+		Variable("by", BytesType),
+		Variable("du", DurationType),
+		Variable("i", IntType),
+		Variable("n", NullType),
+		Variable("s", StringType),
+		Variable("ts", TimestampType),
+		Variable("ty", TypeType),
+		Variable("u", UintType),
+		Variable("li", ListType(IntType)),
+		Variable("lli", ListType(ListType(IntType))),
+		Variable("msi", MapType(StringType, IntType)),
+		Variable("ld", ListType(DoubleType)),
+		Variable("lx", ListType(DynType)),
+		Variable("msd", MapType(StringType, DoubleType)),
+		Variable("d", DoubleType),
+		Variable("x", DynType),
+		Variable("oi", OptionalType(IntType)),
+		Variable("o", ObjectType("google.expr.proto3.test.TestAllTypes")),
+	)
 	if err != nil {
 		t.Fatalf("NewEnv() failed: %v", err)
 	}
-	folder, err := NewConstantFoldingOptimizer()
-	if err != nil {
-		t.Fatalf("NewConstantFoldingOptimizer() failed: %v", err)
-	}
-	opt, err := NewStaticOptimizer(folder)
-	if err != nil {
-		t.Fatalf("NewStaticOptimizer() failed: %v", err)
-	}
-	vars := map[string]any{"x": types.Double(math.NaN()), "d": math.NaN()}
-	for _, expr := range []string{`x in [1, 2, x]`, `d in [d]`} {
-		t.Run(expr, func(t *testing.T) {
-			checked, iss := env.Compile(expr)
+	for _, tst := range tests {
+		tc := tst
+		t.Run(tc.expr, func(t *testing.T) {
+			checked, iss := env.Compile(tc.expr)
 			if iss.Err() != nil {
 				t.Fatalf("Compile() failed: %v", iss.Err())
+			}
+			folder, err := NewConstantFoldingOptimizer()
+			if err != nil {
+				t.Fatalf("NewConstantFoldingOptimizer() failed: %v", err)
+			}
+			opt, err := NewStaticOptimizer(folder)
+			if err != nil {
+				t.Fatalf("NewStaticOptimizer() failed: %v", err)
 			}
 			optimized, iss := opt.Optimize(env, checked)
 			if iss.Err() != nil {
 				t.Fatalf("Optimize() generated an invalid AST: %v", iss.Err())
 			}
+			folded, err := AstToString(optimized)
+			if err != nil {
+				t.Fatalf("AstToString() failed: %v", err)
+			}
+			if folded != tc.folded {
+				t.Errorf("got %q, wanted %q", folded, tc.folded)
+			}
+			if tc.vars == nil {
+				return
+			}
 			prg, err := env.Program(optimized)
 			if err != nil {
 				t.Fatalf("Program() failed: %v", err)
 			}
-			out, _, err := prg.Eval(vars)
+			out, _, err := prg.Eval(tc.vars)
 			if err != nil {
 				t.Fatalf("Eval() failed: %v", err)
 			}

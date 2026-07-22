@@ -624,8 +624,9 @@ func constantCallMatcher(e ast.NavigableExpr) bool {
 //
 // Matching an identifier against a list element by name only proves list membership when the
 // value the name resolves to is self-equal. A double may be NaN, which is not equal to itself,
-// and the dyn, aggregate, and abstract types may all hold a NaN at runtime, so the check is
-// limited to the scalar types which cannot.
+// and dyn, abstract, and struct types may all hold a NaN at runtime, so the check is limited
+// to the scalar types which cannot, and to the aggregate types whose type parameters are
+// themselves self-equal.
 func isSelfEqualIdent(e ast.Expr) bool {
 	if e.Kind() != ast.IdentKind {
 		return false
@@ -634,13 +635,27 @@ func isSelfEqualIdent(e ast.Expr) bool {
 	if !ok {
 		return false
 	}
-	t := nav.Type()
+	return isSelfEqualType(nav.Type())
+}
+
+// isSelfEqualType indicates whether all runtime values of the given type are equal to themselves.
+func isSelfEqualType(t *types.Type) bool {
 	if t == nil {
 		return false
 	}
 	switch t.Kind() {
 	case types.BoolKind, types.BytesKind, types.DurationKind, types.IntKind,
-		types.NullTypeKind, types.StringKind, types.TimestampKind, types.UintKind:
+		types.NullTypeKind, types.StringKind, types.TimestampKind, types.TypeKind,
+		types.UintKind:
+		return true
+	case types.ListKind, types.MapKind:
+		// Aggregates compare element-wise, so they are self-equal exactly when their type
+		// parameters are. A list(dyn) or map(string, double) may still contain a NaN.
+		for _, p := range t.Parameters() {
+			if !isSelfEqualType(p) {
+				return false
+			}
+		}
 		return true
 	default:
 		return false
