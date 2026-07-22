@@ -20,28 +20,54 @@ import (
 	"github.com/google/cel-go/common/types/ref"
 )
 
+// compareDoubleInt orders a double against an int by their mathematical values.
+//
+// The int is split from the double rather than converted to one: ints above 2^53 have no exact
+// double representation, so converting rounds them to a neighbouring value. Callers screen NaN
+// before dispatching here.
 func compareDoubleInt(d Double, i Int) Int {
-	if d < math.MinInt64 {
+	f := float64(d)
+	if f < math.MinInt64 {
 		return IntNegOne
 	}
-	if d > math.MaxInt64 {
+	// MaxInt64 rounds up to 2^63 as a double, which is the first value above the int64 range.
+	if f >= math.MaxInt64 {
 		return IntOne
 	}
-	return compareDouble(d, Double(i))
+	// The integral part is now within the int64 range, so it converts exactly.
+	whole := math.Trunc(f)
+	if Int(whole) < i {
+		return IntNegOne
+	}
+	if Int(whole) > i {
+		return IntOne
+	}
+	// Equal whole parts, so the remaining fraction decides the order.
+	return compareDouble(Double(f-whole), 0)
 }
 
 func compareIntDouble(i Int, d Double) Int {
 	return -compareDoubleInt(d, i)
 }
 
+// compareDoubleUint orders a double against a uint by their mathematical values, splitting the
+// double instead of converting the uint for the reason given on compareDoubleInt.
 func compareDoubleUint(d Double, u Uint) Int {
-	if d < 0 {
+	f := float64(d)
+	if f < 0 {
 		return IntNegOne
 	}
-	if d > math.MaxUint64 {
+	if f >= doubleTwoTo64 {
 		return IntOne
 	}
-	return compareDouble(d, Double(u))
+	whole := math.Trunc(f)
+	if Uint(whole) < u {
+		return IntNegOne
+	}
+	if Uint(whole) > u {
+		return IntOne
+	}
+	return compareDouble(Double(f-whole), 0)
 }
 
 func compareUintDouble(u Uint, d Double) Int {
