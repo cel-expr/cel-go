@@ -214,11 +214,11 @@ func TestConstantFoldingOptimizer(t *testing.T) {
 		},
 		{
 			expr:   `true && x`,
-			folded: `x`,
+			folded: `true && x`,
 		},
 		{
 			expr:   `x && true`,
-			folded: `x`,
+			folded: `x && true`,
 		},
 		{
 			expr:   `false && x`,
@@ -238,19 +238,59 @@ func TestConstantFoldingOptimizer(t *testing.T) {
 		},
 		{
 			expr:   `false || x`,
-			folded: `x`,
+			folded: `false || x`,
 		},
 		{
 			expr:   `x || false`,
-			folded: `x`,
+			folded: `x || false`,
+		},
+		{
+			expr:   `true && b`,
+			folded: `b`,
+		},
+		{
+			expr:   `b && true`,
+			folded: `b`,
+		},
+		{
+			expr:   `false || b`,
+			folded: `b`,
+		},
+		{
+			expr:   `b || false`,
+			folded: `b`,
+		},
+		{
+			expr:   `false || x`,
+			folded: `false || x`,
+		},
+		{
+			expr:   `x || false`,
+			folded: `x || false`,
+		},
+		{
+			expr:   `true && x`,
+			folded: `true && x`,
+		},
+		{
+			expr:   `x && true`,
+			folded: `x && true`,
 		},
 		{
 			expr:   `true && x && true && x`,
-			folded: `x && x`,
+			folded: `true && x && true && x`,
 		},
 		{
 			expr:   `false || x || false || x`,
-			folded: `x || x`,
+			folded: `false || x || false || x`,
+		},
+		{
+			expr:   `true && b && true && b`,
+			folded: `b && b`,
+		},
+		{
+			expr:   `false || b || false || b`,
+			folded: `b || b`,
 		},
 		{
 			expr:   `true && true`,
@@ -363,7 +403,11 @@ func TestConstantFoldingOptimizer(t *testing.T) {
 		},
 		{
 			expr:   `false || x || false || y`,
-			folded: `x || y`,
+			folded: `false || x || false || y`,
+		},
+		{
+			expr:   `false || b || false || b`,
+			folded: `b || b`,
 		},
 		{
 			expr:   `true ? (false ? x + 1 : x + 2) : x`,
@@ -497,6 +541,7 @@ func TestConstantFoldingOptimizer(t *testing.T) {
 		Types(&proto3pb.TestAllTypes{}),
 		Variable("x", DynType),
 		Variable("y", DynType),
+		Variable("b", BoolType),
 		// work around different package convention in piper vs github.
 		// google.expr.proto3.test.ImportedGlobalEnum.IMPORT_BAZ
 		Constant("c", IntType, types.Int(2)),

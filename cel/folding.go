@@ -95,7 +95,7 @@ func (opt *constantFoldingOptimizer) Optimize(ctx *OptimizerContext, a *ast.AST)
 		for _, fold := range foldableExprs {
 			// If the expression could be folded because it's a non-strict call, and the
 			// branches are pruned, continue to the next fold.
-			if fold.Kind() == ast.CallKind && maybePruneBranches(ctx, fold) {
+			if fold.Kind() == ast.CallKind && maybePruneBranches(ctx, a, fold) {
 				continue
 			}
 			// Late-bound function calls cannot be folded.
@@ -202,12 +202,12 @@ func isLateBoundFunctionCall(ctx *OptimizerContext, expr ast.Expr) bool {
 // a branch can be removed. Evaluation will naturally prune logical and / or calls,
 // but conditional will not be pruned cleanly, so this is one small area where the
 // constant folding step reimplements a portion of the evaluator.
-func maybePruneBranches(ctx *OptimizerContext, expr ast.NavigableExpr) bool {
+func maybePruneBranches(ctx *OptimizerContext, a *ast.AST, expr ast.NavigableExpr) bool {
 	call := expr.AsCall()
 	args := call.Args()
 	switch call.FunctionName() {
 	case operators.LogicalAnd, operators.LogicalOr:
-		return maybeShortcircuitLogic(ctx, call.FunctionName(), args, expr)
+		return maybeShortcircuitLogic(ctx, a, call.FunctionName(), args, expr)
 	case operators.Conditional:
 		cond := args[0]
 		truthy := args[1]
@@ -248,7 +248,7 @@ func maybePruneBranches(ctx *OptimizerContext, expr ast.NavigableExpr) bool {
 	return false
 }
 
-func maybeShortcircuitLogic(ctx *OptimizerContext, function string, args []ast.Expr, expr ast.NavigableExpr) bool {
+func maybeShortcircuitLogic(ctx *OptimizerContext, a *ast.AST, function string, args []ast.Expr, expr ast.NavigableExpr) bool {
 	shortcircuit := types.False
 	skip := types.True
 	if function == operators.LogicalOr {
@@ -271,15 +271,29 @@ func maybeShortcircuitLogic(ctx *OptimizerContext, function string, args []ast.E
 	}
 	if len(newArgs) == 0 {
 		newArgs = append(newArgs, args[0])
-		ctx.UpdateExpr(expr, newArgs[0])
-		return true
+	}
+	if len(newArgs) == len(args) {
+		return false
 	}
 	if len(newArgs) == 1 {
+		if !isBoolType(a, newArgs[0]) {
+			return false
+		}
 		ctx.UpdateExpr(expr, newArgs[0])
 		return true
 	}
 	ctx.UpdateExpr(expr, ctx.NewCall(function, newArgs...))
 	return true
+}
+
+func isBoolType(a *ast.AST, e ast.Expr) bool {
+	if a != nil && a.GetType(e.ID()) == types.BoolType {
+		return true
+	}
+	if e.Kind() == ast.LiteralKind && e.AsLiteral().Type() == types.BoolType {
+		return true
+	}
+	return false
 }
 
 // pruneOptionalElements works from the bottom up to resolve optional elements within
