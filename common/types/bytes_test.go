@@ -36,6 +36,27 @@ func TestBytesAdd(t *testing.T) {
 	}
 }
 
+func TestBytesAddNoAlias(t *testing.T) {
+	// A bytes value whose backing array has spare capacity, as happens when a
+	// host binds a []byte that is a sub-slice of a larger buffer.
+	backing := make([]byte, 3, 16)
+	copy(backing, "abc")
+	b := Bytes(backing)
+
+	first := b.Add(Bytes("111")).(Bytes)
+	second := b.Add(Bytes("222")).(Bytes)
+
+	if !bytes.Equal(first, []byte("abc111")) {
+		t.Errorf("first concatenation aliased: got %q, wanted %q", first, "abc111")
+	}
+	if !bytes.Equal(second, []byte("abc222")) {
+		t.Errorf("second concatenation wrong: got %q, wanted %q", second, "abc222")
+	}
+	if !bytes.Equal(b, []byte("abc")) {
+		t.Errorf("receiver mutated: got %q, wanted %q", b, "abc")
+	}
+}
+
 func TestBytesCompare(t *testing.T) {
 	if !Bytes("1234").Compare(Bytes("2345")).Equal(IntNegOne).(Bool) {
 		t.Error("Comparison did not yield -1")
