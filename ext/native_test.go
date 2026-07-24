@@ -1277,3 +1277,61 @@ type TestRefValFieldType struct {
 	IntVal       types.Int
 	CELTime      types.Timestamp `cel:"time"`
 }
+
+// registeredNativeStruct is registered with NativeTypes in the delegation test.
+type registeredNativeStruct struct {
+	Name string
+}
+
+// unregisteredNativeStruct is not registered, so NativeToValue should hand it to
+// the composed base adapter rather than wrapping it as a native object.
+type unregisteredNativeStruct struct {
+	Name string
+}
+
+// recordingAdapter converts unregisteredNativeStruct into a sentinel string and
+// records that it was asked to, so the test can confirm nativeTypeProvider
+// delegated the value. Everything else falls through to the base adapter.
+type recordingAdapter struct {
+	base types.Adapter
+	saw  bool
+}
+
+func (a *recordingAdapter) NativeToValue(value any) ref.Val {
+	if _, ok := value.(unregisteredNativeStruct); ok {
+		a.saw = true
+		return types.String("from-base-adapter")
+	}
+	return a.base.NativeToValue(value)
+}
+
+func TestNativeToValueDelegatesUnregisteredStructs(t *testing.T) {
+	custom := &recordingAdapter{base: types.DefaultTypeAdapter}
+	env, err := cel.NewEnv(
+		cel.CustomTypeAdapter(custom),
+		NativeTypes(reflect.TypeOf(registeredNativeStruct{})),
+	)
+	if err != nil {
+		t.Fatalf("cel.NewEnv() failed: %v", err)
+	}
+	adapter := env.CELTypeAdapter()
+
+	// An unregistered struct must reach the composed base adapter.
+	got := adapter.NativeToValue(unregisteredNativeStruct{Name: "x"})
+	if !custom.saw {
+		t.Error("base adapter was not consulted for an unregistered struct")
+	}
+	if got.Equal(types.String("from-base-adapter")) != types.True {
+		t.Errorf("NativeToValue(unregisteredNativeStruct) = %v, want the base adapter's value", got)
+	}
+
+	// A registered native type must still be wrapped as a native object.
+	custom.saw = false
+	gotReg := adapter.NativeToValue(registeredNativeStruct{Name: "y"})
+	if custom.saw {
+		t.Error("base adapter was consulted for a registered native type")
+	}
+	if tn := gotReg.Type().TypeName(); !strings.Contains(tn, "registeredNativeStruct") {
+		t.Errorf("NativeToValue(registeredNativeStruct).Type() = %q, want a native object type", tn)
+	}
+}

@@ -395,7 +395,16 @@ func (tp *nativeTypeProvider) NativeToValue(val any) ref.Val {
 			time.Time:
 			return tp.baseAdapter.NativeToValue(val)
 		default:
-			return tp.newNativeObject(val, rawVal)
+			// Only claim struct values whose type was registered via
+			// ext.NativeTypes. Every other method on nativeTypeProvider checks
+			// the registry before handling a type; without the same check here
+			// a composed base adapter never sees unregistered structs it wants
+			// to convert itself.
+			typeName := fmt.Sprintf("%s.%s", simplePkgAlias(refVal.Type().PkgPath()), refVal.Type().Name())
+			if _, found := tp.nativeTypes[typeName]; found {
+				return tp.newNativeObject(val, rawVal)
+			}
+			return tp.baseAdapter.NativeToValue(val)
 		}
 	default:
 		return tp.baseAdapter.NativeToValue(val)
