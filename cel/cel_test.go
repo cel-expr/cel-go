@@ -3826,9 +3826,9 @@ func TestExpressionNodeLimit(t *testing.T) {
 		{
 			name:         "chained optMap of various complexity exceeding default limit",
 			expr:         "x.optMap(a, [a, a]).optMap(b, {b: b}).optMap(c, c + 1).optMap(d, d + 2).optMap(e, e + 3).optMap(f, f + 4).optMap(g, g + 5).optMap(h, h + 6).optMap(i, i + 7).optMap(j, j + 8).optMap(k, k + 9).optMap(l, l + 10).optMap(m, m + 11).optMap(n, n + 12)",
-			limit:        0, // default limit 100,000
+			limit:        200, // default limit 100,000
 			expectErr:    true,
-			errSubstring: "expression count exceeds limit of 100000 while expanding macro 'optMap'",
+			errSubstring: "expression count exceeds limit of 200 while expanding macro 'optMap'",
 		},
 		{
 			name:      "chained optMap with unbounded limit (-1)",
