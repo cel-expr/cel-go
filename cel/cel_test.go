@@ -2790,6 +2790,27 @@ func TestDefaultUTCTimeZoneError(t *testing.T) {
 	}
 }
 
+func TestTimeZoneOffsetOutOfRange(t *testing.T) {
+	env := testEnv(t, Variable("x", TimestampType))
+	vars := map[string]any{"x": time.Unix(7506, 0).UTC()}
+	// Offsets whose hour or minute component falls outside a signed HH:MM field
+	// shift the resolved instant, so they must be rejected at evaluation time.
+	for _, tz := range []string{"+24:00", "-24:00", "+99:00", "-50:30", "+00:99", "+05:-30"} {
+		out, err := interpret(t, env, `x.getHours('`+tz+`') >= 0`, vars)
+		if err == nil {
+			t.Errorf("getHours(%q) got %v, wanted error", tz, out)
+		}
+	}
+	// A boundary offset within the field ranges keeps resolving.
+	out, err := interpret(t, env, `x.getHours('23:15')`, vars)
+	if err != nil {
+		t.Fatalf("getHours('23:15') failed: %v", err)
+	}
+	if out.Equal(types.Int(1)) != types.True {
+		t.Errorf("getHours('23:15') got %v, wanted 1", out)
+	}
+}
+
 func TestParserRecursionLimit(t *testing.T) {
 	testCases := []struct {
 		expr        string

@@ -439,6 +439,13 @@ func TestTimestampGetHours(t *testing.T) {
 	if !hrTz.Equal(Int(19)).(Bool) {
 		t.Errorf("ts.getHours('America/Phoenix') got %v, wanted 19 hours", hrTz)
 	}
+	// Out-of-range hour offsets are rejected rather than silently shifting the instant.
+	for _, tz := range []string{"+24:00", "-24:00", "+99:00", "-50:30"} {
+		if got := ts.Receive(overloads.TimeGetHours, overloads.TimestampToHoursWithTz,
+			[]ref.Val{String(tz)}); !IsError(got) {
+			t.Errorf("ts.getHours(%q) got %v, wanted error", tz, got)
+		}
+	}
 }
 
 func TestTimestampGetMinutes(t *testing.T) {
