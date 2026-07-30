@@ -89,12 +89,13 @@ type FieldType struct {
 
 // Registry provides type information for a set of registered types.
 type Registry struct {
-	revTypeMap   map[string]*Type
-	structTypes  map[string]StructTypeDescriptor
-	reflectTypes map[reflect.Type]StructTypeDescriptor
-	pbdb         *pb.Db
-	provider     Provider
-	adapter      Adapter
+	revTypeMap    map[string]*Type
+	structTypes   map[string]StructTypeDescriptor
+	reflectTypes  map[reflect.Type]StructTypeDescriptor
+	pbdb          *pb.Db
+	provider      Provider
+	adapter       Adapter
+	nativeOptions NativeTypeOptions
 }
 
 // NewRegistry accepts a list of proto message instances, ref.Type instances, or RegistryOption
@@ -104,10 +105,8 @@ func NewRegistry(types ...any) (*Registry, error) {
 	if err != nil {
 		return nil, err
 	}
-	for _, t := range types {
-		if err := registerTypeItem(r, t); err != nil {
-			return nil, err
-		}
+	if err := registerTypeItems(r, types...); err != nil {
+		return nil, err
 	}
 	return r, nil
 }
@@ -202,10 +201,8 @@ func ComposeTypes(provider Provider, adapter Adapter, types ...any) (Provider, A
 	reg, isReg := provider.(*Registry)
 	aReg, isAdapterReg := adapter.(*Registry)
 	if isReg && isAdapterReg && reg == aReg {
-		for _, t := range types {
-			if err := registerTypeItem(reg, t); err != nil {
-				return nil, nil, err
-			}
+		if err := registerTypeItems(reg, types...); err != nil {
+			return nil, nil, err
 		}
 		return reg, reg, nil
 	}
@@ -225,6 +222,7 @@ func (p *Registry) Copy() *Registry {
 	copy.pbdb = p.pbdb.Copy()
 	copy.provider = p.provider
 	copy.adapter = p.adapter
+	copy.nativeOptions = p.nativeOptions
 	maps.Copy(copy.revTypeMap, p.revTypeMap)
 	maps.Copy(copy.structTypes, p.structTypes)
 	maps.Copy(copy.reflectTypes, p.reflectTypes)
@@ -508,6 +506,20 @@ func (p *Registry) RegisterType(types ...ref.Type) error {
 	return nil
 }
 
+// RegisterNativeType creates nativeType instances for the given reflect.Type and registers them.
+func (p *Registry) RegisterNativeType(refType reflect.Type) error {
+	result, err := newNativeTypes(refType, p.nativeOptions.fieldNameHandler)
+	if err != nil {
+		return err
+	}
+	for _, nt := range result {
+		if err := p.RegisterType(nt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (p *Registry) findStructDescriptorByReflectType(rt reflect.Type) (StructTypeDescriptor, bool) {
 	if rt == nil {
 		return nil, false
@@ -612,6 +624,30 @@ func sanitizeStructTypeName(structType string) string {
 	return structType
 }
 
+func registerTypeItems(r *Registry, types ...any) error {
+	opts := make([]any, 0, len(types))
+	items := make([]any, 0, len(types))
+	for _, t := range types {
+		switch t.(type) {
+		case NativeTypeOption:
+			opts = append(opts, t)
+		default:
+			items = append(items, t)
+		}
+	}
+	for _, opt := range opts {
+		if err := registerTypeItem(r, opt); err != nil {
+			return err
+		}
+	}
+	for _, item := range items {
+		if err := registerTypeItem(r, item); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func registerTypeItem(r *Registry, t any) error {
 	switch v := t.(type) {
 	case proto.Message:
@@ -620,11 +656,17 @@ func registerTypeItem(r *Registry, t any) error {
 		return r.RegisterDescriptor(v)
 	case ref.Type:
 		return r.RegisterType(v)
+	case reflect.Type:
+		return r.RegisterNativeType(v)
+	case reflect.Value:
+		return r.RegisterNativeType(v.Type())
+	case NativeTypeOption:
+		return v(&r.nativeOptions)
 	case RegistryOption:
 		_, err := v(r)
 		return err
 	default:
-		return fmt.Errorf("unsupported type: %T", t)
+		return fmt.Errorf("unsupported type: %v (%T) must be reflect.Type or reflect.Value", t, t)
 	}
 }
 

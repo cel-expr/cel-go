@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package ext
+package types_test
 
 import (
 	"errors"
@@ -31,6 +31,7 @@ import (
 	"github.com/google/cel-go/common/types/pb"
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/google/cel-go/common/types/traits"
+	"github.com/google/cel-go/ext"
 	"github.com/google/cel-go/test"
 
 	structpb "google.golang.org/protobuf/types/known/structpb"
@@ -46,8 +47,8 @@ func TestNativeTypes(t *testing.T) {
 		envOpts []any
 	}{
 		{
-			expr: `ext.TestAllTypes{
-				NestedVal: ext.TestNestedType{NestedMapVal: {1: false}},
+			expr: `types_test.TestAllTypes{
+				NestedVal: types_test.TestNestedType{NestedMapVal: {1: false}},
 				BoolVal: true,
 				BytesVal: b'hello',
 				DurationVal: duration('5s'),
@@ -60,23 +61,23 @@ func TestNativeTypes(t *testing.T) {
 				Uint32Val: 100u,
 				Uint64Val: 200u,
 				ListVal: [
-					ext.TestNestedType{
+					types_test.TestNestedType{
 						NestedListVal:['goodbye', 'cruel', 'world'],
 						NestedMapVal: {42: true},
-            custom_name: 'name',
+						custom_name: 'name',
 					},
 				],
 				ArrayVal: [
-					ext.TestNestedType{
+					types_test.TestNestedType{
 						NestedListVal:['goodbye', 'cruel', 'world'],
 						NestedMapVal: {42: true},
-            custom_name: 'name',
+						custom_name: 'name',
 					},
 				],
-				MapVal: {'map-key': ext.TestAllTypes{BoolVal: true}},
-				CustomSliceVal: [ext.TestNestedSliceType{Value: 'none'}],
-				CustomMapVal: {'even': ext.TestMapVal{Value: 'more'}},
-        custom_name: 'name',
+				MapVal: {'map-key': types_test.TestAllTypes{BoolVal: true}},
+				CustomSliceVal: [types_test.TestNestedSliceType{Value: 'none'}],
+				CustomMapVal: {'even': types_test.TestMapVal{Value: 'more'}},
+				custom_name: 'name',
 			}`,
 			out: &TestAllTypes{
 				NestedVal:    &TestNestedType{NestedMapVal: map[int64]bool{1: false}},
@@ -108,12 +109,12 @@ func TestNativeTypes(t *testing.T) {
 				CustomMapVal:   map[string]TestMapVal{"even": {Value: "more"}},
 				CustomName:     "name",
 			},
-			envOpts: []any{ParseStructTags(true)},
+			envOpts: []any{types.ParseStructTags(true)},
 		},
 
 		{
-			expr: `ext.TestAllTypes{
-				nestedVal: ext.TestNestedType{NestedMapVal: {1: false}},
+			expr: `types_test.TestAllTypes{
+				nestedVal: types_test.TestNestedType{NestedMapVal: {1: false}},
 				boolVal: true,
 				BytesVal: b'hello',
 				DurationVal: duration('5s'),
@@ -126,23 +127,23 @@ func TestNativeTypes(t *testing.T) {
 				Uint32Val: 100u,
 				Uint64Val: 200u,
 				ListVal: [
-					ext.TestNestedType{
+					types_test.TestNestedType{
 						NestedListVal:['goodbye', 'cruel', 'world'],
 						NestedMapVal: {42: true},
-            custom_name: 'name',
+						custom_name: 'name',
 					},
 				],
 				ArrayVal: [
-					ext.TestNestedType{
+					types_test.TestNestedType{
 						NestedListVal:['goodbye', 'cruel', 'world'],
 						NestedMapVal: {42: true},
-            custom_name: 'name',
+						custom_name: 'name',
 					},
 				],
-				MapVal: {'map-key': ext.TestAllTypes{boolVal: true}},
-				CustomSliceVal: [ext.TestNestedSliceType{Value: 'none'}],
-				CustomMapVal: {'even': ext.TestMapVal{Value: 'more'}},
-        CustomName: 'name',
+				MapVal: {'map-key': types_test.TestAllTypes{boolVal: true}},
+				CustomSliceVal: [types_test.TestNestedSliceType{Value: 'none'}],
+				CustomMapVal: {'even': types_test.TestMapVal{Value: 'more'}},
+				CustomName: 'name',
 			}`,
 			out: &TestAllTypes{
 				NestedVal:    &TestNestedType{NestedMapVal: map[int64]bool{1: false}},
@@ -174,11 +175,11 @@ func TestNativeTypes(t *testing.T) {
 				CustomMapVal:   map[string]TestMapVal{"even": {Value: "more"}},
 				CustomName:     "name",
 			},
-			envOpts: []any{ParseStructTag("json")},
+			envOpts: []any{types.ParseStructTag("json")},
 		},
 		{
-			expr: `ext.TestAllTypes{
-				NestedVal: ext.TestNestedType{NestedMapVal: {1: false}},
+			expr: `types_test.TestAllTypes{
+				NestedVal: types_test.TestNestedType{NestedMapVal: {1: false}},
 				BoolVal: true,
 				BytesVal: b'hello',
 				DurationVal: duration('5s'),
@@ -191,23 +192,23 @@ func TestNativeTypes(t *testing.T) {
 				Uint32Val: 100u,
 				Uint64Val: 200u,
 				ListVal: [
-					ext.TestNestedType{
+					types_test.TestNestedType{
 						NestedListVal:['goodbye', 'cruel', 'world'],
 						NestedMapVal: {42: true},
-            NestedCustomName: 'name',
+						NestedCustomName: 'name',
 					},
 				],
 				ArrayVal: [
-					ext.TestNestedType{
+					types_test.TestNestedType{
 						NestedListVal:['goodbye', 'cruel', 'world'],
 						NestedMapVal: {42: true},
-            NestedCustomName: 'name',
+						NestedCustomName: 'name',
 					},
 				],
-				MapVal: {'map-key': ext.TestAllTypes{BoolVal: true}},
-				CustomSliceVal: [ext.TestNestedSliceType{Value: 'none'}],
-				CustomMapVal: {'even': ext.TestMapVal{Value: 'more'}},
-        CustomName: 'name',
+				MapVal: {'map-key': types_test.TestAllTypes{BoolVal: true}},
+				CustomSliceVal: [types_test.TestNestedSliceType{Value: 'none'}],
+				CustomMapVal: {'even': types_test.TestMapVal{Value: 'more'}},
+				CustomName: 'name',
 			}`,
 			out: &TestAllTypes{
 				NestedVal:    &TestNestedType{NestedMapVal: map[int64]bool{1: false}},
@@ -241,33 +242,33 @@ func TestNativeTypes(t *testing.T) {
 			},
 		},
 		{
-			expr: `ext.TestAllTypes{
+			expr: `types_test.TestAllTypes{
 					PbVal: test.TestAllTypes{single_int32: 123}
 				}.PbVal`,
 			out: &proto3pb.TestAllTypes{SingleInt32: 123},
 		},
 		{
-			expr: `ext.TestAllTypes{PbVal: test.TestAllTypes{}} ==
-			ext.TestAllTypes{PbVal: test.TestAllTypes{single_bool: false}}`,
+			expr: `types_test.TestAllTypes{PbVal: test.TestAllTypes{}} ==
+			types_test.TestAllTypes{PbVal: test.TestAllTypes{single_bool: false}}`,
 		},
-		{expr: `ext.TestNestedType{} == TestNestedType{}`},
-		{expr: `ext.TestAllTypes{}.BoolVal != true`},
-		{expr: `!has(ext.TestAllTypes{}.BoolVal) && !has(ext.TestAllTypes{}.NestedVal)`},
-		{expr: `type(ext.TestAllTypes) == type`},
-		{expr: `type(ext.TestAllTypes{}) == ext.TestAllTypes`},
-		{expr: `type(ext.TestAllTypes{}) == ext.TestAllTypes`},
-		{expr: `ext.TestAllTypes != test.TestAllTypes`},
-		{expr: `ext.TestAllTypes{BoolVal: true} != dyn(test.TestAllTypes{single_bool: true})`},
-		{expr: `ext.TestAllTypes{}.NestedVal == ext.TestNestedType{}`},
-		{expr: `ext.TestNestedType{} == ext.TestAllTypes{}.NestedStructVal`},
-		{expr: `ext.TestAllTypes{}.NestedStructVal == ext.TestNestedType{}`},
-		{expr: `ext.TestAllTypes{}.ListVal.size() == 0`},
-		{expr: `ext.TestAllTypes{}.MapVal.size() == 0`},
-		{expr: `ext.TestAllTypes{}.TimestampVal == timestamp(0)`},
+		{expr: `types_test.TestNestedType{} == TestNestedType{}`},
+		{expr: `types_test.TestAllTypes{}.BoolVal != true`},
+		{expr: `!has(types_test.TestAllTypes{}.BoolVal) && !has(types_test.TestAllTypes{}.NestedVal)`},
+		{expr: `type(types_test.TestAllTypes) == type`},
+		{expr: `type(types_test.TestAllTypes{}) == types_test.TestAllTypes`},
+		{expr: `type(types_test.TestAllTypes{}) == types_test.TestAllTypes`},
+		{expr: `types_test.TestAllTypes != test.TestAllTypes`},
+		{expr: `types_test.TestAllTypes{BoolVal: true} != dyn(test.TestAllTypes{single_bool: true})`},
+		{expr: `types_test.TestAllTypes{}.NestedVal == types_test.TestNestedType{}`},
+		{expr: `types_test.TestNestedType{} == types_test.TestAllTypes{}.NestedStructVal`},
+		{expr: `types_test.TestAllTypes{}.NestedStructVal == types_test.TestNestedType{}`},
+		{expr: `types_test.TestAllTypes{}.ListVal.size() == 0`},
+		{expr: `types_test.TestAllTypes{}.MapVal.size() == 0`},
+		{expr: `types_test.TestAllTypes{}.TimestampVal == timestamp(0)`},
 		{expr: `test.TestAllTypes{}.single_timestamp == timestamp(0)`},
 		{expr: `[TestAllTypes{BoolVal: true}, TestAllTypes{BoolVal: false}].exists(t, t.BoolVal == true)`},
 		{expr: `[TestAllTypes{CustomName: 'Alice'}, TestAllTypes{CustomName: 'Bob'}].exists(t, t.CustomName == 'Alice')`},
-		{expr: `[TestAllTypes{custom_name: 'Alice'}, TestAllTypes{custom_name: 'Bob'}].exists(t, t.custom_name == 'Alice')`, envOpts: []any{ParseStructTags(true)}},
+		{expr: `[TestAllTypes{custom_name: 'Alice'}, TestAllTypes{custom_name: 'Bob'}].exists(t, t.custom_name == 'Alice')`, envOpts: []any{types.ParseStructTags(true)}},
 		{expr: `TestAllTypes{BytesArrayVal: b'1234'}.BytesArrayVal != b'123'`},
 		{expr: `TestAllTypes{BytesArrayVal: b'1234'}.BytesArrayVal == b'1234'`},
 		{
@@ -322,14 +323,14 @@ func TestNativeTypes(t *testing.T) {
 }
 
 func TestNativeFindStructFieldNames(t *testing.T) {
-	env := testNativeEnv(t, ParseStructTags(true))
+	env := testNativeEnv(t, types.ParseStructTags(true))
 	provider := env.CELTypeProvider()
 	tests := []struct {
 		typeName string
 		fields   []string
 	}{
 		{
-			typeName: "ext.TestNestedType",
+			typeName: "types_test.TestNestedType",
 			fields:   []string{"NestedListVal", "NestedMapVal", "custom_name"},
 		},
 		{
@@ -362,33 +363,33 @@ func TestNativeTypesStaticErrors(t *testing.T) {
 	}{
 		{
 			expr: `TestAllTypos{}`,
-			err: `ERROR: <input>:1:13: undeclared reference to 'TestAllTypos' (in container 'ext')
+			err: `ERROR: <input>:1:13: undeclared reference to 'TestAllTypos' (in container 'types_test')
 			 | TestAllTypos{}
 			 | ............^`,
 		},
 		{
-			expr: `ext.TestAllTypes{bool_val: false}`,
-			err: `ERROR: <input>:1:26: undefined field 'bool_val'
-			| ext.TestAllTypes{bool_val: false}
-			| .........................^`,
+			expr: `types_test.TestAllTypes{bool_val: false}`,
+			err: `ERROR: <input>:1:33: undefined field 'bool_val'
+			| types_test.TestAllTypes{bool_val: false}
+			| ................................^`,
 		},
 		{
-			expr: `ext.TestAllTypes{UnsupportedVal: null}`,
-			err: `ERROR: <input>:1:32: undefined field 'UnsupportedVal'
-			| ext.TestAllTypes{UnsupportedVal: null}
-			| ...............................^`,
+			expr: `types_test.TestAllTypes{UnsupportedVal: null}`,
+			err: `ERROR: <input>:1:39: undefined field 'UnsupportedVal'
+			| types_test.TestAllTypes{UnsupportedVal: null}
+			| ......................................^`,
 		},
 		{
-			expr: `ext.TestAllTypes{UnsupportedListVal: null}`,
-			err: `ERROR: <input>:1:36: undefined field 'UnsupportedListVal'
-			| ext.TestAllTypes{UnsupportedListVal: null}
-			| ...................................^`,
+			expr: `types_test.TestAllTypes{UnsupportedListVal: null}`,
+			err: `ERROR: <input>:1:43: undefined field 'UnsupportedListVal'
+			| types_test.TestAllTypes{UnsupportedListVal: null}
+			| ..........................................^`,
 		},
 		{
-			expr: `ext.TestAllTypes{UnsupportedMapVal: null}`,
-			err: `ERROR: <input>:1:35: undefined field 'UnsupportedMapVal'
-			| ext.TestAllTypes{UnsupportedMapVal: null}
-			| ..................................^`,
+			expr: `types_test.TestAllTypes{UnsupportedMapVal: null}`,
+			err: `ERROR: <input>:1:42: undefined field 'UnsupportedMapVal'
+			| types_test.TestAllTypes{UnsupportedMapVal: null}
+			| .........................................^`,
 		},
 	}
 	env := testNativeEnv(t)
@@ -425,7 +426,7 @@ func TestNativeTypesJsonSerialization(t *testing.T) {
 				Int32Val: 23,
 				Int64Val: 64,
 				MapVal: {
-					'map-key': ext.TestAllTypes{
+					'map-key': types_test.TestAllTypes{
 						BoolVal: true
 					}
 				},
@@ -433,7 +434,7 @@ func TestNativeTypesJsonSerialization(t *testing.T) {
 					NestedListVal: ["first", "second"],
 				},
 				StringVal: "string",
-        CustomName: "name",
+				CustomName: "name",
 			}`,
 			out: `{
 				"BoolVal":  true,
@@ -466,7 +467,7 @@ func TestNativeTypesJsonSerialization(t *testing.T) {
 				Int32Val: 23,
 				Int64Val: 64,
 				MapVal: {
-					'map-key': ext.TestAllTypes{
+					'map-key': types_test.TestAllTypes{
 						BoolVal: true
 					}
 				},
@@ -497,7 +498,7 @@ func TestNativeTypesJsonSerialization(t *testing.T) {
 				"StringVal":  "string",
                 "custom_name": "name"
 			  }`,
-			additionalEnvOptions: []any{ParseStructTags(true)},
+			additionalEnvOptions: []any{types.ParseStructTags(true)},
 		},
 	}
 	for i, tst := range tests {
@@ -538,51 +539,51 @@ func TestNativeTypesRuntimeErrors(t *testing.T) {
 			err:  `unknown type: TestAllTypos`,
 		},
 		{
-			expr: `ext.TestAllTypes{bool_val: false}`,
+			expr: `types_test.TestAllTypes{bool_val: false}`,
 			err:  `no such field: bool_val`,
 		},
 		{
-			expr: `ext.TestAllTypes{UnsupportedVal: null}`,
+			expr: `types_test.TestAllTypes{UnsupportedVal: null}`,
 			err:  `no such field: UnsupportedVal`,
 		},
 		{
-			expr: `ext.TestAllTypes{UnsupportedListVal: null}`,
+			expr: `types_test.TestAllTypes{UnsupportedListVal: null}`,
 			err:  `no such field: UnsupportedListVal`,
 		},
 		{
-			expr: `ext.TestAllTypes{UnsupportedMapVal: null}`,
+			expr: `types_test.TestAllTypes{UnsupportedMapVal: null}`,
 			err:  `no such field: UnsupportedMapVal`,
 		},
 		{
-			expr: `ext.TestAllTypes{privateVal: null}`,
+			expr: `types_test.TestAllTypes{privateVal: null}`,
 			err:  `no such field: privateVal`,
 		},
 		{
-			expr: `ext.TestAllTypes{}.UnsupportedMapVal`,
+			expr: `types_test.TestAllTypes{}.UnsupportedMapVal`,
 			err:  `no such field: UnsupportedMapVal`,
 		},
 		{
-			expr: `ext.TestAllTypes{}.privateVal`,
+			expr: `types_test.TestAllTypes{}.privateVal`,
 			err:  `no such field: privateVal`,
 		},
 		{
-			expr: `ext.TestAllTypes{BoolVal: 'false'}`,
+			expr: `types_test.TestAllTypes{BoolVal: 'false'}`,
 			err:  `unsupported native conversion from string to 'bool'`,
 		},
 		{
-			expr: `has(ext.TestAllTypes{}.BadFieldName)`,
+			expr: `has(types_test.TestAllTypes{}.BadFieldName)`,
 			err:  `no such field: BadFieldName`,
 		},
 		{
-			expr: `ext.TestAllTypes{}[42]`,
+			expr: `types_test.TestAllTypes{}[42]`,
 			err:  `no such overload`,
 		},
 		{
-			expr: `ext.TestAllTypes{Int32Val: 9223372036854775807}`,
+			expr: `types_test.TestAllTypes{Int32Val: 9223372036854775807}`,
 			err:  `integer overflow`,
 		},
 		{
-			expr: `ext.TestAllTypes{Uint32Val: 9223372036854775807u}`,
+			expr: `types_test.TestAllTypes{Uint32Val: 9223372036854775807u}`,
 			err:  `unsigned integer overflow`,
 		},
 	}
@@ -634,7 +635,7 @@ func TestNativeTypesErrors(t *testing.T) {
 	for i, tst := range envTests {
 		tc := tst
 		t.Run(fmt.Sprintf("%d", i), func(t *testing.T) {
-			_, err := cel.NewEnv(NativeTypes(tc.nativeType))
+			_, err := cel.NewEnv(ext.NativeTypes(tc.nativeType))
 			if err == nil || !strings.Contains(err.Error(), tc.err) {
 				t.Errorf("cel.NewEnv(NativeTypes(%v)) got error %v, wanted %v", tc.nativeType, err, tc.err)
 			}
@@ -643,7 +644,7 @@ func TestNativeTypesErrors(t *testing.T) {
 }
 
 func TestNativeTypesConvertToNative(t *testing.T) {
-	env := testNativeEnv(t, NativeTypes(reflect.TypeOf(TestNestedType{})))
+	env := testNativeEnv(t, ext.NativeTypes(reflect.TypeOf(TestNestedType{})))
 	adapter := env.CELTypeAdapter()
 	conversions := []struct {
 		in     any
@@ -653,17 +654,17 @@ func TestNativeTypesConvertToNative(t *testing.T) {
 	}{
 		{
 			in:     &TestAllTypes{BoolVal: true},
-			inType: cel.ObjectType("ext.TestAllTypes"),
+			inType: cel.ObjectType("types_test.TestAllTypes"),
 			out:    &TestAllTypes{BoolVal: true},
 		},
 		{
 			in:     TestAllTypes{BoolVal: true},
-			inType: cel.ObjectType("ext.TestAllTypes"),
+			inType: cel.ObjectType("types_test.TestAllTypes"),
 			out:    &TestAllTypes{BoolVal: true},
 		},
 		{
 			in:     &TestAllTypes{BoolVal: true},
-			inType: cel.ObjectType("ext.TestAllTypes"),
+			inType: cel.ObjectType("types_test.TestAllTypes"),
 			out:    TestAllTypes{BoolVal: true},
 		},
 		{
@@ -673,7 +674,7 @@ func TestNativeTypesConvertToNative(t *testing.T) {
 		},
 		{
 			in:     &TestAllTypes{BoolVal: true},
-			inType: cel.ObjectType("ext.TestAllTypes"),
+			inType: cel.ObjectType("types_test.TestAllTypes"),
 			out:    &proto3pb.TestAllTypes{},
 			err:    "type conversion error",
 		},
@@ -718,7 +719,7 @@ func TestNativeTypesConvertToNative(t *testing.T) {
 }
 
 func TestConvertToTypeErrors(t *testing.T) {
-	env := testNativeEnv(t, NativeTypes(reflect.TypeOf(TestNestedType{})))
+	env := testNativeEnv(t, ext.NativeTypes(reflect.TypeOf(TestNestedType{})))
 	adapter := env.CELTypeAdapter()
 	conversions := []struct {
 		in  any
@@ -777,12 +778,12 @@ func TestNativeTypesWithOptional(t *testing.T) {
 	var nativeTests = []struct {
 		expr string
 	}{
-		{expr: `!optional.ofNonZeroValue(ext.TestAllTypes{}).hasValue()`},
-		{expr: `!ext.TestAllTypes{}.?BoolVal.orValue(false)`},
-		{expr: `!ext.TestAllTypes{}.?BoolVal.hasValue()`},
-		{expr: `!ext.TestAllTypes{BoolVal: false}.?BoolVal.hasValue()`},
-		{expr: `ext.TestAllTypes{BoolVal: true}.?BoolVal.hasValue()`},
-		{expr: `ext.TestAllTypes{}.NestedVal.?NestedMapVal.orValue({}).size() == 0`},
+		{expr: `!optional.ofNonZeroValue(types_test.TestAllTypes{}).hasValue()`},
+		{expr: `!types_test.TestAllTypes{}.?BoolVal.orValue(false)`},
+		{expr: `!types_test.TestAllTypes{}.?BoolVal.hasValue()`},
+		{expr: `!types_test.TestAllTypes{BoolVal: false}.?BoolVal.hasValue()`},
+		{expr: `types_test.TestAllTypes{BoolVal: true}.?BoolVal.hasValue()`},
+		{expr: `types_test.TestAllTypes{}.NestedVal.?NestedMapVal.orValue({}).size() == 0`},
 	}
 	env := testNativeEnv(t, cel.OptionalTypes())
 	for i, tst := range nativeTests {
@@ -821,16 +822,16 @@ func TestNativeTypesWithCELTypedFields(t *testing.T) {
 		expr string
 	}{
 		{
-			expr: `ext.TestRefValFieldType{optional_name: optional.of('my name')}.optional_name.orValue('') == 'my name'`,
+			expr: `types_test.TestRefValFieldType{optional_name: optional.of('my name')}.optional_name.orValue('') == 'my name'`,
 		},
 		{
-			expr: `ext.TestRefValFieldType{IntVal: 2}.IntVal >= 1`,
+			expr: `types_test.TestRefValFieldType{IntVal: 2}.IntVal >= 1`,
 		},
 		{
-			expr: `ext.TestRefValFieldType{time: timestamp('2001-01-01T00:00:00Z')}.time > timestamp('1970-01-01T00:00:00Z')`,
+			expr: `types_test.TestRefValFieldType{time: timestamp('2001-01-01T00:00:00Z')}.time > timestamp('1970-01-01T00:00:00Z')`,
 		},
 	}
-	env := testNativeEnv(t, cel.OptionalTypes(), ParseStructTag("cel"))
+	env := testNativeEnv(t, cel.OptionalTypes(), types.ParseStructTag("cel"))
 	for i, tst := range nativeTests {
 		tc := tst
 		t.Run(fmt.Sprintf("[%d]", i), func(t *testing.T) {
@@ -978,7 +979,7 @@ func TestNativeStructEmbedded(t *testing.T) {
 			out: errors.New("no such field: -"),
 		},
 		{
-			expr: `test.embedded == ext.TestNestedType{custom_name: "name"}`,
+			expr: `test.embedded == types_test.TestNestedType{custom_name: "name"}`,
 			in: map[string]any{
 				"test": &TestEmbeddedTypes{
 					TestNestedType: TestNestedType{NestedCustomName: "name"},
@@ -999,12 +1000,12 @@ func TestNativeStructEmbedded(t *testing.T) {
 	}
 
 	envOpts := []cel.EnvOption{
-		NativeTypes(
+		ext.NativeTypes(
 			reflect.TypeFor[*TestEmbeddedTypes](),
 			reflect.TypeFor[*TestNestedType](),
-			ParseStructTag("json"),
+			types.ParseStructTag("json"),
 		),
-		cel.Variable("test", cel.ObjectType("ext.TestEmbeddedTypes")),
+		cel.Variable("test", cel.ObjectType("types_test.TestEmbeddedTypes")),
 	}
 
 	env, err := cel.NewEnv(envOpts...)
@@ -1071,19 +1072,19 @@ func TestNativeStructEmbeddedPointer(t *testing.T) {
 			out: true,
 		},
 		{
-			expr: `ext.TestEmbeddedPointerTypes{custom_name: "name"}.custom_name == "name"`,
+			expr: `types_test.TestEmbeddedPointerTypes{custom_name: "name"}.custom_name == "name"`,
 			in:   nil,
 			out:  true,
 		},
 	}
 
 	envOpts := []cel.EnvOption{
-		NativeTypes(
+		ext.NativeTypes(
 			reflect.TypeFor[*TestEmbeddedPointerTypes](),
 			reflect.TypeFor[*TestNestedType](),
-			ParseStructTag("json"),
+			types.ParseStructTag("json"),
 		),
-		cel.Variable("test", cel.ObjectType("ext.TestEmbeddedPointerTypes")),
+		cel.Variable("test", cel.ObjectType("types_test.TestEmbeddedPointerTypes")),
 	}
 
 	env, err := cel.NewEnv(envOpts...)
@@ -1121,11 +1122,11 @@ func TestNativeStructEmbeddedPointer(t *testing.T) {
 
 func TestNativeStructHiddenField(t *testing.T) {
 	envOpts := []cel.EnvOption{
-		NativeTypes(
+		ext.NativeTypes(
 			reflect.TypeFor[*TestEmbeddedTypes](),
-			ParseStructTag("json"),
+			types.ParseStructTag("json"),
 		),
-		cel.Variable("test", cel.ObjectType("ext.TestEmbeddedTypes")),
+		cel.Variable("test", cel.ObjectType("types_test.TestEmbeddedTypes")),
 	}
 
 	env, err := cel.NewEnv(envOpts...)
@@ -1180,11 +1181,11 @@ func TestNativeNestedStruct(t *testing.T) {
 	}
 
 	envOpts := []cel.EnvOption{
-		NativeTypes(
+		ext.NativeTypes(
 			reflect.ValueOf(&TestNestedStruct{}),
-			ParseStructTag("json"),
+			types.ParseStructTag("json"),
 		),
-		cel.Variable("test", cel.ObjectType("ext.TestNestedStruct")),
+		cel.Variable("test", cel.ObjectType("types_test.TestNestedStruct")),
 	}
 
 	env, err := cel.NewEnv(envOpts...)
@@ -1224,7 +1225,7 @@ func TestNativeNestedStruct(t *testing.T) {
 }
 
 func TestNativeTypesVersion(t *testing.T) {
-	_, err := cel.NewEnv(NativeTypes(NativeTypesVersion(0)))
+	_, err := cel.NewEnv(ext.NativeTypes(ext.NativeTypesVersion(0)))
 	if err != nil {
 		t.Fatalf("NewEnv(NativeTypes(NativeTypesVersion(0))) failed: %v", err)
 	}
@@ -1233,9 +1234,9 @@ func TestNativeTypesVersion(t *testing.T) {
 func TestTypeResolutionRace(t *testing.T) {
 	customType := reflect.TypeFor[*Custom]()
 	env, err := cel.NewEnv(
-		cel.Container("ext"),
-		NativeTypes(
-			ParseStructTag("cel"),
+		cel.Container("types_test"),
+		ext.NativeTypes(
+			types.ParseStructTag("cel"),
 			customType,
 		),
 	)
@@ -1271,14 +1272,213 @@ func TestTypeResolutionRace(t *testing.T) {
 	}
 }
 
+func TestNativeToValueDelegatesUnregisteredStructs(t *testing.T) {
+	custom := &recordingAdapter{base: types.DefaultTypeAdapter}
+	env, err := cel.NewEnv(
+		cel.CustomTypeAdapter(custom),
+		ext.NativeTypes(reflect.TypeOf(registeredNativeStruct{})),
+	)
+	if err != nil {
+		t.Fatalf("cel.NewEnv() failed: %v", err)
+	}
+	adapter := env.CELTypeAdapter()
+
+	// An unregistered struct must reach the composed base adapter.
+	got := adapter.NativeToValue(unregisteredNativeStruct{Name: "x"})
+	if !custom.saw {
+		t.Error("base adapter was not consulted for an unregistered struct")
+	}
+	if got.Equal(types.String("from-base-adapter")) != types.True {
+		t.Errorf("NativeToValue(unregisteredNativeStruct) = %v, want the base adapter's value", got)
+	}
+
+	// A registered native type must still be wrapped as a native object.
+	custom.saw = false
+	gotReg := adapter.NativeToValue(registeredNativeStruct{Name: "y"})
+	if custom.saw {
+		t.Error("base adapter was consulted for a registered native type")
+	}
+	if tn := gotReg.Type().TypeName(); !strings.Contains(tn, "registeredNativeStruct") {
+		t.Errorf("NativeToValue(registeredNativeStruct).Type() = %q, want a native object type", tn)
+	}
+}
+
+func BenchmarkNativeTypesEval(b *testing.B) {
+	benchmarks := []struct {
+		name    string
+		expr    string
+		in      any
+		envOpts []any
+	}{
+		{
+			name: "FieldAccess",
+			expr: "t.Int32Val + t.Int64Val",
+			in: map[string]any{
+				"t": &TestAllTypes{Int32Val: 10, Int64Val: 20},
+			},
+		},
+		{
+			name: "NestedFieldAccess",
+			expr: "t.NestedVal.NestedCustomName == 'name'",
+			in: map[string]any{
+				"t": &TestAllTypes{
+					NestedVal: &TestNestedType{NestedCustomName: "name"},
+				},
+			},
+		},
+		{
+			name: "StructCreation",
+			expr: `types_test.TestAllTypes{
+				BoolVal: true,
+				Int32Val: 10,
+				Int64Val: 20,
+				StringVal: 'hello world',
+			}`,
+		},
+		{
+			name: "FieldPresence",
+			expr: "has(t.BoolVal) && has(t.NestedVal)",
+			in: map[string]any{
+				"t": &TestAllTypes{
+					BoolVal:   true,
+					NestedVal: &TestNestedType{},
+				},
+			},
+		},
+		{
+			name:    "StructTagFieldAccess",
+			expr:    "t.custom_name == 'name'",
+			envOpts: []any{types.ParseStructTags(true)},
+			in: map[string]any{
+				"t": &TestAllTypes{CustomName: "name"},
+			},
+		},
+		{
+			name: "ListExists",
+			expr: "tests.exists(t, t.Int32Val > 15)",
+			in: map[string]any{
+				"tests": []*TestAllTypes{
+					{Int32Val: 10},
+					{Int32Val: 20},
+				},
+			},
+		},
+	}
+
+	for _, bm := range benchmarks {
+		b.Run(bm.name, func(b *testing.B) {
+			envOpts := append([]any{
+				cel.Variable("t", cel.ObjectType("types_test.TestAllTypes")),
+			}, bm.envOpts...)
+			env := testNativeEnv(b, envOpts...)
+			ast, iss := env.Compile(bm.expr)
+			if iss.Err() != nil {
+				b.Fatalf("env.Compile(%q) failed: %v", bm.expr, iss.Err())
+			}
+			prg, err := env.Program(ast, cel.EvalOptions(cel.OptOptimize))
+			if err != nil {
+				b.Fatalf("env.Program() failed: %v", err)
+			}
+			input := bm.in
+			if input == nil {
+				input = cel.NoVars()
+			}
+			b.ResetTimer()
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				prg.Eval(input)
+			}
+		})
+	}
+}
+
+func BenchmarkNativeToValue(b *testing.B) {
+	env := testNativeEnv(b)
+	adapter := env.CELTypeAdapter()
+
+	nested := &TestNestedType{
+		NestedListVal:    []string{"a", "b", "c"},
+		NestedMapVal:     map[int64]bool{1: true},
+		NestedCustomName: "test",
+	}
+	allTypes := &TestAllTypes{
+		BoolVal:   true,
+		Int32Val:  10,
+		Int64Val:  20,
+		StringVal: "hello world",
+		NestedVal: nested,
+		ListVal:   []*TestNestedType{nested},
+	}
+	allTypesSlice := []*TestAllTypes{allTypes, allTypes}
+
+	benchmarks := []struct {
+		name string
+		val  any
+	}{
+		{name: "TestNestedType", val: nested},
+		{name: "TestAllTypes", val: allTypes},
+		{name: "SliceTestAllTypes", val: allTypesSlice},
+	}
+
+	for _, bm := range benchmarks {
+		b.Run(bm.name, func(b *testing.B) {
+			b.ResetTimer()
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				adapter.NativeToValue(bm.val)
+			}
+		})
+	}
+}
+
+func BenchmarkConvertToNative(b *testing.B) {
+	env := testNativeEnv(b)
+	adapter := env.CELTypeAdapter()
+
+	allTypes := &TestAllTypes{
+		BoolVal:   true,
+		Int32Val:  10,
+		Int64Val:  20,
+		StringVal: "hello world",
+	}
+	celVal := adapter.NativeToValue(allTypes)
+	targetType := reflect.TypeOf(&TestAllTypes{})
+
+	allTypesSlice := []*TestAllTypes{allTypes, allTypes}
+	celSliceVal := adapter.NativeToValue(allTypesSlice)
+	sliceTargetType := reflect.TypeOf([]*TestAllTypes{})
+
+	b.Run("TestAllTypes", func(b *testing.B) {
+		b.ResetTimer()
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			_, err := celVal.ConvertToNative(targetType)
+			if err != nil {
+				b.Fatalf("ConvertToNative failed: %v", err)
+			}
+		}
+	})
+
+	b.Run("SliceTestAllTypes", func(b *testing.B) {
+		b.ResetTimer()
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			_, err := celSliceVal.ConvertToNative(sliceTargetType)
+			if err != nil {
+				b.Fatalf("ConvertToNative failed: %v", err)
+			}
+		}
+	})
+}
+
 // testEnv initializes the test environment common to all tests.
 func testNativeEnv(t testing.TB, opts ...any) *cel.Env {
 	t.Helper()
 	envOpts := []cel.EnvOption{
-		cel.Container("ext"),
+		cel.Container("types_test"),
 		cel.Abbrevs("google.expr.proto3.test"),
 		cel.Types(&proto3pb.TestAllTypes{}),
-		cel.Variable("tests", cel.ListType(cel.ObjectType("ext.TestAllTypes"))),
+		cel.Variable("tests", cel.ListType(cel.ObjectType("types_test.TestAllTypes"))),
 	}
 	nativeOpts := []any{
 		reflect.ValueOf(&TestAllTypes{}),
@@ -1286,7 +1486,7 @@ func testNativeEnv(t testing.TB, opts ...any) *cel.Env {
 	}
 	for _, o := range opts {
 		switch opt := o.(type) {
-		case NativeTypesOption:
+		case types.NativeTypeOption:
 			nativeOpts = append(nativeOpts, opt)
 		case cel.EnvOption:
 			envOpts = append(envOpts, opt)
@@ -1296,7 +1496,7 @@ func testNativeEnv(t testing.TB, opts ...any) *cel.Env {
 	}
 
 	envOpts = append(envOpts,
-		NativeTypes(
+		ext.NativeTypes(
 			nativeOpts...,
 		),
 	)
@@ -1412,203 +1612,4 @@ func (a *recordingAdapter) NativeToValue(value any) ref.Val {
 		return types.String("from-base-adapter")
 	}
 	return a.base.NativeToValue(value)
-}
-
-func TestNativeToValueDelegatesUnregisteredStructs(t *testing.T) {
-	custom := &recordingAdapter{base: types.DefaultTypeAdapter}
-	env, err := cel.NewEnv(
-		cel.CustomTypeAdapter(custom),
-		NativeTypes(reflect.TypeOf(registeredNativeStruct{})),
-	)
-	if err != nil {
-		t.Fatalf("cel.NewEnv() failed: %v", err)
-	}
-	adapter := env.CELTypeAdapter()
-
-	// An unregistered struct must reach the composed base adapter.
-	got := adapter.NativeToValue(unregisteredNativeStruct{Name: "x"})
-	if !custom.saw {
-		t.Error("base adapter was not consulted for an unregistered struct")
-	}
-	if got.Equal(types.String("from-base-adapter")) != types.True {
-		t.Errorf("NativeToValue(unregisteredNativeStruct) = %v, want the base adapter's value", got)
-	}
-
-	// A registered native type must still be wrapped as a native object.
-	custom.saw = false
-	gotReg := adapter.NativeToValue(registeredNativeStruct{Name: "y"})
-	if custom.saw {
-		t.Error("base adapter was consulted for a registered native type")
-	}
-	if tn := gotReg.Type().TypeName(); !strings.Contains(tn, "registeredNativeStruct") {
-		t.Errorf("NativeToValue(registeredNativeStruct).Type() = %q, want a native object type", tn)
-	}
-}
-
-func BenchmarkNativeTypesEval(b *testing.B) {
-	benchmarks := []struct {
-		name    string
-		expr    string
-		in      any
-		envOpts []any
-	}{
-		{
-			name: "FieldAccess",
-			expr: "t.Int32Val + t.Int64Val",
-			in: map[string]any{
-				"t": &TestAllTypes{Int32Val: 10, Int64Val: 20},
-			},
-		},
-		{
-			name: "NestedFieldAccess",
-			expr: "t.NestedVal.NestedCustomName == 'name'",
-			in: map[string]any{
-				"t": &TestAllTypes{
-					NestedVal: &TestNestedType{NestedCustomName: "name"},
-				},
-			},
-		},
-		{
-			name: "StructCreation",
-			expr: `ext.TestAllTypes{
-				BoolVal: true,
-				Int32Val: 10,
-				Int64Val: 20,
-				StringVal: 'hello world',
-			}`,
-		},
-		{
-			name: "FieldPresence",
-			expr: "has(t.BoolVal) && has(t.NestedVal)",
-			in: map[string]any{
-				"t": &TestAllTypes{
-					BoolVal:   true,
-					NestedVal: &TestNestedType{},
-				},
-			},
-		},
-		{
-			name:    "StructTagFieldAccess",
-			expr:    "t.custom_name == 'name'",
-			envOpts: []any{ParseStructTags(true)},
-			in: map[string]any{
-				"t": &TestAllTypes{CustomName: "name"},
-			},
-		},
-		{
-			name: "ListExists",
-			expr: "tests.exists(t, t.Int32Val > 15)",
-			in: map[string]any{
-				"tests": []*TestAllTypes{
-					{Int32Val: 10},
-					{Int32Val: 20},
-				},
-			},
-		},
-	}
-
-	for _, bm := range benchmarks {
-		b.Run(bm.name, func(b *testing.B) {
-			envOpts := append([]any{
-				cel.Variable("t", cel.ObjectType("ext.TestAllTypes")),
-			}, bm.envOpts...)
-			env := testNativeEnv(b, envOpts...)
-			ast, iss := env.Compile(bm.expr)
-			if iss.Err() != nil {
-				b.Fatalf("env.Compile(%q) failed: %v", bm.expr, iss.Err())
-			}
-			prg, err := env.Program(ast, cel.EvalOptions(cel.OptOptimize))
-			if err != nil {
-				b.Fatalf("env.Program() failed: %v", err)
-			}
-			input := bm.in
-			if input == nil {
-				input = cel.NoVars()
-			}
-			b.ResetTimer()
-			b.ReportAllocs()
-			for i := 0; i < b.N; i++ {
-				prg.Eval(input)
-			}
-		})
-	}
-}
-
-func BenchmarkNativeToValue(b *testing.B) {
-	env := testNativeEnv(b)
-	adapter := env.CELTypeAdapter()
-
-	nested := &TestNestedType{
-		NestedListVal:    []string{"a", "b", "c"},
-		NestedMapVal:     map[int64]bool{1: true},
-		NestedCustomName: "test",
-	}
-	allTypes := &TestAllTypes{
-		BoolVal:   true,
-		Int32Val:  10,
-		Int64Val:  20,
-		StringVal: "hello world",
-		NestedVal: nested,
-		ListVal:   []*TestNestedType{nested},
-	}
-	allTypesSlice := []*TestAllTypes{allTypes, allTypes}
-
-	benchmarks := []struct {
-		name string
-		val  any
-	}{
-		{name: "TestNestedType", val: nested},
-		{name: "TestAllTypes", val: allTypes},
-		{name: "SliceTestAllTypes", val: allTypesSlice},
-	}
-
-	for _, bm := range benchmarks {
-		b.Run(bm.name, func(b *testing.B) {
-			b.ResetTimer()
-			b.ReportAllocs()
-			for i := 0; i < b.N; i++ {
-				adapter.NativeToValue(bm.val)
-			}
-		})
-	}
-}
-
-func BenchmarkConvertToNative(b *testing.B) {
-	env := testNativeEnv(b)
-	adapter := env.CELTypeAdapter()
-
-	allTypes := &TestAllTypes{
-		BoolVal:   true,
-		Int32Val:  10,
-		Int64Val:  20,
-		StringVal: "hello world",
-	}
-	celVal := adapter.NativeToValue(allTypes)
-	targetType := reflect.TypeOf(&TestAllTypes{})
-
-	allTypesSlice := []*TestAllTypes{allTypes, allTypes}
-	celSliceVal := adapter.NativeToValue(allTypesSlice)
-	sliceTargetType := reflect.TypeOf([]*TestAllTypes{})
-
-	b.Run("TestAllTypes", func(b *testing.B) {
-		b.ResetTimer()
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			_, err := celVal.ConvertToNative(targetType)
-			if err != nil {
-				b.Fatalf("ConvertToNative failed: %v", err)
-			}
-		}
-	})
-
-	b.Run("SliceTestAllTypes", func(b *testing.B) {
-		b.ResetTimer()
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			_, err := celSliceVal.ConvertToNative(sliceTargetType)
-			if err != nil {
-				b.Fatalf("ConvertToNative failed: %v", err)
-			}
-		}
-	})
 }

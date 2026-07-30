@@ -2418,3 +2418,47 @@ func TestRegistry_RegisterTypeEdgeCases(t *testing.T) {
 		})
 	}
 }
+
+type sampleTaggedStruct struct {
+	Greeting string `cel:"hello_str"`
+	Count    int    `cel:"count_int"`
+}
+
+func TestRegistry_NativeReflectTypes(t *testing.T) {
+	reg, err := NewRegistry(
+		ParseStructTags(true),
+		reflect.TypeFor[sampleTaggedStruct](),
+	)
+	if err != nil {
+		t.Fatalf("NewRegistry(reflect.Type) failed: %v", err)
+	}
+
+	t.Run("FindStructType", func(t *testing.T) {
+		st, found := reg.FindStructType("types.sampleTaggedStruct")
+		if !found || st == nil {
+			t.Fatalf("FindStructType(types.sampleTaggedStruct) not found")
+		}
+	})
+
+	t.Run("FindStructFieldType with tag", func(t *testing.T) {
+		ft, found := reg.FindStructFieldType("types.sampleTaggedStruct", "hello_str")
+		if !found || ft == nil {
+			t.Fatalf("FindStructFieldType(hello_str) not found")
+		}
+		if ft.Type != StringType {
+			t.Errorf("FindStructFieldType(hello_str) got %v, want StringType", ft.Type)
+		}
+	})
+
+	t.Run("NativeToValue", func(t *testing.T) {
+		inst := sampleTaggedStruct{Greeting: "world", Count: 42}
+		val := reg.NativeToValue(&inst)
+		if IsError(val) {
+			t.Fatalf("NativeToValue() failed: %v", val)
+		}
+		gotGreeting := val.(traits.Indexer).Get(String("hello_str"))
+		if gotGreeting.Equal(String("world")) != True {
+			t.Errorf("Get(hello_str) = %v, want 'world'", gotGreeting)
+		}
+	})
+}
