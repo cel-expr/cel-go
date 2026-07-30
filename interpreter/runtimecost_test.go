@@ -268,6 +268,26 @@ func TestRuntimeCost(t *testing.T) {
 			want: 0,
 		},
 		{
+			name: "eq error operand short-circuits",
+			expr: `1 / 0 == 2`,
+			want: 2,
+		},
+		{
+			name: "eq error operand commuted",
+			expr: `2 == 1 / 0`,
+			want: 2,
+		},
+		{
+			name: "ne error operand short-circuits",
+			expr: `1 / 0 != 2`,
+			want: 2,
+		},
+		{
+			name: "binary call error operand short-circuits",
+			expr: `1 / 0 + 2`,
+			want: 2,
+		},
+		{
 			name: "identity",
 			expr: `input`,
 			vars: []*decls.VariableDecl{decls.NewVariable("input", intList)},

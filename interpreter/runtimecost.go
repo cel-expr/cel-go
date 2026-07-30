@@ -155,6 +155,14 @@ func (ct *costTrackerFactory) Observe(vars Activation, id int64, programStep any
 	case InterpretableCall:
 		if argVals, ok := tracker.stack.dropArgs(t.Args()); ok {
 			tracker.cost += tracker.costCall(t, argVals, val)
+		} else if types.IsError(val) {
+			switch t.(type) {
+			case *evalEq, *evalNe, *evalBinary:
+				// The call short-circuited on an error operand without evaluating all of
+				// its arguments. Charge the base call cost so that the observed cost does
+				// not depend on which operand produced the error.
+				tracker.cost++
+			}
 		}
 	case InterpretableConstructor:
 		tracker.stack.dropArgs(t.InitVals())
