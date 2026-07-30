@@ -122,11 +122,32 @@ func (t *NativeType) Adapt(adapter Adapter, value any) ref.Val {
 	if value == nil {
 		return NullValue
 	}
+	refVal := reflect.ValueOf(value)
+	if refVal.Kind() == reflect.Ptr {
+		if refVal.IsNil() {
+			return NullValue
+		}
+		refVal = refVal.Elem()
+	}
+	return t.AdaptReflect(adapter, value, refVal)
+}
+
+// AdaptReflect implements StructTypeDescriptor.
+func (t *NativeType) AdaptReflect(adapter Adapter, value any, refValue reflect.Value) ref.Val {
+	if value == nil {
+		return NullValue
+	}
+	if refValue.Kind() == reflect.Ptr {
+		if refValue.IsNil() {
+			return NullValue
+		}
+		refValue = refValue.Elem()
+	}
 	return &nativeObj{
 		Adapter:  adapter,
 		val:      value,
 		valType:  t,
-		refValue: reflect.ValueOf(value),
+		refValue: refValue,
 	}
 }
 
@@ -248,13 +269,16 @@ type nativeObj struct {
 
 func (o *nativeObj) ConvertToNative(typeDesc reflect.Type) (any, error) {
 	if o.refValue.Type() == typeDesc {
-		return o.val, nil
-	}
-	if o.refValue.Kind() == reflect.Pointer && o.refValue.Type().Elem() == typeDesc {
-		return o.refValue.Elem().Interface(), nil
+		if reflect.TypeOf(o.val) == typeDesc {
+			return o.val, nil
+		}
+		return o.refValue.Interface(), nil
 	}
 	if typeDesc.Kind() == reflect.Pointer && o.refValue.Type() == typeDesc.Elem() {
-		ptr := reflect.New(typeDesc.Elem())
+		if reflect.TypeOf(o.val) == typeDesc {
+			return o.val, nil
+		}
+		ptr := reflect.New(o.refValue.Type())
 		ptr.Elem().Set(o.refValue)
 		return ptr.Interface(), nil
 	}
@@ -266,7 +290,7 @@ func (o *nativeObj) ConvertToNative(typeDesc reflect.Type) (any, error) {
 		}
 		return structpb.NewStructValue(jsonStruct.(*structpb.Struct)), nil
 	case jsonStructType:
-		refVal := reflect.Indirect(o.refValue)
+		refVal := o.refValue
 		fields := make(map[string]*structpb.Value, refVal.NumField())
 		for fieldName, fieldType := range o.valType.fieldsByName {
 			fieldValue := refVal.FieldByIndex(fieldType.Index)
@@ -304,20 +328,15 @@ func (o *nativeObj) Equal(other ref.Val) ref.Val {
 	}
 	val := o.val
 	otherVal := otherNtv.val
-	refVal := o.refValue
-	otherRefVal := otherNtv.refValue
-	if refVal.Kind() != otherRefVal.Kind() {
-		if refVal.Kind() == reflect.Pointer {
-			val = refVal.Elem().Interface()
-		} else if otherRefVal.Kind() == reflect.Pointer {
-			otherVal = otherRefVal.Elem().Interface()
-		}
+	if reflect.TypeOf(val).Kind() != reflect.TypeOf(otherVal).Kind() {
+		val = o.refValue.Interface()
+		otherVal = otherNtv.refValue.Interface()
 	}
 	return Bool(reflect.DeepEqual(val, otherVal))
 }
 
 func (o *nativeObj) IsZeroValue() bool {
-	return reflect.Indirect(o.refValue).IsZero()
+	return o.refValue.IsZero()
 }
 
 func (o *nativeObj) IsSet(field ref.Val) ref.Val {
@@ -346,8 +365,7 @@ func (o *nativeObj) getReflectedField(field ref.Val) (reflect.Value, ref.Val) {
 	if !isDefined {
 		return reflect.Value{}, NewErr("no such field: %s", fieldName)
 	}
-	refVal := reflect.Indirect(o.refValue)
-	return safeGetFieldByIndex(refVal, refField.Index), nil
+	return safeGetFieldByIndex(o.refValue, refField.Index), nil
 }
 
 func (o *nativeObj) Type() ref.Type {
@@ -460,6 +478,9 @@ func safeSetFieldByIndex(v reflect.Value, index []int) reflect.Value {
 }
 
 func safeGetFieldByIndex(v reflect.Value, index []int) reflect.Value {
+	if len(index) == 1 {
+		return v.Field(index[0])
+	}
 	for _, i := range index {
 		if v.Kind() == reflect.Pointer {
 			if v.IsNil() {

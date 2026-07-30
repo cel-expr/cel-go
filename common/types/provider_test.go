@@ -947,6 +947,7 @@ func TestNativeToValue_Primitive(t *testing.T) {
 		{name: "pointer to ref.Val bytes", in: &rBytes, want: rBytes},
 
 		// Extensions to core types.
+		{name: "custom testBool", in: testBool(true), want: True},
 		{name: "custom testInt", in: testInt(1), want: Int(1)},
 		{name: "custom testInt8", in: testInt8(1), want: Int(1)},
 		{name: "custom testInt16", in: testInt16(1), want: Int(1)},
@@ -1362,6 +1363,13 @@ func (d *testStructType) NewValue(adapter Adapter, fields map[string]ref.Val) re
 }
 
 func (d *testStructType) Adapt(adapter Adapter, value any) ref.Val {
+	if value == nil {
+		return NullValue
+	}
+	refVal := reflect.ValueOf(value)
+	if refVal.Kind() == reflect.Pointer && refVal.IsNil() {
+		return NullValue
+	}
 	return &testStructVal{
 		adapter: adapter,
 		st:      d,

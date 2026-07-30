@@ -544,13 +544,145 @@ func (p *Registry) findStructDescriptorByReflectType(rt reflect.Type) (StructTyp
 //
 // This method should be the inverse of ref.Val.ConvertToNative.
 func (p *Registry) NativeToValue(value any) ref.Val {
-	if val, found := nativeToValue(p, value); found {
-		return val
-	}
 	switch v := value.(type) {
+	case nil:
+		return NullValue
+	case *Bool:
+		if v != nil {
+			return *v
+		}
+	case *Bytes:
+		if v != nil {
+			return *v
+		}
+	case *Double:
+		if v != nil {
+			return *v
+		}
+	case *Int:
+		if v != nil {
+			return *v
+		}
+	case *String:
+		if v != nil {
+			return *v
+		}
+	case *Uint:
+		if v != nil {
+			return *v
+		}
+	case ref.Val:
+		return v
+	case bool:
+		return Bool(v)
+	case int:
+		return Int(v)
+	case int32:
+		return Int(v)
+	case int64:
+		return Int(v)
+	case uint:
+		return Uint(v)
+	case uint32:
+		return Uint(v)
+	case uint64:
+		return Uint(v)
+	case float32:
+		return Double(v)
+	case float64:
+		return Double(v)
+	case string:
+		return String(v)
+	case *dpb.Duration:
+		return Duration{Duration: v.AsDuration()}
+	case time.Duration:
+		return Duration{Duration: v}
+	case *tpb.Timestamp:
+		return Timestamp{Time: v.AsTime()}
+	case time.Time:
+		return Timestamp{Time: v}
+	case *bool:
+		if v != nil {
+			return Bool(*v)
+		}
+	case *float32:
+		if v != nil {
+			return Double(*v)
+		}
+	case *float64:
+		if v != nil {
+			return Double(*v)
+		}
+	case *int:
+		if v != nil {
+			return Int(*v)
+		}
+	case *int32:
+		if v != nil {
+			return Int(*v)
+		}
+	case *int64:
+		if v != nil {
+			return Int(*v)
+		}
+	case *string:
+		if v != nil {
+			return String(*v)
+		}
+	case *uint:
+		if v != nil {
+			return Uint(*v)
+		}
+	case *uint32:
+		if v != nil {
+			return Uint(*v)
+		}
+	case *uint64:
+		if v != nil {
+			return Uint(*v)
+		}
+	case []byte:
+		return Bytes(v)
+	// specializations for common lists types.
+	case []string:
+		return NewStringList(p, v)
+	case []ref.Val:
+		return NewRefValList(p, v)
+	// specializations for common map types.
+	case map[string]string:
+		return NewStringStringMap(p, v)
+	case map[string]any:
+		return NewStringInterfaceMap(p, v)
+	case map[ref.Val]ref.Val:
+		return NewRefValMap(p, v)
+	// additional specializations may be added upon request / need.
+	case *anypb.Any:
+		if v == nil {
+			return UnsupportedRefValConversionErr(v)
+		}
+		unpackedAny, err := v.UnmarshalNew()
+		if err != nil {
+			return NewErr("anypb.UnmarshalNew() failed for type %q: %v", v.GetTypeUrl(), err)
+		}
+		return p.NativeToValue(unpackedAny)
+	case *structpb.NullValue, structpb.NullValue:
+		return NullValue
+	case *structpb.ListValue:
+		return NewJSONList(p, v)
+	case *structpb.Struct:
+		return NewJSONStruct(p, v)
+	case protoreflect.EnumNumber:
+		return Int(v)
 	case proto.Message:
+		if v == nil {
+			return UnsupportedRefValConversionErr(v)
+		}
 		typeName := string(v.ProtoReflect().Descriptor().FullName())
-		td, found := p.pbdb.DescribeType(typeName)
+		pbdb := p.pbdb
+		if pbdb == nil {
+			pbdb = pb.DefaultDb
+		}
+		td, found := pbdb.DescribeType(typeName)
 		if !found {
 			if p.adapter != nil {
 				return p.adapter.NativeToValue(value)
@@ -578,14 +710,42 @@ func (p *Registry) NativeToValue(value any) ref.Val {
 	case protoreflect.Value:
 		return p.NativeToValue(v.Interface())
 	default:
-		if len(p.reflectTypes) > 0 && value != nil {
-			if st, found := p.findStructDescriptorByReflectType(reflect.TypeOf(value)); found {
-				val := reflect.ValueOf(value)
-				if val.Kind() == reflect.Ptr && val.IsNil() {
-					return NullValue
-				}
+		rt := reflect.TypeOf(value)
+		if len(p.reflectTypes) > 0 {
+			if st, found := p.findStructDescriptorByReflectType(rt); found {
 				return st.Adapt(p, value)
 			}
+		}
+		refVal := reflect.ValueOf(v)
+		if refVal.Kind() == reflect.Ptr {
+			if refVal.IsNil() {
+				break
+			}
+			refVal = refVal.Elem()
+		}
+		switch refVal.Kind() {
+		case reflect.Array, reflect.Slice:
+			if refVal.Type().Elem() == reflect.TypeOf(byte(0)) {
+				if refVal.CanAddr() {
+					return Bytes(refVal.Bytes())
+				}
+				tmp := reflect.New(refVal.Type())
+				tmp.Elem().Set(refVal)
+				return Bytes(tmp.Elem().Bytes())
+			}
+			return NewDynamicList(p, v)
+		case reflect.Map:
+			return NewDynamicMap(p, v)
+		case reflect.Bool:
+			return Bool(refVal.Bool())
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+			return Int(refVal.Int())
+		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+			return Uint(refVal.Uint())
+		case reflect.Float32, reflect.Float64:
+			return Double(refVal.Float())
+		case reflect.String:
+			return String(refVal.String())
 		}
 	}
 	if p.adapter != nil {
@@ -719,238 +879,12 @@ type defaultTypeAdapter struct{}
 var (
 	// DefaultTypeAdapter adapts canonical CEL types from their equivalent Go values.
 	DefaultTypeAdapter = &defaultTypeAdapter{}
+	emptyRegistry      = &Registry{pbdb: pb.DefaultDb}
 )
 
 // NativeToValue implements the ref.TypeAdapter interface.
 func (a *defaultTypeAdapter) NativeToValue(value any) ref.Val {
-	if val, found := nativeToValue(a, value); found {
-		return val
-	}
-	return UnsupportedRefValConversionErr(value)
-}
-
-// nativeToValue returns the converted (ref.Val, true) of a conversion is found,
-// otherwise (nil, false)
-func nativeToValue(a Adapter, value any) (ref.Val, bool) {
-	switch v := value.(type) {
-	case nil:
-		return NullValue, true
-	case *Bool:
-		if v != nil {
-			return *v, true
-		}
-	case *Bytes:
-		if v != nil {
-			return *v, true
-		}
-	case *Double:
-		if v != nil {
-			return *v, true
-		}
-	case *Int:
-		if v != nil {
-			return *v, true
-		}
-	case *String:
-		if v != nil {
-			return *v, true
-		}
-	case *Uint:
-		if v != nil {
-			return *v, true
-		}
-	case ref.Val:
-		return v, true
-	case bool:
-		return Bool(v), true
-	case int:
-		return Int(v), true
-	case int32:
-		return Int(v), true
-	case int64:
-		return Int(v), true
-	case uint:
-		return Uint(v), true
-	case uint32:
-		return Uint(v), true
-	case uint64:
-		return Uint(v), true
-	case float32:
-		return Double(v), true
-	case float64:
-		return Double(v), true
-	case string:
-		return String(v), true
-	case *dpb.Duration:
-		return Duration{Duration: v.AsDuration()}, true
-	case time.Duration:
-		return Duration{Duration: v}, true
-	case *tpb.Timestamp:
-		return Timestamp{Time: v.AsTime()}, true
-	case time.Time:
-		return Timestamp{Time: v}, true
-	case *bool:
-		if v != nil {
-			return Bool(*v), true
-		}
-	case *float32:
-		if v != nil {
-			return Double(*v), true
-		}
-	case *float64:
-		if v != nil {
-			return Double(*v), true
-		}
-	case *int:
-		if v != nil {
-			return Int(*v), true
-		}
-	case *int32:
-		if v != nil {
-			return Int(*v), true
-		}
-	case *int64:
-		if v != nil {
-			return Int(*v), true
-		}
-	case *string:
-		if v != nil {
-			return String(*v), true
-		}
-	case *uint:
-		if v != nil {
-			return Uint(*v), true
-		}
-	case *uint32:
-		if v != nil {
-			return Uint(*v), true
-		}
-	case *uint64:
-		if v != nil {
-			return Uint(*v), true
-		}
-	case []byte:
-		return Bytes(v), true
-	// specializations for common lists types.
-	case []string:
-		return NewStringList(a, v), true
-	case []ref.Val:
-		return NewRefValList(a, v), true
-	// specializations for common map types.
-	case map[string]string:
-		return NewStringStringMap(a, v), true
-	case map[string]any:
-		return NewStringInterfaceMap(a, v), true
-	case map[ref.Val]ref.Val:
-		return NewRefValMap(a, v), true
-	// additional specializations may be added upon request / need.
-	case *anypb.Any:
-		if v == nil {
-			return UnsupportedRefValConversionErr(v), true
-		}
-		unpackedAny, err := v.UnmarshalNew()
-		if err != nil {
-			return NewErr("anypb.UnmarshalNew() failed for type %q: %v", v.GetTypeUrl(), err), true
-		}
-		return a.NativeToValue(unpackedAny), true
-	case *structpb.NullValue, structpb.NullValue:
-		return NullValue, true
-	case *structpb.ListValue:
-		return NewJSONList(a, v), true
-	case *structpb.Struct:
-		return NewJSONStruct(a, v), true
-	case protoreflect.EnumNumber:
-		return Int(v), true
-	case proto.Message:
-		if v == nil {
-			return UnsupportedRefValConversionErr(v), true
-		}
-		typeName := string(v.ProtoReflect().Descriptor().FullName())
-		td, found := pb.DefaultDb.DescribeType(typeName)
-		if !found {
-			return nil, false
-		}
-		val, unwrapped, err := td.MaybeUnwrap(v)
-		if err != nil {
-			return UnsupportedRefValConversionErr(v), true
-		}
-		if !unwrapped {
-			return nil, false
-		}
-		return a.NativeToValue(val), true
-	// Note: dynamicpb.Message implements the proto.Message _and_ protoreflect.Message interfaces
-	// which means that this case must appear after handling a proto.Message type.
-	case protoreflect.Message:
-		return a.NativeToValue(v.Interface()), true
-	default:
-		refValue := reflect.ValueOf(v)
-		if refValue.Kind() == reflect.Ptr {
-			if refValue.IsNil() {
-				return nil, false
-			}
-			refValue = refValue.Elem()
-		}
-		refKind := refValue.Kind()
-		switch refKind {
-		case reflect.Array, reflect.Slice:
-			if refValue.Type().Elem() == reflect.TypeOf(byte(0)) {
-				if refValue.CanAddr() {
-					return Bytes(refValue.Bytes()), true
-				}
-				tmp := reflect.New(refValue.Type())
-				tmp.Elem().Set(refValue)
-				return Bytes(tmp.Elem().Bytes()), true
-			}
-			return NewDynamicList(a, v), true
-		case reflect.Map:
-			return NewDynamicMap(a, v), true
-		// type aliases of primitive types cannot be asserted as that type, but rather need
-		// to be downcast to int32 before being converted to a CEL representation.
-		case reflect.Bool:
-			boolTupe := reflect.TypeOf(false)
-			return Bool(refValue.Convert(boolTupe).Interface().(bool)), true
-		case reflect.Int:
-			intType := reflect.TypeOf(int(0))
-			return Int(refValue.Convert(intType).Interface().(int)), true
-		case reflect.Int8:
-			intType := reflect.TypeOf(int8(0))
-			return Int(refValue.Convert(intType).Interface().(int8)), true
-		case reflect.Int16:
-			intType := reflect.TypeOf(int16(0))
-			return Int(refValue.Convert(intType).Interface().(int16)), true
-		case reflect.Int32:
-			intType := reflect.TypeOf(int32(0))
-			return Int(refValue.Convert(intType).Interface().(int32)), true
-		case reflect.Int64:
-			intType := reflect.TypeOf(int64(0))
-			return Int(refValue.Convert(intType).Interface().(int64)), true
-		case reflect.Uint:
-			uintType := reflect.TypeOf(uint(0))
-			return Uint(refValue.Convert(uintType).Interface().(uint)), true
-		case reflect.Uint8:
-			uintType := reflect.TypeOf(uint8(0))
-			return Uint(refValue.Convert(uintType).Interface().(uint8)), true
-		case reflect.Uint16:
-			uintType := reflect.TypeOf(uint16(0))
-			return Uint(refValue.Convert(uintType).Interface().(uint16)), true
-		case reflect.Uint32:
-			uintType := reflect.TypeOf(uint32(0))
-			return Uint(refValue.Convert(uintType).Interface().(uint32)), true
-		case reflect.Uint64:
-			uintType := reflect.TypeOf(uint64(0))
-			return Uint(refValue.Convert(uintType).Interface().(uint64)), true
-		case reflect.Float32:
-			doubleType := reflect.TypeOf(float32(0))
-			return Double(refValue.Convert(doubleType).Interface().(float32)), true
-		case reflect.Float64:
-			doubleType := reflect.TypeOf(float64(0))
-			return Double(refValue.Convert(doubleType).Interface().(float64)), true
-		case reflect.String:
-			stringType := reflect.TypeOf("")
-			return String(refValue.Convert(stringType).Interface().(string)), true
-		}
-	}
-	return nil, false
+	return emptyRegistry.NativeToValue(value)
 }
 
 func msgSetField(target protoreflect.Message, field *pb.FieldDescription, val ref.Val) error {
