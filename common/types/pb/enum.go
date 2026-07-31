@@ -42,3 +42,9 @@ func (ed *EnumValueDescription) Name() string {
 func (ed *EnumValueDescription) Value() int32 {
 	return int32(ed.desc.Number())
 }
+
+// Descriptor returns the protoreflect.EnumValueDescriptor backing the enum
+// value description.
+func (ed *EnumValueDescription) Descriptor() protoreflect.EnumValueDescriptor {
+	return ed.desc
+}

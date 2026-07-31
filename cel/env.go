@@ -912,6 +912,21 @@ func (e *Env) configure(opts []EnvOption) (*Env, error) {
 		}
 	}
 
+	// Enable strong enum typing if using a proto-based *types.Registry
+	if e.HasFeature(featureStrongEnums) {
+		reg, isReg := e.provider.(*types.Registry)
+		if !isReg {
+			return nil, fmt.Errorf("StrongEnums() option is only compatible with *types.Registry providers")
+		}
+		reg.WithStrongEnums(true)
+		for _, opt := range strongEnumOptions(reg) {
+			e, err = opt(e)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+
 	// Ensure that the checker init happens eagerly rather than lazily.
 	if e.HasFeature(featureEagerlyValidateDeclarations) {
 		_, err := e.initChecker()
@@ -921,6 +936,63 @@ func (e *Env) configure(opts []EnvOption) (*Env, error) {
 	}
 
 	return e, nil
+}
+
+// strongEnumOptions produces conversion function declarations for the enum
+// types registered with the registry. Each enum type is callable as a
+// conversion function accepting an int or a string, and the standard int
+// conversion accepts values of the enum type.
+func strongEnumOptions(reg *types.Registry) []EnvOption {
+	enumDescs := reg.EnumDescriptors()
+	opts := make([]EnvOption, 0, len(enumDescs)*2)
+	for _, ed := range enumDescs {
+		enumName := string(ed.FullName())
+		enumType := types.NewOpaqueType(enumName)
+		overloadPrefix := strings.ReplaceAll(enumName, ".", "_")
+		opts = append(opts,
+			Function(enumName,
+				Overload(overloadPrefix+"_int_to_enum", []*Type{IntType}, enumType,
+					UnaryBinding(intToEnumBinding(enumName))),
+				Overload(overloadPrefix+"_string_to_enum", []*Type{StringType}, enumType,
+					UnaryBinding(stringToEnumBinding(enumName, ed.Values())))),
+			Function("int",
+				Overload(overloadPrefix+"_to_int", []*Type{enumType}, IntType,
+					UnaryBinding(func(val ref.Val) ref.Val {
+						return val.ConvertToType(types.IntType)
+					}))))
+	}
+	return opts
+}
+
+// intToEnumBinding converts an int value to the given enum type, failing for
+// values outside the signed 32-bit range.
+func intToEnumBinding(enumName string) func(ref.Val) ref.Val {
+	return func(val ref.Val) ref.Val {
+		i, ok := val.(types.Int)
+		if !ok {
+			return types.MaybeNoSuchOverloadErr(val)
+		}
+		if int64(i) > math.MaxInt32 || int64(i) < math.MinInt32 {
+			return types.NewErr("enum value out of int32 range: %d", int64(i))
+		}
+		return types.NewEnumValue(enumName, int32(i))
+	}
+}
+
+// stringToEnumBinding converts a string value naming one of the enum's values
+// to the given enum type, failing for names the enum does not declare.
+func stringToEnumBinding(enumName string, values protoreflect.EnumValueDescriptors) func(ref.Val) ref.Val {
+	return func(val ref.Val) ref.Val {
+		s, ok := val.(types.String)
+		if !ok {
+			return types.MaybeNoSuchOverloadErr(val)
+		}
+		vd := values.ByName(protoreflect.Name(string(s)))
+		if vd == nil {
+			return types.NewErr("invalid enum value name '%s' for enum '%s'", string(s), enumName)
+		}
+		return types.NewEnumValue(enumName, int32(vd.Number()))
+	}
 }
 
 func (e *Env) initChecker() (*checker.Env, error) {

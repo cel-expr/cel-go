@@ -156,6 +156,11 @@ func (o *protoObj) Get(index ref.Val) ref.Val {
 	if err != nil {
 		return NewErrFromString(err.Error())
 	}
+	if reg, ok := o.Adapter.(*Registry); ok && reg.StrongEnums() && fd.IsEnum() {
+		if enumNum, isInt := fv.(int64); isInt {
+			return NewEnumValue(string(fd.Descriptor().Enum().FullName()), int32(enumNum))
+		}
+	}
 	return o.NativeToValue(fv)
 }
 

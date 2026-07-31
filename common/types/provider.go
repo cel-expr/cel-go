@@ -88,8 +88,9 @@ type FieldType struct {
 
 // Registry provides type information for a set of registered types.
 type Registry struct {
-	revTypeMap map[string]*Type
-	pbdb       *pb.Db
+	revTypeMap  map[string]*Type
+	pbdb        *pb.Db
+	strongEnums bool
 }
 
 // NewRegistry accepts a list of proto message instances and returns a type
@@ -172,8 +173,9 @@ func NewEmptyRegistry() *Registry {
 // Copy copies the current state of the registry into its own memory space.
 func (p *Registry) Copy() *Registry {
 	copy := &Registry{
-		revTypeMap: make(map[string]*Type),
-		pbdb:       p.pbdb.Copy(),
+		revTypeMap:  make(map[string]*Type),
+		pbdb:        p.pbdb.Copy(),
+		strongEnums: p.strongEnums,
 	}
 	for k, v := range p.revTypeMap {
 		copy.revTypeMap[k] = v
@@ -209,7 +211,46 @@ func (p *Registry) EnumValue(enumName string) ref.Val {
 	if !found {
 		return NewErr("unknown enum name '%s'", enumName)
 	}
+	if p.strongEnums {
+		return NewEnumValue(string(enumVal.Descriptor().Parent().FullName()), enumVal.Value())
+	}
 	return Int(enumVal.Value())
+}
+
+// StrongEnums returns whether strong enum handling is enabled in this registry.
+func (p *Registry) StrongEnums() bool {
+	return p.strongEnums
+}
+
+// WithStrongEnums configures the registry to treat protobuf enum values as
+// first-class enum-typed values rather than plain integers.
+func (p *Registry) WithStrongEnums(enabled bool) {
+	p.strongEnums = enabled
+}
+
+// EnumDescriptors returns the distinct enum type descriptors registered with
+// the registry.
+func (p *Registry) EnumDescriptors() []protoreflect.EnumDescriptor {
+	seen := make(map[protoreflect.FullName]bool)
+	var descs []protoreflect.EnumDescriptor
+	for _, fd := range p.pbdb.FileDescriptions() {
+		for _, enumValName := range fd.GetEnumNames() {
+			enumVal, found := p.pbdb.DescribeEnum(enumValName)
+			if !found {
+				continue
+			}
+			enumDesc, ok := enumVal.Descriptor().Parent().(protoreflect.EnumDescriptor)
+			if !ok {
+				continue
+			}
+			if seen[enumDesc.FullName()] {
+				continue
+			}
+			seen[enumDesc.FullName()] = true
+			descs = append(descs, enumDesc)
+		}
+	}
+	return descs
 }
 
 // FindFieldType returns the field type for a checked type value. Returns false if
@@ -261,10 +302,24 @@ func (p *Registry) FindStructFieldType(structType, fieldName string) (*FieldType
 	if !found {
 		return nil, false
 	}
+	getFrom := field.GetFrom
+	if p.strongEnums && field.IsEnum() {
+		enumName := string(field.Descriptor().Enum().FullName())
+		getFrom = func(target any) (any, error) {
+			v, err := field.GetFrom(target)
+			if err != nil {
+				return nil, err
+			}
+			if enumNum, ok := v.(int64); ok {
+				return NewEnumValue(enumName, int32(enumNum)), nil
+			}
+			return v, nil
+		}
+	}
 	return &FieldType{
-		Type:        fieldDescToCELType(field),
+		Type:        fieldDescToCELType(field, p.strongEnums),
 		IsSet:       field.IsSet,
-		GetFrom:     field.GetFrom,
+		GetFrom:     getFrom,
 		IsJSONField: p.pbdb.JSONFieldNames() && fieldName == field.JSONName(),
 	}, true
 }
@@ -289,6 +344,9 @@ func (p *Registry) FindIdent(identName string) (ref.Val, bool) {
 		return t, true
 	}
 	if enumVal, found := p.pbdb.DescribeEnum(identName); found {
+		if p.strongEnums {
+			return NewEnumValue(string(enumVal.Descriptor().Parent().FullName()), enumVal.Value()), true
+		}
 		return Int(enumVal.Value()), true
 	}
 	return nil, false
@@ -454,23 +512,26 @@ func (p *Registry) registerAllTypes(fd *pb.FileDescription) error {
 	return nil
 }
 
-func fieldDescToCELType(field *pb.FieldDescription) *Type {
+func fieldDescToCELType(field *pb.FieldDescription, strongEnums bool) *Type {
 	if field.IsMap() {
 		return NewMapType(
-			singularFieldDescToCELType(field.KeyType),
-			singularFieldDescToCELType(field.ValueType))
+			singularFieldDescToCELType(field.KeyType, strongEnums),
+			singularFieldDescToCELType(field.ValueType, strongEnums))
 	}
 	if field.IsList() {
-		return NewListType(singularFieldDescToCELType(field))
+		return NewListType(singularFieldDescToCELType(field, strongEnums))
 	}
-	return singularFieldDescToCELType(field)
+	return singularFieldDescToCELType(field, strongEnums)
 }
 
-func singularFieldDescToCELType(field *pb.FieldDescription) *Type {
+func singularFieldDescToCELType(field *pb.FieldDescription, strongEnums bool) *Type {
 	if field.IsMessage() {
 		return NewObjectType(string(field.Descriptor().Message().FullName()))
 	}
 	if field.IsEnum() {
+		if strongEnums {
+			return NewOpaqueType(string(field.Descriptor().Enum().FullName()))
+		}
 		return IntType
 	}
 	return ProtoCELPrimitives[field.ProtoKind()]

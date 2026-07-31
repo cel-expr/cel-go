@@ -66,6 +66,7 @@ go_test(
         "cel_test.go",
         "decls_test.go",
         "env_test.go",
+	"enums_test.go",
         "fieldpaths_test.go",
         "folding_test.go",
         "inlining_test.go",

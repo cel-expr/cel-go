@@ -75,6 +75,10 @@ const (
 
 	// Enable accessing fields by JSON names within protobuf messages
 	featureJSONFieldNames
+
+	// Enable strong typing of protobuf enum values so they are treated as
+	// distinct enum types rather than plain integers.
+	featureStrongEnums
 )
 
 var featureIDsToNames = map[int]string{
@@ -82,6 +86,7 @@ var featureIDsToNames = map[int]string{
 	featureCrossTypeNumericComparisons: "cel.feature.cross_type_numeric_comparisons",
 	featureIdentEscapeSyntax:           "cel.feature.backtick_escape_syntax",
 	featureJSONFieldNames:              "cel.feature.json_field_names",
+	featureStrongEnums:                 "cel.feature.strong_enums",
 }
 
 func featureNameByID(id int) (string, bool) {
@@ -962,6 +967,16 @@ func EnableIdentifierEscapeSyntax() EnvOption {
 // CrossTypeNumericComparisons makes it possible to compare across numeric types, e.g. double < int
 func CrossTypeNumericComparisons(enabled bool) EnvOption {
 	return features(featureCrossTypeNumericComparisons, enabled)
+}
+
+// StrongEnums enables strong typing of protobuf enum values within CEL
+// programs. When enabled, enum constants, enum-typed message fields, and enum
+// conversion calls produce values whose type is the fully qualified enum type
+// rather than int, and each registered enum type is callable as a conversion
+// function from int and string values. The legacy integer treatment of enums
+// remains the default when the option is disabled or absent.
+func StrongEnums(enabled bool) EnvOption {
+	return features(featureStrongEnums, enabled)
 }
 
 // DefaultUTCTimeZone ensures that time-based operations use the UTC timezone rather than the

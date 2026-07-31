@@ -228,6 +228,9 @@ func (e *Env) lookupGlobalIdent(candidate string) *decls.VariableDecl {
 	// Next try to import this as an enum value by splitting the name in a type prefix and
 	// the enum inside.
 	if enumValue := e.provider.EnumValue(candidate); enumValue.Type() != types.ErrType {
+		if enumType, ok := enumValue.Type().(*types.Type); ok {
+			return decls.NewConstant(candidate, enumType, enumValue)
+		}
 		return decls.NewConstant(candidate, types.IntType, enumValue)
 	}
 	return nil
