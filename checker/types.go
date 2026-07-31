@@ -65,8 +65,23 @@ func isEqualOrLessSpecific(t1, t2 *types.Type) bool {
 	if isDyn(t2) || kind2 == types.TypeParamKind {
 		return false
 	}
+	// Nullable types are less specific than NullType.
+	if kind2 == types.NullTypeKind && t1.IsAssignableType(types.NullType) {
+		return true
+	}
+	if kind1 == types.NullTypeKind && t2.IsAssignableType(types.NullType) {
+		return false
+	}
 	// Types must be of the same kind to be equal.
 	if kind1 != kind2 {
+		return false
+	}
+
+	// Wrapper types are less specific than their underlying primitive types.
+	if t1.IsAssignableType(types.NullType) && !t2.IsAssignableType(types.NullType) {
+		return true
+	}
+	if !t1.IsAssignableType(types.NullType) && t2.IsAssignableType(types.NullType) {
 		return false
 	}
 

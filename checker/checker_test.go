@@ -2452,6 +2452,157 @@ _&&_(_==_(list~type(list(dyn))^list,
 	}
 }
 
+func TestListUnification(t *testing.T) {
+	tests := []struct {
+		in      string
+		env     testEnv
+		outType *types.Type
+	}{
+		{
+			in: `[1, null_int, null]`,
+			env: testEnv{
+				idents: []*decls.VariableDecl{
+					decls.NewVariable("null_int", types.NewNullableType(types.IntType)),
+				},
+			},
+			outType: types.NewListType(types.NewNullableType(types.IntType)),
+		},
+		{
+			in: `[null, 1, null_int]`,
+			env: testEnv{
+				idents: []*decls.VariableDecl{
+					decls.NewVariable("null_int", types.NewNullableType(types.IntType)),
+				},
+			},
+			outType: types.NewListType(types.NewNullableType(types.IntType)),
+		},
+		{
+			in: `[null_int, null, 1]`,
+			env: testEnv{
+				idents: []*decls.VariableDecl{
+					decls.NewVariable("null_int", types.NewNullableType(types.IntType)),
+				},
+			},
+			outType: types.NewListType(types.NewNullableType(types.IntType)),
+		},
+		{
+			in:      `[1, null]`,
+			outType: types.NewListType(types.NewNullableType(types.IntType)),
+		},
+		{
+			in:      `[null, 1]`,
+			outType: types.NewListType(types.NewNullableType(types.IntType)),
+		},
+		{
+			in:      `['foo', null]`,
+			outType: types.NewListType(types.NewNullableType(types.StringType)),
+		},
+		{
+			in:      `[null, 'foo']`,
+			outType: types.NewListType(types.NewNullableType(types.StringType)),
+		},
+	}
+
+	p, err := parser.NewParser(parser.Macros(parser.AllMacros...))
+	if err != nil {
+		t.Fatalf("parser.NewParser() failed: %v", err)
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.in, func(t *testing.T) {
+			src := common.NewTextSource(tc.in)
+			pAst, errors := p.Parse(src)
+			if len(errors.GetErrors()) > 0 {
+				t.Fatalf("Parse(%s) failed: %v", tc.in, errors.ToDisplayString())
+			}
+			reg, err := types.NewProtoRegistry()
+			if err != nil {
+				t.Fatalf("types.NewProtoRegistry() failed: %v", err)
+			}
+			cont, err := containers.NewContainer()
+			if err != nil {
+				t.Fatalf("containers.NewContainer() failed: %v", err)
+			}
+			env, err := NewEnv(cont, reg)
+			if err != nil {
+				t.Fatalf("NewEnv failed: %v", err)
+			}
+			if len(tc.env.idents) > 0 {
+				for _, id := range tc.env.idents {
+					env.AddIdents(id)
+				}
+			}
+			cAst, errs := Check(pAst, src, env)
+			if len(errs.GetErrors()) > 0 {
+				t.Fatalf("Check(%s) failed: %v", tc.in, errs.ToDisplayString())
+			}
+			gotType := cAst.GetType(cAst.Expr().ID())
+			if !gotType.IsExactType(tc.outType) {
+				t.Errorf("Check(%s) type = %v, want %v", tc.in, gotType, tc.outType)
+			}
+		})
+	}
+}
+
+func BenchmarkListUnification(b *testing.B) {
+	p, err := parser.NewParser(parser.Macros(parser.AllMacros...))
+	if err != nil {
+		b.Fatalf("parser.NewParser() failed: %v", err)
+	}
+	src := common.NewTextSource(`[1, null_int, null]`)
+	pAst, errors := p.Parse(src)
+	if len(errors.GetErrors()) > 0 {
+		b.Fatalf("Parse failed: %v", errors.ToDisplayString())
+	}
+	reg, err := types.NewProtoRegistry()
+	if err != nil {
+		b.Fatalf("types.NewProtoRegistry() failed: %v", err)
+	}
+	cont, err := containers.NewContainer()
+	if err != nil {
+		b.Fatalf("containers.NewContainer() failed: %v", err)
+	}
+	env, err := NewEnv(cont, reg)
+	if err != nil {
+		b.Fatalf("NewEnv failed: %v", err)
+	}
+	env.AddIdents(decls.NewVariable("null_int", types.NewNullableType(types.IntType)))
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = Check(pAst, src, env)
+	}
+}
+
+func BenchmarkConcreteList(b *testing.B) {
+	p, err := parser.NewParser(parser.Macros(parser.AllMacros...))
+	if err != nil {
+		b.Fatalf("parser.NewParser() failed: %v", err)
+	}
+	src := common.NewTextSource(`[1, 2, 3]`)
+	pAst, errors := p.Parse(src)
+	if len(errors.GetErrors()) > 0 {
+		b.Fatalf("Parse failed: %v", errors.ToDisplayString())
+	}
+	reg, err := types.NewProtoRegistry()
+	if err != nil {
+		b.Fatalf("types.NewProtoRegistry() failed: %v", err)
+	}
+	cont, err := containers.NewContainer()
+	if err != nil {
+		b.Fatalf("containers.NewContainer() failed: %v", err)
+	}
+	env, err := NewEnv(cont, reg)
+	if err != nil {
+		b.Fatalf("NewEnv failed: %v", err)
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = Check(pAst, src, env)
+	}
+}
+
 func testEnvs(t testing.TB) map[string]testEnv {
 	return map[string]testEnv{
 		"default": {
@@ -2654,7 +2805,10 @@ func BenchmarkCheck(b *testing.B) {
 			if len(errors.GetErrors()) > 0 {
 				b.Fatalf("Unexpected parse errors: %v", errors.ToDisplayString())
 			}
-			reg, err := types.NewProtoRegistry(types.ProtoTypeDefs(&proto2pb.TestAllTypes{}, &proto3pb.TestAllTypes{}))
+			reg, err := types.NewProtoRegistry(
+				types.JSONFieldNames(tc.env.jsonFieldNames),
+				types.ProtoTypeDefs(&proto2pb.TestAllTypes{}, &proto3pb.TestAllTypes{}),
+			)
 			if err != nil {
 				b.Fatalf("types.NewProtoRegistry() failed: %v", err)
 			}
@@ -2670,6 +2824,9 @@ func BenchmarkCheck(b *testing.B) {
 			opts := []Option{CrossTypeNumericComparisons(true)}
 			if len(tc.opts) != 0 {
 				opts = tc.opts
+			}
+			if tc.env.jsonFieldNames {
+				opts = append(opts, JSONFieldNames(true))
 			}
 			env, err := NewEnv(cont, reg, opts...)
 			if err != nil {

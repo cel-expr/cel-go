@@ -3631,6 +3631,14 @@ func TestOptionalValuesEvalUnknowns(t *testing.T) {
 			},
 			out: types.IntOne,
 		},
+		{
+			expr: `[optional.of(1), optional.none()].filter(x, x.hasValue()).map(x, x.value())`,
+			out:  types.DefaultTypeAdapter.NativeToValue([]int64{1}),
+		},
+		{
+			expr: `[1, 2].map(x, optional.of(x)).filter(x, x.hasValue()).map(x, x.value())`,
+			out:  types.DefaultTypeAdapter.NativeToValue([]int64{1, 2}),
+		},
 	}
 	for i, tst := range tests {
 		tc := tst

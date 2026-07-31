@@ -430,6 +430,7 @@ func (c *checker) checkCreateList(e ast.Expr) {
 	for _, optInd := range optionalIndices {
 		optionals[optInd] = true
 	}
+	var mSnapshot *mapping
 	for i, e := range create.Elements() {
 		c.check(e)
 		elemType := c.getType(e)
@@ -440,11 +441,17 @@ func (c *checker) checkCreateList(e ast.Expr) {
 				c.errors.typeMismatch(e.ID(), c.location(e), types.NewOptionalType(elemType), elemType)
 			}
 		}
+		if mSnapshot == nil && (hasTypeParam(elemsType) || hasTypeParam(elemType)) {
+			mSnapshot = c.mappings.copy()
+		}
 		elemsType = c.joinTypes(e, elemsType, elemType)
 	}
 	if elemsType == nil {
 		// If the list is empty, assign free type var to elem type.
 		elemsType = c.newTypeVar()
+	}
+	if mSnapshot != nil && isDyn(elemsType) {
+		c.mappings = mSnapshot
 	}
 	c.setType(e, types.NewListType(elemsType))
 }
@@ -453,11 +460,17 @@ func (c *checker) checkCreateMap(e ast.Expr) {
 	mapVal := e.AsMap()
 	var mapKeyType *types.Type
 	var mapValueType *types.Type
+	var mSnapshotKey *mapping
+	var mSnapshotVal *mapping
 	for _, e := range mapVal.Entries() {
 		entry := e.AsMapEntry()
 		key := entry.Key()
 		c.check(key)
-		mapKeyType = c.joinTypes(key, mapKeyType, c.getType(key))
+		keyType := c.getType(key)
+		if mSnapshotKey == nil && (hasTypeParam(mapKeyType) || hasTypeParam(keyType)) {
+			mSnapshotKey = c.mappings.copy()
+		}
+		mapKeyType = c.joinTypes(key, mapKeyType, keyType)
 
 		val := entry.Value()
 		c.check(val)
@@ -469,6 +482,9 @@ func (c *checker) checkCreateMap(e ast.Expr) {
 				c.errors.typeMismatch(val.ID(), c.location(val), types.NewOptionalType(valType), valType)
 			}
 		}
+		if mSnapshotVal == nil && (hasTypeParam(mapValueType) || hasTypeParam(valType)) {
+			mSnapshotVal = c.mappings.copy()
+		}
 		mapValueType = c.joinTypes(val, mapValueType, valType)
 	}
 	if mapKeyType == nil {
@@ -476,7 +492,28 @@ func (c *checker) checkCreateMap(e ast.Expr) {
 		mapKeyType = c.newTypeVar()
 		mapValueType = c.newTypeVar()
 	}
+	if mSnapshotKey != nil && isDyn(mapKeyType) {
+		c.mappings = mSnapshotKey
+	}
+	if mSnapshotVal != nil && isDyn(mapValueType) {
+		c.mappings = mSnapshotVal
+	}
 	c.setType(e, types.NewMapType(mapKeyType, mapValueType))
+}
+
+func hasTypeParam(t *types.Type) bool {
+	if t == nil {
+		return false
+	}
+	if t.Kind() == types.TypeParamKind {
+		return true
+	}
+	for _, p := range t.Parameters() {
+		if hasTypeParam(p) {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *checker) checkCreateStruct(e ast.Expr) {
@@ -620,11 +657,57 @@ func (c *checker) joinTypes(e ast.Expr, previous, current *types.Type) *types.Ty
 	if c.isAssignable(previous, current) {
 		return mostGeneral(previous, current)
 	}
+	if c.isAssignable(current, previous) {
+		return mostGeneral(current, previous)
+	}
+	if t := maybeJoinNullable(previous, current); t != nil {
+		return t
+	}
 	if c.dynAggregateLiteralElementTypesEnabled() {
 		return types.DynType
 	}
 	c.errors.typeMismatch(e.ID(), c.location(e), previous, current)
 	return types.ErrorType
+}
+
+func isPrimitiveType(t *types.Type) bool {
+	switch t.Kind() {
+	case types.BoolKind, types.BytesKind, types.DoubleKind, types.IntKind, types.StringKind, types.UintKind:
+		return !t.IsAssignableType(types.NullType)
+	default:
+		return false
+	}
+}
+
+func isWrapperType(t *types.Type) bool {
+	switch t.Kind() {
+	case types.BoolKind, types.BytesKind, types.DoubleKind, types.IntKind, types.StringKind, types.UintKind:
+		return t.IsAssignableType(types.NullType)
+	default:
+		return false
+	}
+}
+
+func maybeJoinNullable(t1, t2 *types.Type) *types.Type {
+	if t1.Kind() == types.NullTypeKind {
+		if isPrimitiveType(t2) || isWrapperType(t2) {
+			return types.NewNullableType(t2)
+		}
+	}
+	if t2.Kind() == types.NullTypeKind {
+		if isPrimitiveType(t1) || isWrapperType(t1) {
+			return types.NewNullableType(t1)
+		}
+	}
+	if t1.Kind() == t2.Kind() {
+		if isPrimitiveType(t1) && isWrapperType(t2) {
+			return t2
+		}
+		if isWrapperType(t1) && isPrimitiveType(t2) {
+			return t1
+		}
+	}
+	return nil
 }
 
 func (c *checker) dynAggregateLiteralElementTypesEnabled() bool {
