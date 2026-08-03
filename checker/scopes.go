@@ -15,6 +15,7 @@
 package checker
 
 import (
+	"maps"
 	"strings"
 
 	"github.com/google/cel-go/common/decls"
@@ -25,8 +26,9 @@ import (
 // Each Groups value is a mapping of names to Decls in the ident and function namespaces.
 // Lookups are performed such that bindings in inner scopes shadow those in outer scopes.
 type Scopes struct {
-	parent *Scopes
-	scopes *Group
+	parent    *Scopes
+	inherited *Scopes
+	scopes    *Group
 }
 
 // newScopes creates a new, empty Scopes.
@@ -46,6 +48,9 @@ func (s *Scopes) Copy() *Scopes {
 	if s.parent != nil {
 		cpy.parent = s.parent.Copy()
 	}
+	if s.inherited != nil {
+		cpy.inherited = s.inherited.Copy()
+	}
 	cpy.scopes = s.scopes.copy()
 	return cpy
 }
@@ -55,6 +60,14 @@ func (s *Scopes) Push() *Scopes {
 	return &Scopes{
 		parent: s,
 		scopes: newGroup(),
+	}
+}
+
+// PushInherited creates a new Scopes value which references the current Scope as its inherited parent.
+func (s *Scopes) PushInherited() *Scopes {
+	return &Scopes{
+		inherited: s,
+		scopes:    newGroup(),
 	}
 }
 
@@ -83,7 +96,14 @@ func (s *Scopes) FindIdent(name string) *decls.VariableDecl {
 		return ident
 	}
 	if s.parent != nil {
-		return s.parent.FindIdent(name)
+		if ident := s.parent.FindIdent(name); ident != nil {
+			return ident
+		}
+	}
+	if s.inherited != nil {
+		if ident := s.inherited.FindIdent(name); ident != nil {
+			return ident
+		}
 	}
 	return nil
 }
@@ -134,7 +154,14 @@ func (s *Scopes) FindFunction(name string) *decls.FunctionDecl {
 		return fn
 	}
 	if s.parent != nil {
-		return s.parent.FindFunction(name)
+		if fn := s.parent.FindFunction(name); fn != nil {
+			return fn
+		}
+	}
+	if s.inherited != nil {
+		if fn := s.inherited.FindFunction(name); fn != nil {
+			return fn
+		}
 	}
 	return nil
 }
@@ -151,14 +178,8 @@ type Group struct {
 // If callers need to mutate the exprpb.Decl definitions for a Function, they should copy-on-write.
 func (g *Group) copy() *Group {
 	cpy := &Group{
-		idents:    make(map[string]*decls.VariableDecl, len(g.idents)),
-		functions: make(map[string]*decls.FunctionDecl, len(g.functions)),
-	}
-	for n, id := range g.idents {
-		cpy.idents[n] = id
-	}
-	for n, fn := range g.functions {
-		cpy.functions[n] = fn
+		idents:    maps.Clone(g.idents),
+		functions: maps.Clone(g.functions),
 	}
 	return cpy
 }

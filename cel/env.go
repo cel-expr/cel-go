@@ -1007,6 +1007,15 @@ func (e *Env) initChecker() (*checker.Env, error) {
 		chkOpts = append(chkOpts,
 			checker.JSONFieldNames(e.HasFeature(featureJSONFieldNames)))
 
+		if e.parent != nil && e.funcsShared {
+			parentChk, err := e.parent.initChecker()
+			if err != nil {
+				e.setCheckerOrError(nil, err)
+				return
+			}
+			chkOpts = append(chkOpts, checker.ValidatedDeclarations(parentChk))
+		}
+
 		ce, err := checker.NewEnv(e.Container, e.provider, chkOpts...)
 		if err != nil {
 			e.setCheckerOrError(nil, err)
@@ -1019,14 +1028,16 @@ func (e *Env) initChecker() (*checker.Env, error) {
 			return
 		}
 		// Add the function declarations which are derived from the FunctionDecl instances.
-		for _, fn := range e.functions {
-			if fn.IsDeclarationDisabled() {
-				continue
-			}
-			err = ce.AddFunctions(fn)
-			if err != nil {
-				e.setCheckerOrError(nil, err)
-				return
+		if e.parent == nil || !e.funcsShared {
+			for _, fn := range e.functions {
+				if fn.IsDeclarationDisabled() {
+					continue
+				}
+				err = ce.AddFunctions(fn)
+				if err != nil {
+					e.setCheckerOrError(nil, err)
+					return
+				}
 			}
 		}
 		// Add function declarations here separately.

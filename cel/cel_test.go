@@ -95,6 +95,90 @@ func Test_ExampleWithBuiltins(t *testing.T) {
 	}
 }
 
+func TestExtendCheckerParity(t *testing.T) {
+	// Base environment carrying standard library functions
+	baseEnv, err := NewEnv(
+		Variable("baseVar", StringType),
+	)
+	if err != nil {
+		t.Fatalf("NewEnv() failed: %v", err)
+	}
+
+	// Extended environment adding child variables (K8s CRD pattern)
+	extEnv, err := baseEnv.Extend(
+		Variable("value", StringType),
+		Variable("oldValue", StringType),
+	)
+	if err != nil {
+		t.Fatalf("baseEnv.Extend() failed: %v", err)
+	}
+
+	// Equivalent flat environment created from scratch
+	flatEnv, err := NewEnv(
+		Variable("baseVar", StringType),
+		Variable("value", StringType),
+		Variable("oldValue", StringType),
+	)
+	if err != nil {
+		t.Fatalf("flat NewEnv() failed: %v", err)
+	}
+
+	testCases := []struct {
+		expr string
+		vars map[string]any
+		want ref.Val
+	}{
+		{
+			expr: `value + " " + oldValue + " " + baseVar`,
+			vars: map[string]any{"value": "new", "oldValue": "old", "baseVar": "base"},
+			want: types.String("new old base"),
+		},
+		{
+			expr: `size(value) > 0 && [1, 2, 3].exists(x, x > 2)`,
+			vars: map[string]any{"value": "test"},
+			want: types.True,
+		},
+	}
+
+	for _, tc := range testCases {
+		extAst, extIss := extEnv.Compile(tc.expr)
+		if extIss.Err() != nil {
+			t.Fatalf("extEnv.Compile(%q) failed: %v", tc.expr, extIss.Err())
+		}
+		flatAst, flatIss := flatEnv.Compile(tc.expr)
+		if flatIss.Err() != nil {
+			t.Fatalf("flatEnv.Compile(%q) failed: %v", tc.expr, flatIss.Err())
+		}
+
+		if extAst.OutputType().TypeName() != flatAst.OutputType().TypeName() {
+			t.Errorf("OutputType mismatch for %q: ext %v, flat %v", tc.expr, extAst.OutputType(), flatAst.OutputType())
+		}
+
+		extPrg, err := extEnv.Program(extAst)
+		if err != nil {
+			t.Fatalf("extEnv.Program() failed: %v", err)
+		}
+		flatPrg, err := flatEnv.Program(flatAst)
+		if err != nil {
+			t.Fatalf("flatEnv.Program() failed: %v", err)
+		}
+
+		extOut, _, err := extPrg.Eval(tc.vars)
+		if err != nil {
+			t.Fatalf("extPrg.Eval() failed: %v", err)
+		}
+		flatOut, _, err := flatPrg.Eval(tc.vars)
+		if err != nil {
+			t.Fatalf("flatPrg.Eval() failed: %v", err)
+		}
+
+		if extOut.Equal(tc.want) != types.True || flatOut.Equal(tc.want) != types.True {
+			t.Errorf("Eval result mismatch for %q: ext %v, flat %v, want %v", tc.expr, extOut, flatOut, tc.want)
+		}
+	}
+}
+
+
 func TestCompile(t *testing.T) {
 	prg, err := Compile(`"hello " + name`, Variable("name", StringType))
 	if err != nil {
