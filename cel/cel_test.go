@@ -4087,12 +4087,45 @@ func BenchmarkDynamicDispatch(b *testing.B) {
 }
 
 func BenchmarkProgramPlan(b *testing.B) {
-	env, err := NewEnv(
+	b.Run("NewEnv", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			_, err := NewEnv(
+				Variable("ai", IntType),
+				Variable("ar", MapType(StringType, StringType)),
+			)
+			if err != nil {
+				b.Fatalf("NewEnv() failed: %v", err)
+			}
+		}
+	})
+
+	baseEnv, err := NewEnv()
+	if err != nil {
+		b.Fatalf("NewEnv() failed: %v", err)
+	}
+
+	b.Run("ExtendEnv", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			_, err := baseEnv.Extend(
+				Variable("ai", IntType),
+				Variable("ar", MapType(StringType, StringType)),
+			)
+			if err != nil {
+				b.Fatalf("baseEnv.Extend() failed: %v", err)
+			}
+		}
+	})
+
+	env, err := baseEnv.Extend(
 		Variable("ai", IntType),
 		Variable("ar", MapType(StringType, StringType)),
 	)
 	if err != nil {
-		b.Fatalf("NewEnv() failed: %v", err)
+		b.Fatalf("Extend() failed: %v", err)
 	}
 	astSimple, iss := env.Compile("ai == 20 || ar['foo'] == 'bar'")
 	if iss.Err() != nil {
