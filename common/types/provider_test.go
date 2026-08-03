@@ -60,7 +60,204 @@ func TestRegistryCopy(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("nil registry", func(t *testing.T) {
+		var reg *Registry
+		if reg.Copy() != nil {
+			t.Error("expected nil registry copy to return nil")
+		}
+	})
 }
+
+func assertShared(t *testing.T, reg *Registry) {
+	t.Helper()
+	if !reg.shared {
+		t.Errorf("registry.shared = false, want true")
+	}
+}
+
+func assertUnshared(t *testing.T, reg *Registry) {
+	t.Helper()
+	if reg.shared {
+		t.Errorf("registry.shared = true, want false")
+	}
+}
+
+func newSharedRegistryPair(t *testing.T, opts ...RegistryOption) (*Registry, *Registry) {
+	t.Helper()
+	reg := newTestRegistry(t, opts...)
+	copied := reg.Copy()
+	assertShared(t, reg)
+	assertShared(t, copied)
+	return reg, copied
+}
+
+func TestRegistrySharedOnCopy(t *testing.T) {
+	reg := NewEmptyRegistry()
+	assertUnshared(t, reg)
+
+	copied := reg.Copy()
+	assertShared(t, reg)
+	assertShared(t, copied)
+
+	if !reflect.DeepEqual(reg, copied) {
+		t.Errorf("reg.Copy() expected equivalent registries")
+	}
+}
+
+func TestRegistryUnshared_RegisterTypeOnCopy(t *testing.T) {
+	reg, copied := newSharedRegistryPair(t)
+
+	customType := NewObjectType("custom.TypeA")
+	if err := copied.RegisterType(customType); err != nil {
+		t.Fatalf("RegisterType() failed: %v", err)
+	}
+
+	assertUnshared(t, copied)
+	assertShared(t, reg)
+
+	if _, found := copied.FindIdent("custom.TypeA"); !found {
+		t.Errorf("copied.FindIdent('custom.TypeA') expected found == true")
+	}
+	if _, found := reg.FindIdent("custom.TypeA"); found {
+		t.Errorf("reg.FindIdent('custom.TypeA') expected found == false after mutating copy")
+	}
+
+	// Subsequent mutation on already unshared copy stays unshared
+	customTypeB := NewObjectType("custom.TypeB")
+	if err := copied.RegisterType(customTypeB); err != nil {
+		t.Fatalf("RegisterType() failed: %v", err)
+	}
+	assertUnshared(t, copied)
+	if _, found := copied.FindIdent("custom.TypeB"); !found {
+		t.Errorf("copied.FindIdent('custom.TypeB') expected found == true")
+	}
+	if _, found := reg.FindIdent("custom.TypeB"); found {
+		t.Errorf("reg.FindIdent('custom.TypeB') expected found == false")
+	}
+}
+
+func TestRegistryUnshared_RegisterTypeOnOriginal(t *testing.T) {
+	reg, copied := newSharedRegistryPair(t)
+
+	customType := NewObjectType("custom.TypeOrig")
+	if err := reg.RegisterType(customType); err != nil {
+		t.Fatalf("RegisterType() failed: %v", err)
+	}
+
+	assertUnshared(t, reg)
+	assertShared(t, copied)
+
+	if _, found := reg.FindIdent("custom.TypeOrig"); !found {
+		t.Errorf("reg.FindIdent('custom.TypeOrig') expected found == true")
+	}
+	if _, found := copied.FindIdent("custom.TypeOrig"); found {
+		t.Errorf("copied.FindIdent('custom.TypeOrig') expected found == false after mutating original")
+	}
+}
+
+func TestRegistryUnshared_RegisterMessage(t *testing.T) {
+	reg, copied := newSharedRegistryPair(t)
+
+	if err := copied.RegisterMessage(&proto3pb.TestAllTypes{}); err != nil {
+		t.Fatalf("RegisterMessage() failed: %v", err)
+	}
+
+	assertUnshared(t, copied)
+	assertShared(t, reg)
+
+	if _, found := copied.FindStructType("google.expr.proto3.test.TestAllTypes"); !found {
+		t.Errorf("copied.FindStructType() expected found == true")
+	}
+	if _, found := reg.FindStructType("google.expr.proto3.test.TestAllTypes"); found {
+		t.Errorf("reg.FindStructType() expected found == false")
+	}
+}
+
+func TestRegistryUnshared_RegisterDescriptor(t *testing.T) {
+	reg, copied := newSharedRegistryPair(t)
+
+	err := copied.RegisterDescriptor(proto3pb.GlobalEnum_GOO.Descriptor().ParentFile())
+	if err != nil {
+		t.Fatalf("RegisterDescriptor() failed: %v", err)
+	}
+
+	assertUnshared(t, copied)
+	assertShared(t, reg)
+
+	enumVal := copied.EnumValue("google.expr.proto3.test.GlobalEnum.GOO")
+	if IsError(enumVal) || enumVal.(Int) != Int(proto3pb.GlobalEnum_GOO.Number()) {
+		t.Errorf("copied.EnumValue() got %v, wanted %v", enumVal, proto3pb.GlobalEnum_GOO.Number())
+	}
+	origEnumVal := reg.EnumValue("google.expr.proto3.test.GlobalEnum.GOO")
+	if !IsError(origEnumVal) {
+		t.Errorf("reg.EnumValue() expected error, got %v", origEnumVal)
+	}
+}
+
+func TestRegistryUnshared_WithJSONFieldNames(t *testing.T) {
+	reg, copied := newSharedRegistryPair(t, ProtoTypeDefs(&proto3pb.TestAllTypes{}))
+
+	if err := copied.WithJSONFieldNames(true); err != nil {
+		t.Fatalf("WithJSONFieldNames() failed: %v", err)
+	}
+
+	assertUnshared(t, copied)
+	assertShared(t, reg)
+
+	if !copied.JSONFieldNames() {
+		t.Errorf("copied.JSONFieldNames() expected true, got false")
+	}
+	if reg.JSONFieldNames() {
+		t.Errorf("reg.JSONFieldNames() expected false, got true")
+	}
+}
+
+func TestRegistryUnshared_ChainedCopies(t *testing.T) {
+	r1 := NewEmptyRegistry()
+	r2 := r1.Copy()
+	r3 := r2.Copy()
+
+	assertShared(t, r1)
+	assertShared(t, r2)
+	assertShared(t, r3)
+
+	typeInR2 := NewObjectType("custom.InR2")
+	if err := r2.RegisterType(typeInR2); err != nil {
+		t.Fatalf("RegisterType() failed: %v", err)
+	}
+
+	assertUnshared(t, r2)
+	assertShared(t, r1)
+	assertShared(t, r3)
+
+	if _, found := r2.FindIdent("custom.InR2"); !found {
+		t.Errorf("r2.FindIdent('custom.InR2') expected found == true")
+	}
+	if _, found := r1.FindIdent("custom.InR2"); found {
+		t.Errorf("r1.FindIdent('custom.InR2') expected found == false")
+	}
+	if _, found := r3.FindIdent("custom.InR2"); found {
+		t.Errorf("r3.FindIdent('custom.InR2') expected found == false")
+	}
+
+	typeInR3 := NewObjectType("custom.InR3")
+	if err := r3.RegisterType(typeInR3); err != nil {
+		t.Fatalf("RegisterType() failed: %v", err)
+	}
+
+	assertUnshared(t, r3)
+	if _, found := r3.FindIdent("custom.InR3"); !found {
+		t.Errorf("r3.FindIdent('custom.InR3') expected found == true")
+	}
+	if _, found := r1.FindIdent("custom.InR3"); found {
+		t.Errorf("r1.FindIdent('custom.InR3') expected found == false")
+	}
+	if _, found := r2.FindIdent("custom.InR3"); found {
+		t.Errorf("r2.FindIdent('custom.InR3') expected found == false")
+	}
+}
+
 
 func TestRegistryRegisterType(t *testing.T) {
 	tests := []struct {

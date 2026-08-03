@@ -184,6 +184,9 @@ func (lib *stdLibrary) CompileOptions() []EnvOption {
 			if err = lib.subset.Validate(); err != nil {
 				return nil, err
 			}
+			if len(funcs) > 0 {
+				e.ensureMutableFunctions()
+			}
 			for _, fn := range funcs {
 				existing, found := e.functions[fn.Name()]
 				if found {

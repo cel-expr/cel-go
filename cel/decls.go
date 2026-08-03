@@ -223,8 +223,8 @@ func FunctionDecls(funcs ...*decls.FunctionDecl) EnvOption {
 		if len(funcs) == 0 {
 			return e, nil
 		}
-		e.ensureMutableFunctions()
 		var err error
+		e.ensureMutableFunctions()
 		for _, fn := range funcs {
 			if existing, found := e.functions[fn.Name()]; found {
 				fn, err = existing.Merge(fn)
