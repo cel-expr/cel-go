@@ -4002,6 +4002,58 @@ func BenchmarkDynamicDispatch(b *testing.B) {
 	})
 }
 
+func BenchmarkProgramPlan(b *testing.B) {
+	env, err := NewEnv(
+		Variable("ai", IntType),
+		Variable("ar", MapType(StringType, StringType)),
+	)
+	if err != nil {
+		b.Fatalf("NewEnv() failed: %v", err)
+	}
+	astSimple, iss := env.Compile("ai == 20 || ar['foo'] == 'bar'")
+	if iss.Err() != nil {
+		b.Fatalf("env.Compile() failed: %v", iss.Err())
+	}
+	astOpt, iss := env.Compile("ai in [10, 20, 30] || 'foo' in ar")
+	if iss.Err() != nil {
+		b.Fatalf("env.Compile() failed: %v", iss.Err())
+	}
+
+	b.Run("Default", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			_, err := env.Program(astSimple)
+			if err != nil {
+				b.Fatalf("env.Program() failed: %v", err)
+			}
+		}
+	})
+
+	b.Run("OptimizeUnneeded", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			_, err := env.Program(astSimple, EvalOptions(OptOptimize))
+			if err != nil {
+				b.Fatalf("env.Program() failed: %v", err)
+			}
+		}
+	})
+
+	b.Run("OptimizeNeeded", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			_, err := env.Program(astOpt, EvalOptions(OptOptimize))
+			if err != nil {
+				b.Fatalf("env.Program() failed: %v", err)
+			}
+		}
+	})
+}
+
+
 func TestAstProgramNilValue(t *testing.T) {
 	var ast *Ast = nil
 	env := testEnv(t)
