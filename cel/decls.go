@@ -220,6 +220,10 @@ func ExcludeOverloads(overloadIDs ...string) OverloadSelector {
 // FunctionDecls provides one or more fully formed function declarations to be added to the environment.
 func FunctionDecls(funcs ...*decls.FunctionDecl) EnvOption {
 	return func(e *Env) (*Env, error) {
+		if len(funcs) == 0 {
+			return e, nil
+		}
+		e.ensureMutableFunctions()
 		var err error
 		for _, fn := range funcs {
 			if existing, found := e.functions[fn.Name()]; found {

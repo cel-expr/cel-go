@@ -98,6 +98,7 @@ func Lib(l Library) EnvOption {
 			if e.HasLibrary(singleton.LibraryName()) {
 				return e, nil
 			}
+			e.ensureMutableLibraries()
 			e.libraries[singleton.LibraryName()] = singleton
 		}
 		var err error

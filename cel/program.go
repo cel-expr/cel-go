@@ -22,7 +22,6 @@ import (
 
 	"github.com/google/cel-go/cel/async"
 	"github.com/google/cel-go/common/ast"
-	"github.com/google/cel-go/common/functions"
 	"github.com/google/cel-go/common/operators"
 	"github.com/google/cel-go/common/overloads"
 	"github.com/google/cel-go/common/types"
@@ -236,34 +235,11 @@ func newProgram(e *Env, a *ast.AST, opts []ProgramOption) (Program, error) {
 	// Program() built from it and read-only during planning — so assemble it once per env
 	// and layer a thin child over it here for per-program Functions() isolation, rather than
 	// re-indexing overloads on every Program() call.
-	hasAsync := false
-	e.dispOnce.Do(func() {
-		var bindings []*functions.Overload
-		for _, fn := range e.functions {
-			bs, err := fn.Bindings()
-			if err != nil {
-				e.dispErr = err
-				return
-			}
-			// Determine whether the environment declares any asynchronous function. Async is a property of
-			// the binding, so its presence is known from the environment alone, without inspecting the
-			// program plan. The synchronous entry points (Eval, ContextEval) reject programs from an env
-			// with async functions; callers needing synchronous evaluation should use a non-async env.
-			for _, b := range bs {
-				if b.Async != nil {
-					hasAsync = true
-				}
-			}
-			bindings = append(bindings, bs...)
-		}
-		d := interpreter.NewDispatcher()
-		e.dispErr = d.Add(bindings...)
-		e.sharedDispatcher = d
-	})
-	if e.dispErr != nil {
-		return nil, e.dispErr
+	sharedDisp, hasAsync, err := e.initDispatcher()
+	if err != nil {
+		return nil, err
 	}
-	disp := interpreter.ExtendDispatcher(e.sharedDispatcher)
+	disp := interpreter.ExtendDispatcher(sharedDisp)
 
 	// Ensure the default attribute factory is set after the adapter and provider are
 	// configured.
@@ -277,7 +253,6 @@ func newProgram(e *Env, a *ast.AST, opts []ProgramOption) (Program, error) {
 	}
 
 	// Configure the program via the ProgramOption values.
-	var err error
 	for _, opt := range opts {
 		p, err = opt(p)
 		if err != nil {

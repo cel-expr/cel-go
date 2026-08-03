@@ -977,6 +977,7 @@ func DefaultUTCTimeZone(enabled bool) EnvOption {
 // features sets the given feature flags.  See list of Feature constants above.
 func features(flag int, enabled bool) EnvOption {
 	return func(e *Env) (*Env, error) {
+		e.ensureMutableFeatures()
 		e.features[flag] = enabled
 		return e, nil
 	}
@@ -987,6 +988,7 @@ func setLimit(id limitID, limit int) EnvOption {
 		limit = -1
 	}
 	return func(e *Env) (*Env, error) {
+		e.ensureMutableLimits()
 		e.limits[id] = limit
 		return e, nil
 	}
