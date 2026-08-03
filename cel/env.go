@@ -170,15 +170,6 @@ type Env struct {
 	hasAsync         bool
 	dispErr          error
 
-	// sharedDispatcher caches a dispatcher populated with the env's function
-	// bindings, built once and reused across every Program() constructed from
-	// this env. It is read-only after construction; each Program layers a thin
-	// child over it for per-program Functions(). Zero in an extended env, so
-	// Extend() correctly rebuilds it.
-	dispOnce         sync.Once
-	sharedDispatcher interpreter.Dispatcher
-	dispErr          error
-
 	// Internal parser representation
 	prsr     *parser.Parser
 	prsrOpts []parser.Option
