@@ -4053,7 +4053,6 @@ func BenchmarkProgramPlan(b *testing.B) {
 	})
 }
 
-
 func TestAstProgramNilValue(t *testing.T) {
 	var ast *Ast = nil
 	env := testEnv(t)

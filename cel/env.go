@@ -17,6 +17,7 @@ package cel
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"slices"
 	"strings"
@@ -29,7 +30,6 @@ import (
 	"github.com/google/cel-go/common/containers"
 	"github.com/google/cel-go/common/decls"
 	"github.com/google/cel-go/common/env"
-	"github.com/google/cel-go/common/functions"
 	"github.com/google/cel-go/common/stdlib"
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
@@ -149,9 +149,6 @@ type Env struct {
 	libraries       map[string]SingletonLibrary
 	validators      []ASTValidator
 	costOptions     []checker.CostOption
-
-	funcBindOnce     sync.Once
-	functionBindings []*functions.Overload
 
 	// sharedDispatcher caches a dispatcher populated with the env's function
 	// bindings, built once and reused across every Program() constructed from
@@ -379,20 +376,19 @@ func NewCustomEnv(opts ...EnvOption) (*Env, error) {
 		return nil, err
 	}
 	return (&Env{
-		variables:        []*decls.VariableDecl{},
-		functions:        map[string]*decls.FunctionDecl{},
-		functionBindings: []*functions.Overload{},
-		macros:           []parser.Macro{},
-		Container:        containers.DefaultContainer,
-		adapter:          registry,
-		provider:         registry,
-		features:         map[int]bool{},
-		appliedFeatures:  map[int]bool{},
-		limits:           map[limitID]int{},
-		libraries:        map[string]SingletonLibrary{},
-		validators:       []ASTValidator{},
-		progOpts:         []ProgramOption{},
-		costOptions:      []checker.CostOption{},
+		variables:       []*decls.VariableDecl{},
+		functions:       map[string]*decls.FunctionDecl{},
+		macros:          []parser.Macro{},
+		Container:       containers.DefaultContainer,
+		adapter:         registry,
+		provider:        registry,
+		features:        map[int]bool{},
+		appliedFeatures: map[int]bool{},
+		limits:          map[limitID]int{},
+		libraries:       map[string]SingletonLibrary{},
+		validators:      []ASTValidator{},
+		progOpts:        []ProgramOption{},
+		costOptions:     []checker.CostOption{},
 	}).configure(opts)
 }
 
@@ -582,25 +578,15 @@ func (e *Env) Extend(opts ...EnvOption) (*Env, error) {
 	}
 
 	featuresCopy := make(map[int]bool, len(e.features))
-	for k, v := range e.features {
-		featuresCopy[k] = v
-	}
+	maps.Copy(featuresCopy, e.features)
 	appliedFeaturesCopy := make(map[int]bool, len(e.appliedFeatures))
-	for k, v := range e.appliedFeatures {
-		appliedFeaturesCopy[k] = v
-	}
+	maps.Copy(appliedFeaturesCopy, e.appliedFeatures)
 	limitsCopy := make(map[limitID]int, len(e.limits))
-	for k, v := range e.limits {
-		limitsCopy[k] = v
-	}
+	maps.Copy(limitsCopy, e.limits)
 	funcsCopy := make(map[string]*decls.FunctionDecl, len(e.functions))
-	for k, v := range e.functions {
-		funcsCopy[k] = v
-	}
+	maps.Copy(funcsCopy, e.functions)
 	libsCopy := make(map[string]SingletonLibrary, len(e.libraries))
-	for k, v := range e.libraries {
-		libsCopy[k] = v
-	}
+	maps.Copy(libsCopy, e.libraries)
 	validatorsCopy := make([]ASTValidator, len(e.validators))
 	copy(validatorsCopy, e.validators)
 

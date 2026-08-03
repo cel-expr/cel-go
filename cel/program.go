@@ -231,34 +231,33 @@ func scanOptTargets(root ast.Expr) (needOpt, needRegex bool) {
 //
 // If the program cannot be configured the prog will be nil, with a non-nil error response.
 func newProgram(e *Env, a *ast.AST, opts []ProgramOption) (Program, error) {
-	// Build the env's function bindings once (a pure function of the env). This
-	// is moved ahead of the ProgramOption loop so the shared dispatcher can be
-	// assembled before per-program Functions() options add to its child.
-	var err error
-	e.funcBindOnce.Do(func() {
+	// Build the env's function bindings and shared dispatcher once (pure functions of the
+	// env). The dispatcher holding the env's function bindings is identical across every
+	// Program() built from it and read-only during planning — so assemble it once per env
+	// and layer a thin child over it here for per-program Functions() isolation, rather than
+	// re-indexing overloads on every Program() call.
+	hasAsync := false
+	e.dispOnce.Do(func() {
 		var bindings []*functions.Overload
-		e.functionBindings = []*functions.Overload{}
 		for _, fn := range e.functions {
-			bindings, err = fn.Bindings()
+			bs, err := fn.Bindings()
 			if err != nil {
+				e.dispErr = err
 				return
 			}
-			e.functionBindings = append(e.functionBindings, bindings...)
+			// Determine whether the environment declares any asynchronous function. Async is a property of
+			// the binding, so its presence is known from the environment alone, without inspecting the
+			// program plan. The synchronous entry points (Eval, ContextEval) reject programs from an env
+			// with async functions; callers needing synchronous evaluation should use a non-async env.
+			for _, b := range bs {
+				if b.Async != nil {
+					hasAsync = true
+				}
+			}
+			bindings = append(bindings, bs...)
 		}
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	// Build the dispatcher, interpreter, and default program value. The
-	// dispatcher holding the env's function bindings is a pure function of the
-	// env, identical across every Program() built from it, and read-only during
-	// planning — so assemble it once per env and layer a thin child over it here
-	// for per-program Functions() isolation, rather than re-indexing the ~100
-	// standard-library overloads on every Program() call.
-	e.dispOnce.Do(func() {
 		d := interpreter.NewDispatcher()
-		e.dispErr = d.Add(e.functionBindings...)
+		e.dispErr = d.Add(bindings...)
 		e.sharedDispatcher = d
 	})
 	if e.dispErr != nil {
@@ -274,24 +273,15 @@ func newProgram(e *Env, a *ast.AST, opts []ProgramOption) (Program, error) {
 		dispatcher:     disp,
 		costOptions:    []interpreter.CostTrackerOption{},
 		drainStrategy:  async.DrainReady(100 * time.Microsecond),
+		hasAsync:       hasAsync,
 	}
 
 	// Configure the program via the ProgramOption values.
+	var err error
 	for _, opt := range opts {
 		p, err = opt(p)
 		if err != nil {
 			return nil, err
-		}
-	}
-
-	// Determine whether the environment declares any asynchronous function. Async is a property of
-	// the binding, so its presence is known from the environment alone, without inspecting the
-	// program plan. The synchronous entry points (Eval, ContextEval) reject programs from an env
-	// with async functions; callers needing synchronous evaluation should use a non-async env.
-	for _, b := range e.functionBindings {
-		if b.Async != nil {
-			p.hasAsync = true
-			break
 		}
 	}
 
