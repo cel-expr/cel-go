@@ -1,0 +1,42 @@
+name: Tag Go Submodules
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  tag-submodules:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@://github.com"
+
+      - name: Auto-Detect and Tag Submodules
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          echo "Finding all subdirectories containing go.mod..."
+          
+          # Find all go.mod files, exclude root (./go.mod), and get their directory paths
+          find . -mindepth 2 -name "go.mod" | while read -r gomod_path; do
+            # Extract directory path (e.g., ./pkg/submod1/go.mod -> pkg/submod1)
+            SUBDIR=$(dirname "$gomod_path" | sed 's|^\./||')
+            
+            SUB_TAG="${SUBDIR}/${RELEASE_TAG}"
+            
+            echo "----------------------------------------"
+            echo "Found Go module in: $SUBDIR"
+            echo "Creating tag: $SUB_TAG"
+            
+            git tag -a "$SUB_TAG" -m "Release $SUB_TAG via GitHub Action"
+            git push origin "$SUB_TAG"
+          done
