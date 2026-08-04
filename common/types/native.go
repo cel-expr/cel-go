@@ -129,25 +129,11 @@ func (t *NativeType) Adapt(adapter Adapter, value any) ref.Val {
 		}
 		refVal = refVal.Elem()
 	}
-	return t.AdaptReflect(adapter, value, refVal)
-}
-
-// AdaptReflect implements StructTypeDescriptor.
-func (t *NativeType) AdaptReflect(adapter Adapter, value any, refValue reflect.Value) ref.Val {
-	if value == nil {
-		return NullValue
-	}
-	if refValue.Kind() == reflect.Ptr {
-		if refValue.IsNil() {
-			return NullValue
-		}
-		refValue = refValue.Elem()
-	}
 	return &nativeObj{
 		Adapter:  adapter,
 		val:      value,
 		valType:  t,
-		refValue: refValue,
+		refValue: refVal,
 	}
 }
 
@@ -290,10 +276,10 @@ func (o *nativeObj) ConvertToNative(typeDesc reflect.Type) (any, error) {
 		}
 		return structpb.NewStructValue(jsonStruct.(*structpb.Struct)), nil
 	case jsonStructType:
-		refVal := o.refValue
+		refVal := reflect.Indirect(o.refValue)
 		fields := make(map[string]*structpb.Value, refVal.NumField())
 		for fieldName, fieldType := range o.valType.fieldsByName {
-			fieldValue := refVal.FieldByIndex(fieldType.Index)
+			fieldValue := safeGetFieldByIndex(refVal, fieldType.Index)
 			if !fieldValue.IsValid() || fieldValue.IsZero() {
 				continue
 			}
@@ -365,7 +351,8 @@ func (o *nativeObj) getReflectedField(field ref.Val) (reflect.Value, ref.Val) {
 	if !isDefined {
 		return reflect.Value{}, NewErr("no such field: %s", fieldName)
 	}
-	return safeGetFieldByIndex(o.refValue, refField.Index), nil
+	refVal := reflect.Indirect(o.refValue)
+	return safeGetFieldByIndex(refVal, refField.Index), nil
 }
 
 func (o *nativeObj) Type() ref.Type {
@@ -478,9 +465,6 @@ func safeSetFieldByIndex(v reflect.Value, index []int) reflect.Value {
 }
 
 func safeGetFieldByIndex(v reflect.Value, index []int) reflect.Value {
-	if len(index) == 1 {
-		return v.Field(index[0])
-	}
 	for _, i := range index {
 		if v.Kind() == reflect.Pointer {
 			if v.IsNil() {

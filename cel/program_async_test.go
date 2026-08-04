@@ -188,7 +188,7 @@ func TestConcurrentEval(t *testing.T) {
 		{
 			name:      "drain_ready_partial_debounce",
 			expr:      `delayed_rpc("a", 1) + delayed_rpc("b", 2) + delayed_rpc("c", 10)`,
-			opts:      []any{cel.ConcurrentDrainStrategy(async.DrainReady(2 * time.Millisecond))},
+			opts:      []any{cel.ConcurrentDrainStrategy(async.DrainReady(3 * time.Millisecond))},
 			trackCost: true,
 			wantCost:  15,
 			want:      "abc",
