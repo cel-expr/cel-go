@@ -1037,3 +1037,72 @@ Examples:
     regex.extractAll('id:123, id:456', 'assa') == []
 
     regex.extractAll('testuser@testdomain', '(.*)@([^.]*)') \\ Runtime Error multiple capture group
+
+## JWT (JSON Web Token)
+
+Returns a `cel.EnvOption` to configure support for JWT token verification, parsing, and claims inspection.
+
+### Features & Capabilities
+
+- **Automatic JWKS Key Retrieval**: Automatically retrieves public verification keys from standard OIDC discovery endpoints (`<issuer>/.well-known/jwks.json`) for major OAuth/OIDC identity providers (Auth0, Google, Apple, Okta, jwt.io).
+- **Supported Signature Algorithms**:
+  - **HMAC**: `HS256`, `HS384`, `HS512`
+  - **RSA PKCS#1 v1.5**: `RS256`, `RS384`, `RS512`
+  - **RSA-PSS**: `PS256`, `PS384`, `PS512`
+  - **ECDSA**: `ES256` (P-256), `ES384` (P-384), `ES512` (P-521)
+  - **EdDSA**: `EdDSA` (Ed25519)
+- **Key Formats Supported**: RSA public keys, EC public keys (P-256, P-384, P-521), OKP (Ed25519), PEM-encoded public keys/certificates, and `x5c` certificate chains.
+- **Key Caching**: Thread-safe in-memory key caching (15-minute default TTL, configurable via `jwt.KeyCacheTTL`).
+- **Key Filtering**: Automatically filters out non-signature keys (e.g. `use: "enc"`).
+- **Bearer Prefix Handling**: Trims leading `Bearer ` prefixes automatically from token strings.
+
+### Requirements & Limitations
+
+- Tokens verified with `jwt.verify(<string>)` must contain an `iss` (issuer) claim to allow public key lookup.
+- Cryptographic verification checks signature validity; audience and issuer validation should be performed via `jwt.Token.presentedBy(aud, iss)`.
+
+### JWT Functions
+
+#### jwt.verify
+
+Verifies and parses a JWT token string using the configured key fetcher. Returns an `optional_type<jwt.Token>`.
+
+    jwt.verify(<string>) -> optional_type<jwt.Token>
+
+Examples:
+
+    jwt.verify(tokenStr).hasValue()
+    jwt.verify(tokenStr).value().issuer == 'https://auth.example.com'
+
+#### jwt.verifyWithKey
+
+Verifies and parses a JWT token string using an explicit secret or PEM key string.
+
+    jwt.verifyWithKey(<string>, <string>) -> optional_type<jwt.Token>
+
+Examples:
+
+    jwt.verifyWithKey(tokenStr, 'my-secret-key').hasValue()
+    jwt.verifyWithKey(tokenStr, pubKeyPem).value().subject == 'user_123'
+
+#### jwt.Token.presentedBy
+
+Determines whether the token was issued for the expected audience (`aud`) and issuer (`iss`). Works on both `jwt.Token` and `optional_type<jwt.Token>`.
+
+    <jwt.Token>.presentedBy(<string aud>, <string iss>) -> bool
+    <optional_type<jwt.Token>>.presentedBy(<string aud>, <string iss>) -> bool
+
+Examples:
+
+    jwt.verify(tokenStr).presentedBy('my-api-audience', 'https://auth.example.com')
+
+#### jwt.Token.claim
+
+Queries a claim value by key name from the token payload, returning an `optional_type<string>`.
+
+    <jwt.Token>.claim(<string>) -> optional_type<string>
+
+Examples:
+
+    jwt.verifyWithKey(tokenStr, key).value().claim('tenant_id').orValue('default')
+
