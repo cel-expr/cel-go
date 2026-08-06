@@ -427,3 +427,27 @@ func uint64ToInt64Lossless(v uint64) (int64, bool) {
 	i, err := uint64ToInt64Checked(v)
 	return i, err == nil
 }
+
+func safeAddUint32(a, b uint32) uint32 {
+	if math.MaxUint32-a < b {
+		return math.MaxUint32
+	}
+	return a + b
+}
+
+func safeUint32FromInt(n int) uint32 {
+	if n < 0 {
+		return 0
+	}
+	if uint64(n) > math.MaxUint32 {
+		return math.MaxUint32
+	}
+	return uint32(n)
+}
+
+func safeUint32FromBoxedInt(v Int) uint32 {
+	if v < 0 || v > math.MaxUint32 {
+		return math.MaxUint32
+	}
+	return uint32(v)
+}

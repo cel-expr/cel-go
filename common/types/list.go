@@ -109,15 +109,10 @@ func NewMutableList(adapter Adapter) traits.MutableLister {
 // The `Adapter` enables native type to CEL type conversions.
 type baseList struct {
 	Adapter
-	value any
-
-	// size indicates the number of elements within the list.
-	// Since objects are immutable the size of a list is static.
-	size int
-
-	// get returns a value at the specified integer index.
-	// The index is guaranteed to be checked against the list index range.
-	get func(int) any
+	value   any
+	size    int
+	aggSize uint32
+	get     func(int) any
 }
 
 // Add implements the traits.Adder interface method.
@@ -269,6 +264,19 @@ func (l *baseList) Size() ref.Val {
 	return Int(l.size)
 }
 
+// AggregateSize implements the AggregateSizeVisitor interface method.
+func (l *baseList) AggregateSize(sizer AggregateSizer) uint32 {
+	if l.aggSize != 0 {
+		return l.aggSize
+	}
+	total := uint32(1)
+	for i := range l.size {
+		total = safeAddUint32(total, sizer.AggregateSize(l.get(i)))
+	}
+	l.aggSize = total
+	return total
+}
+
 // Type implements the ref.Val interface method.
 func (l *baseList) Type() ref.Type {
 	return ListType
@@ -322,11 +330,13 @@ func (l *mutableList) Add(other ref.Val) ref.Val {
 	case *mutableList:
 		l.mutableValues = append(l.mutableValues, otherList.mutableValues...)
 		l.size += len(otherList.mutableValues)
+		l.aggSize = 0
 	case traits.Lister:
 		for i := IntZero; i < otherList.Size().(Int); i++ {
 			l.size++
 			l.mutableValues = append(l.mutableValues, otherList.Get(i))
 		}
+		l.aggSize = 0
 	default:
 		return MaybeNoSuchOverloadErr(otherList)
 	}
@@ -478,6 +488,11 @@ func (l *concatList) Iterator() traits.Iterator {
 // Size implements the traits.Sizer interface method.
 func (l *concatList) Size() ref.Val {
 	return l.cachedSize
+}
+
+// AggregateSize implements the AggregateSizeVisitor interface method.
+func (l *concatList) AggregateSize(sizer AggregateSizer) uint32 {
+	return safeAddUint32(sizer.AggregateSize(l.prevList), sizer.AggregateSize(l.nextList))
 }
 
 // String converts the concatenated list to a human-readable string.

@@ -8,6 +8,7 @@ package(
 go_library(
     name = "go_default_library",
     srcs = [
+        "aggregate_sizer.go",
         "any_value.go",
         "bool.go",
         "bytes.go",
