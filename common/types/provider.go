@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"maps"
 	"reflect"
+	"sync/atomic"
 	"time"
 
 	"google.golang.org/protobuf/proto"
@@ -92,7 +93,7 @@ type Registry struct {
 	revTypeMap    map[string]*Type
 	structTypes   map[string]StructTypeDescriptor
 	reflectTypes  map[reflect.Type]StructTypeDescriptor
-	shared        bool
+	shared        atomic.Bool
 	pbdb          *pb.Db
 	provider      Provider
 	adapter       Adapter
@@ -222,28 +223,27 @@ func (p *Registry) Copy() *Registry {
 	if p == nil {
 		return nil
 	}
-	if !p.shared {
-		p.shared = true
-	}
-	return &Registry{
+	p.shared.Store(true)
+	cpy := &Registry{
 		revTypeMap:    p.revTypeMap,
 		structTypes:   p.structTypes,
 		reflectTypes:  p.reflectTypes,
 		nativeOptions: p.nativeOptions,
 		pbdb:          p.pbdb,
-		shared:        true,
 		provider:      p.provider,
 		adapter:       p.adapter,
 	}
+	cpy.shared.Store(true)
+	return cpy
 }
 
 func (p *Registry) ensureMutable() {
-	if p.shared {
+	if p.shared.Load() {
 		p.revTypeMap = maps.Clone(p.revTypeMap)
 		p.structTypes = maps.Clone(p.structTypes)
 		p.reflectTypes = maps.Clone(p.reflectTypes)
 		p.pbdb = p.pbdb.Copy()
-		p.shared = false
+		p.shared.Store(false)
 	}
 }
 

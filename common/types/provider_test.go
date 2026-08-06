@@ -20,6 +20,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -71,14 +72,14 @@ func TestRegistryCopy(t *testing.T) {
 
 func assertShared(t *testing.T, reg *Registry) {
 	t.Helper()
-	if !reg.shared {
+	if !reg.shared.Load() {
 		t.Errorf("registry.shared = false, want true")
 	}
 }
 
 func assertUnshared(t *testing.T, reg *Registry) {
 	t.Helper()
-	if reg.shared {
+	if reg.shared.Load() {
 		t.Errorf("registry.shared = true, want false")
 	}
 }
@@ -257,6 +258,20 @@ func TestRegistryUnshared_ChainedCopies(t *testing.T) {
 		t.Errorf("r2.FindIdent('custom.InR3') expected found == false")
 	}
 }
+
+func TestRegistryConcurrentCopy(t *testing.T) {
+	reg := NewEmptyRegistry()
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = reg.Copy()
+		}()
+	}
+	wg.Wait()
+}
+
 
 
 func TestRegistryRegisterType(t *testing.T) {
