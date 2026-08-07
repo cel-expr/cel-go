@@ -752,9 +752,9 @@ func (c *coster) functionCost(e ast.Expr, function, overloadID string, target *A
 	// O(n) functions
 	case overloads.ExtFormatString:
 		if target != nil {
-			// ResultSize not calculated because we can't bound the max size.
+			// ResultSize is bounded: since precision is capped by StringsMaxPrecision, 			// the output cannot exceed the format string size plus the sum of 			// argument string sizes (each numeric arg expands by at most 			// maxPrecision + fixed overhead characters).
 			return CallEstimate{
-				CostEstimate: c.sizeOrUnknown(*target).MultiplyByCostFactor(common.StringTraversalCostFactor).Add(argCostSum())}
+				targetSz := c.sizeOrUnknown(*target) 			argsSz := c.sizeOrUnknown(args[0]) 			resultSize := targetSz.Add(argsSz) 			return CallEstimate{ 				CostEstimate: targetSz.MultiplyByCostFactor(common.StringTraversalCostFactor).Add(argCostSum()), 				ResultSize:   &resultSize}
 		}
 	case overloads.StringToBytes:
 		if len(args) == 1 {
