@@ -164,6 +164,37 @@ func TestFormatCELTypeEquivalence(t *testing.T) {
 	}
 }
 
+func TestEnvExtendDisableDeclaration(t *testing.T) {
+	baseEnv, err := NewCustomEnv(
+		Function("foo",
+			Overload("foo_bool", []*Type{BoolType}, BoolType),
+		),
+	)
+	if err != nil {
+		t.Fatalf("NewCustomEnv() failed: %v", err)
+	}
+	_, iss := baseEnv.Compile("foo(true)")
+	if iss.Err() != nil {
+		t.Fatalf("baseEnv.Compile(foo(true)) failed: %v", iss.Err())
+	}
+
+	childEnv, err := baseEnv.Extend(
+		Function("foo",
+			DisableDeclaration(true),
+			Overload("foo_bool", []*Type{BoolType}, BoolType),
+		),
+	)
+	if err != nil {
+		t.Fatalf("baseEnv.Extend() failed: %v", err)
+	}
+
+	_, iss = childEnv.Compile("foo(true)")
+	if iss.Err() == nil {
+		t.Errorf("childEnv.Compile(foo(true)) succeeded, wanted error")
+	}
+}
+
+
 func TestEnvCheckExtendRace(t *testing.T) {
 	t.Parallel()
 	for i := 0; i < 500; i++ {

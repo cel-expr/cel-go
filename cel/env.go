@@ -532,27 +532,17 @@ func (e *Env) CompileSource(src Source) (*Ast, *Issues) {
 // TypeProvider are immutable, or that their underlying implementations are based on the
 // ref.TypeRegistry which provides a Copy method which will be invoked by this method.
 func (e *Env) Extend(opts ...EnvOption) (*Env, error) {
-	chk, chkErr := e.getCheckerOrError()
-	if chkErr != nil {
+	if _, chkErr := e.getCheckerOrError(); chkErr != nil {
 		return nil, chkErr
 	}
 
 	prsrOptsCopy := slices.Clone(e.prsrOpts)
-	// The type-checker is configured with Declarations. The declarations may either be provided
-	// as options which have not yet been validated, or may come from a previous checker instance
-	// whose types have already been validated.
 	chkOptsCopy := slices.Clone(e.chkOpts)
-
-	// Copy the declarations if needed.
-	if chk != nil {
-		// If the type-checker has already been instantiated, then the e.declarations have been
-		// validated within the chk instance.
-		chkOptsCopy = append(chkOptsCopy, checker.ValidatedDeclarations(chk))
-	}
 	varsCopy := slices.Clone(e.variables)
-	// Copy macros and program options
 	macsCopy := slices.Clone(e.macros)
 	progOptsCopy := slices.Clone(e.progOpts)
+	validatorsCopy := slices.Clone(e.validators)
+	costOptsCopy := slices.Clone(e.costOptions)
 
 	// Copy the adapter / provider if they appear to be mutable.
 	adapter := e.adapter
@@ -580,9 +570,6 @@ func (e *Env) Extend(opts ...EnvOption) (*Env, error) {
 	} else if isAdapterReg {
 		adapter = adapterReg.Copy()
 	}
-
-	validatorsCopy := slices.Clone(e.validators)
-	costOptsCopy := slices.Clone(e.costOptions)
 
 	ext := &Env{
 		parent:          e,
