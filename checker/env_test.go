@@ -77,20 +77,6 @@ func BenchmarkNewStdEnv(b *testing.B) {
 	}
 }
 
-func BenchmarkCopyDeclarations(b *testing.B) {
-	env, err := NewEnv(containers.DefaultContainer, newTestRegistry(b))
-	if err != nil {
-		b.Fatalf("NewEnv() failed: %v", err)
-	}
-	err = env.AddFunctions(stdlib.Functions()...)
-	if err != nil {
-		b.Fatalf("env.AddFunctions(stdlib.Functions()...) failed: %v", err)
-	}
-	for i := 0; i < b.N; i++ {
-		env.validatedDeclarations().Copy()
-	}
-}
-
 func newStdEnv(t *testing.T) *Env {
 	t.Helper()
 	env, err := NewEnv(containers.DefaultContainer, newTestRegistry(t))

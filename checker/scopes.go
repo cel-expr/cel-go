@@ -15,7 +15,6 @@
 package checker
 
 import (
-	"maps"
 	"strings"
 
 	"github.com/google/cel-go/common/decls"
@@ -37,22 +36,6 @@ func newScopes() *Scopes {
 	return &Scopes{
 		scopes: newGroup(),
 	}
-}
-
-// Copy creates a copy of the current Scopes values, including a copy of its parent if non-nil.
-func (s *Scopes) Copy() *Scopes {
-	cpy := newScopes()
-	if s == nil {
-		return cpy
-	}
-	if s.parent != nil {
-		cpy.parent = s.parent.Copy()
-	}
-	if s.inherited != nil {
-		cpy.inherited = s.inherited.Copy()
-	}
-	cpy.scopes = s.scopes.copy()
-	return cpy
 }
 
 // Push creates a new Scopes value which references the current Scope as its parent.
@@ -87,27 +70,6 @@ func (s *Scopes) AddIdent(decl *decls.VariableDecl) {
 	s.scopes.idents[decl.Name()] = decl
 }
 
-// FindIdent finds the first ident Decl with a matching name in Scopes, or nil if one cannot be
-// found.
-// Note: The search is performed from innermost to outermost.
-func (s *Scopes) FindIdent(name string) *decls.VariableDecl {
-	name = strings.TrimPrefix(name, ".")
-	if ident, found := s.scopes.idents[name]; found {
-		return ident
-	}
-	if s.parent != nil {
-		if ident := s.parent.FindIdent(name); ident != nil {
-			return ident
-		}
-	}
-	if s.inherited != nil {
-		if ident := s.inherited.FindIdent(name); ident != nil {
-			return ident
-		}
-	}
-	return nil
-}
-
 // FindIdentInScope finds the first ident Decl with a matching name in the current Scopes value, or
 // nil if one does not exist.
 // Note: The search is only performed on the current scope and does not search outer scopes.
@@ -136,7 +98,13 @@ func (s *Scopes) FindGlobalIdent(name string) *decls.VariableDecl {
 	for scope.parent != nil {
 		scope = scope.parent
 	}
-	return scope.FindIdentInScope(name)
+	if ident := scope.FindIdentInScope(name); ident != nil {
+		return ident
+	}
+	if scope.inherited != nil {
+		return scope.inherited.FindGlobalIdent(name)
+	}
+	return nil
 }
 
 // SetFunction adds the function Decl to the current scope.
@@ -172,16 +140,6 @@ func (s *Scopes) FindFunction(name string) *decls.FunctionDecl {
 type Group struct {
 	idents    map[string]*decls.VariableDecl
 	functions map[string]*decls.FunctionDecl
-}
-
-// copy creates a new Group instance with a shallow copy of the variables and functions.
-// If callers need to mutate the exprpb.Decl definitions for a Function, they should copy-on-write.
-func (g *Group) copy() *Group {
-	cpy := &Group{
-		idents:    maps.Clone(g.idents),
-		functions: maps.Clone(g.functions),
-	}
-	return cpy
 }
 
 // newGroup creates a new Group with empty maps for identifiers and functions.
