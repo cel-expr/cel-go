@@ -195,7 +195,10 @@ func (opt *ruleComposerImpl) optimizeRule(ctx *cel.OptimizerContext, r *Compiled
 	matches := r.Matches()
 	matchCount := len(matches)
 	var output compositionStep = nil
-	if !isAggregate && r.HasOptionalOutput() {
+	// If the rule is non-aggregate and has an optional output, the last result in the ternary should return
+	// `optional.none`. This output is implicit and created here to reflect the desired
+	// last possible output of this type of rule.
+	if !returnList && r.HasOptionalOutput() {
 		output = newOptionalCompositionStep(ctx, ctx.NewLiteral(types.True), ctx.NewCall("optional.none"))
 	}
 	// Build the rule subgraph.
@@ -205,6 +208,10 @@ func (opt *ruleComposerImpl) optimizeRule(ctx *cel.OptimizerContext, r *Compiled
 
 		var currentStep compositionStep
 		if m.Output() != nil {
+			// If the output is non-nil, then it is considered a non-optional output since
+			// it is explicitly stated. If the rule itself is optional, then the base case value
+			// of output being optional.none() will convert the non-optional value to an optional
+			// one.
 			out := ctx.CopyASTAndMetadata(m.Output().Expr().NativeRep())
 			if returnList {
 				outList := ctx.NewList([]ast.Expr{out}, []int32{})
@@ -213,9 +220,19 @@ func (opt *ruleComposerImpl) optimizeRule(ctx *cel.OptimizerContext, r *Compiled
 				currentStep = newNonOptionalCompositionStep(ctx, cond, out)
 			}
 		} else if m.NestedRule() != nil {
+			// If the match has a nested rule, then compute the rule and whether it has
+			// an optional return value.
+			//
+			// Semantics for nesting:
+			// - With optional values (nestedHasOptional = true): The step is treated as optional.
+			//   If the nested rule yields optional.none, composition allows fall-through to
+			//   subsequent match cases.
+			// - Without optional values (nestedHasOptional = false): The step is treated as non-optional.
+			//   A matching result produces a concrete value that short-circuits further match evaluation,
+			//   though it may be wrapped into optional.of(...) if the outer rule produces optional output.
 			child := m.NestedRule()
 			nestedRule := opt.optimizeRule(ctx, child, returnList)
-			nestedHasOptional := child.HasOptionalOutput()
+			nestedHasOptional := !returnList && child.HasOptionalOutput()
 			if nestedHasOptional {
 				currentStep = newOptionalCompositionStep(ctx, cond, nestedRule)
 			} else {
@@ -522,12 +539,17 @@ func (s nonOptionalCompositionStep) combine(step compositionStep) compositionSte
 	if !s.isConditional() {
 		return s
 	}
+	stepExpr := step.expr()
+	if step.isConditional() {
+		emptyList := ctx.NewList([]ast.Expr{}, []int32{})
+		stepExpr = ctx.NewCall(operators.Conditional, step.condition(), step.expr(), emptyList)
+	}
 	return newNonOptionalCompositionStep(ctx,
 		trueCondition,
 		ctx.NewCall(operators.Conditional,
 			s.condition(),
 			s.expr(),
-			step.expr()))
+			stepExpr))
 }
 
 // newOptionalCompositionStep returns an output step with an optional policy output.
@@ -615,9 +637,7 @@ func isOptionalNone(e ast.Expr) bool {
 
 func removeIneligibleSubExprs(e ast.NavigableExpr, unnestMap map[int64]bool) {
 	for _, id := range comprehensionSubExprIDs(e) {
-		if _, found := unnestMap[id]; found {
-			delete(unnestMap, id)
-		}
+		delete(unnestMap, id)
 	}
 }
 

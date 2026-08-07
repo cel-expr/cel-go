@@ -1,0 +1,72 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+description: "Tests governance policy evaluation with multi-dimensional aggregate rules"
+section:
+  - name: "emergency_approval"
+    tests:
+      - name: "emergency_trumps_all_approval_rules"
+        input:
+          request.is_emergency:
+            value: true
+          request.env:
+            value: "prod"
+          tool.is_mutation:
+            value: true
+          tool.call.args:
+            expr: "{'batch_size': 50}"
+        output:
+          expr: "['REQUIRE_VP_APPROVAL']"
+  - name: "prod_mutation_with_pci_and_throttling"
+    tests:
+      - name: "prod_mutation_pci_tier2"
+        input:
+          request.is_emergency:
+            value: false
+          request.env:
+            value: "prod"
+          tool.is_mutation:
+            value: true
+          tool.call.args:
+            expr: "{'batch_size': dyn(1500), 'cc': dyn('411111111111')}"
+        output:
+          expr: "['REQUIRE_TECH_LEAD_2FA', 'REDACT_PCI', 'THROTTLE_TIER_2']"
+  - name: "dev_mutation_with_pii_and_tier1"
+    tests:
+      - name: "dev_mutation_pii_tier1"
+        input:
+          request.is_emergency:
+            value: false
+          request.env:
+            value: "dev"
+          tool.is_mutation:
+            value: true
+          tool.call.args:
+            expr: "{'batch_size': dyn(500), 'email': dyn('user@example.com')}"
+        output:
+          expr: "['REQUIRE_PEER_CONFIRMATION', 'REDACT_PII', 'THROTTLE_TIER_1']"
+  - name: "read_only_tool"
+    tests:
+      - name: "no_rules_matched"
+        input:
+          request.is_emergency:
+            value: false
+          request.env:
+            value: "prod"
+          tool.is_mutation:
+            value: false
+          tool.call.args:
+            expr: "{'batch_size': 10}"
+        output:
+          expr: "[]"

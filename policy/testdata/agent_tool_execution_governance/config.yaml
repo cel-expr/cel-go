@@ -1,0 +1,42 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: agent_tool_execution_governance
+variables:
+  - name: "request.is_emergency"
+    type_name: "bool"
+  - name: "request.env"
+    type_name: "string"
+  - name: "tool.is_mutation"
+    type_name: "bool"
+  - name: "tool.call.args"
+    type_name: "map"
+    params:
+      - type_name: "string"
+      - type_name: "dyn"
+functions:
+  - name: "classifier.has_credit_card"
+    overloads:
+      - id: "classifier_has_credit_card"
+        args:
+          - type_name: "dyn"
+        return:
+          type_name: "bool"
+  - name: "classifier.has_email_or_phone"
+    overloads:
+      - id: "classifier_has_email_or_phone"
+        args:
+          - type_name: "dyn"
+        return:
+          type_name: "bool"
