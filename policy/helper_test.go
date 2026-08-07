@@ -23,10 +23,10 @@ import (
 	"github.com/google/cel-go/common/env"
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
+	"github.com/google/cel-go/common/types/traits"
 	"github.com/google/cel-go/test"
 
 	"go.yaml.in/yaml/v3"
-
 )
 
 var (
@@ -128,6 +128,28 @@ var (
 	(x == 1)
 	  ? optional.of(((y == 1) ? optional.of("a") : optional.none()).orValue("b"))
 	  : optional.none()`,
+		},
+		{
+			name: "agent_tool_execution_governance",
+			expr: `(request.is_emergency ? ["REQUIRE_VP_APPROVAL"] : ((tool.is_mutation && request.env == "prod") ? ["REQUIRE_TECH_LEAD_2FA"] : (tool.is_mutation ? ["REQUIRE_PEER_CONFIRMATION"] : []))) + ((classifier.has_credit_card(tool.call.args) ? ["REDACT_PCI"] : (classifier.has_email_or_phone(tool.call.args) ? ["REDACT_PII"] : [])) + ((tool.call.args.batch_size > 10000) ? ["THROTTLE_TIER_3"] : ((tool.call.args.batch_size > 1000) ? ["THROTTLE_TIER_2"] : ((tool.call.args.batch_size > 100) ? ["THROTTLE_TIER_1"] : []))))`,
+			envOpts: []cel.EnvOption{
+				cel.Function("classifier.has_credit_card",
+					cel.Overload("classifier_has_credit_card", []*cel.Type{cel.DynType}, cel.BoolType,
+						cel.UnaryBinding(func(args ref.Val) ref.Val {
+							if m, ok := args.(traits.Mapper); ok {
+								return types.Bool(m.Contains(types.String("cc")) == types.True)
+							}
+							return types.False
+						}))),
+				cel.Function("classifier.has_email_or_phone",
+					cel.Overload("classifier_has_email_or_phone", []*cel.Type{cel.DynType}, cel.BoolType,
+						cel.UnaryBinding(func(args ref.Val) ref.Val {
+							if m, ok := args.(traits.Mapper); ok {
+								return types.Bool(m.Contains(types.String("email")) == types.True || m.Contains(types.String("phone")) == types.True)
+							}
+							return types.False
+						}))),
+			},
 		},
 	}
 
@@ -270,6 +292,9 @@ ERROR: testdata/errors/policy.yaml:45:16: incompatible output types: block has o
  | ........^
 ERROR: testdata/errors_unreachable/policy.yaml:36:13: match creates unreachable outputs
  |           - output: |
+ | ............^
+ERROR: testdata/errors_unreachable/policy.yaml:38:13: Condition is always false
+ |           - condition: "false"
  | ............^`,
 		},
 		{
@@ -277,6 +302,30 @@ ERROR: testdata/errors_unreachable/policy.yaml:36:13: match creates unreachable 
 			err: `ERROR: testdata/nested_incompatible_outputs/policy.yaml:22:9: incompatible output types: block has output type string, but previous outputs have type bool
  |         match:
  | ........^`,
+		},
+		{
+			name: "aggregate_errors",
+			err: `ERROR: testdata/aggregate_errors/policy.yaml:21:13: match creates unreachable outputs
+ |           - condition: "true"
+ | ............^
+ERROR: testdata/aggregate_errors/policy.yaml:24:22: incompatible output types: block has output type int, but previous outputs have type optional_type(string)
+ |             output: "403"
+ | .....................^`,
+		},
+		{
+			name: "aggregate_list_errors",
+			err: `ERROR: testdata/aggregate_list_errors/policy.yaml:21:13: match creates unreachable outputs
+ |           - condition: "true"
+ | ............^
+ERROR: testdata/aggregate_list_errors/policy.yaml:24:22: incompatible output types: block has output type int, but previous outputs have type list(string)
+ |             output: "403"
+ | .....................^`,
+		},
+		{
+			name: "aggregate_nested_mixed_semantics",
+			err: `ERROR: testdata/aggregate_nested_mixed_semantics/policy.yaml:23:15: nested aggregate rules are not allowed
+ |               aggregate:
+ | ..............^`,
 		},
 	}
 )

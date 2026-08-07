@@ -102,7 +102,7 @@ variables:
 		t.Fatalf("cel.NewEnv() failed: %v", err)
 	}
 	for _, tst := range tests {
-		c := parseConfigYaml(t, tst)
+		c := parseConfigYAML(t, tst)
 		_, err := baseEnv.Extend(FromConfig(c))
 		if err != nil {
 			t.Errorf("AsEnvOptions() generated error: %v", err)
@@ -233,7 +233,7 @@ functions:
 		t.Fatalf("cel.NewEnv() failed: %v", err)
 	}
 	for _, tst := range tests {
-		c := parseConfigYaml(t, tst.config)
+		c := parseConfigYAML(t, tst.config)
 		_, err := baseEnv.Extend(FromConfig(c))
 		if err == nil || err.Error() != tst.err {
 			t.Errorf("AsEnvOptions() got error: %v, wanted %s", err, tst.err)
@@ -241,7 +241,7 @@ functions:
 	}
 }
 
-func parseConfigYaml(t *testing.T, doc string) *env.Config {
+func parseConfigYAML(t *testing.T, doc string) *env.Config {
 	config := &env.Config{}
 	if err := yaml.Unmarshal([]byte(doc), config); err != nil {
 		t.Fatalf("yaml.Unmarshal(%q) failed: %v", doc, err)

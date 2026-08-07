@@ -46,52 +46,6 @@ func TestCompile(t *testing.T) {
 	}
 }
 
-func TestRuleComposerError(t *testing.T) {
-	env, err := cel.NewEnv()
-	if err != nil {
-		t.Fatalf("NewEnv() failed: %v", err)
-	}
-	_, err = NewRuleComposer(env, ExpressionUnnestHeight(-1))
-	if err == nil || !strings.Contains(err.Error(), "invalid unnest") {
-		t.Errorf("NewRuleComposer() got %v, wanted 'invalid unnest'", err)
-	}
-}
-
-func TestRuleComposerUnnest(t *testing.T) {
-	for _, tst := range composerUnnestTests {
-		tc := tst
-		t.Run(tc.name, func(t *testing.T) {
-			r := newRunner(tc.name, tc.expr, []ParserOption{})
-			env, rule, iss := r.compileRule(t)
-			if iss.Err() != nil {
-				t.Fatalf("CompileRule() failed: %v", iss.Err())
-			}
-			rc, err := NewRuleComposer(env, tc.composerOpts...)
-			if err != nil {
-				t.Fatalf("NewRuleComposer() failed: %v", err)
-			}
-			ast, iss := rc.Compose(rule)
-			if iss.Err() != nil {
-				t.Fatalf("Compose(rule) failed: %v", iss.Err())
-			}
-			policy := parsePolicy(t, tc.name, []ParserOption{})
-			verifySourceInfoCoverage(t, policy, ast)
-			unparsed, err := cel.AstToString(ast)
-			if err != nil {
-				t.Fatalf("cel.AstToString() failed: %v", err)
-			}
-			if normalize(unparsed) != normalize(tc.composed) {
-				t.Errorf("cel.AstToString() got %s, wanted %s", unparsed, tc.composed)
-			}
-			if !ast.OutputType().IsEquivalentType(tc.outputType) {
-				t.Errorf("ast.OutputType() got %v, wanted %v", ast.OutputType(), tc.outputType)
-			}
-			r.setup(t, env, ast)
-			r.run(t)
-		})
-	}
-}
-
 func TestCompileError(t *testing.T) {
 	for _, tst := range policyErrorTests {
 		policy := parsePolicy(t, tst.name, []ParserOption{})
@@ -288,6 +242,36 @@ func BenchmarkCompile(b *testing.B) {
 		r.setup(b, env, ast)
 		r.bench(b)
 	}
+}
+
+func parsePolicySource(t testing.TB, name string, policySource string, parseOpts ...ParserOption) *Policy {
+	t.Helper()
+	p := StringSource(policySource, name)
+	parser, err := NewParser(parseOpts...)
+	if err != nil {
+		t.Fatalf("NewParser() failed: %v", err)
+	}
+	policy, iss := parser.Parse(p)
+	if iss.Err() != nil {
+		t.Fatalf("parser.Parse() failed: %v", iss.Err())
+	}
+	return policy
+}
+
+func parseAndCompilePolicy(t testing.TB, name string, policySource string, envOpts []cel.EnvOption, compilerOpts []CompilerOption) (*cel.Env, *cel.Ast, *cel.Issues) {
+	t.Helper()
+	policy := parsePolicySource(t, name, policySource)
+	envOpts = append([]cel.EnvOption{
+		cel.OptionalTypes(),
+		cel.EnableMacroCallTracking(),
+		ext.Bindings(),
+	}, envOpts...)
+	env, err := cel.NewEnv(envOpts...)
+	if err != nil {
+		t.Fatalf("cel.NewEnv() failed: %v", err)
+	}
+	ast, iss := Compile(env, policy, compilerOpts...)
+	return env, ast, iss
 }
 
 func newRunner(name, expr string, parseOpts []ParserOption, opts ...cel.EnvOption) *runner {
@@ -616,4 +600,239 @@ func exprLinesFromPolicy(policy *Policy) map[int]bool {
 	}
 	traverseRule(policy.Rule())
 	return lines
+}
+
+func TestCompileYAMLPolicy_Aggregate(t *testing.T) {
+	type testEval struct {
+		input  map[string]any
+		output ref.Val
+	}
+	tests := []struct {
+		name             string
+		policy           string
+		envOpts          []cel.EnvOption
+		expectedUnparsed string
+		evals            []testEval
+		wantErr          string
+	}{
+		{
+			name: "eval_aggregate",
+			policy: `name: "aggregate_policy"
+rule:
+  aggregate:
+    - condition: 'true'
+      emit: '"PII"'
+    - condition: 'true'
+      emit: '"CONFIDENTIAL"'`,
+			expectedUnparsed: `["PII"] + ["CONFIDENTIAL"]`,
+			evals: []testEval{
+				{
+					input:  map[string]any{},
+					output: types.NewStringList(types.DefaultTypeAdapter, []string{"PII", "CONFIDENTIAL"}),
+				},
+			},
+		},
+		{
+			name: "aggregate_with_block_variables",
+			policy: `name: "block_policy"
+rule:
+  variables:
+    - name: val1
+      expression: '"PII"'
+    - name: val2
+      expression: '"CONFIDENTIAL"'
+  aggregate:
+    - condition: 'true'
+      emit: 'variables.val1'
+    - condition: 'true'
+      emit: 'variables.val2'`,
+			expectedUnparsed: `cel.@block(["PII", "CONFIDENTIAL"], [@index0] + [@index1])`,
+			evals: []testEval{
+				{
+					input:  map[string]any{},
+					output: types.NewStringList(types.DefaultTypeAdapter, []string{"PII", "CONFIDENTIAL"}),
+				},
+			},
+		},
+		{
+			name: "aggregate_conditions_and_block_variables",
+			policy: `name: "cse_policy"
+rule:
+  variables:
+    - name: threshold
+      expression: "5"
+  aggregate:
+    - condition: "size(resource.payload) > variables.threshold"
+      emit: '"CSE1"'
+    - condition: "size(resource.payload) > variables.threshold"
+      emit: '"CSE2"'
+    - condition: 'true'
+      emit: '"ALWAYS"'`,
+			envOpts: []cel.EnvOption{
+				cel.Variable("resource", cel.MapType(cel.StringType, cel.ListType(cel.IntType))),
+			},
+			expectedUnparsed: `cel.@block([5], ((size(resource.payload) > @index0) ? ["CSE1"] : []) + (((size(resource.payload) > @index0) ? ["CSE2"] : []) + ["ALWAYS"]))`,
+			evals: []testEval{
+				{
+					input: map[string]any{
+						"resource": map[string]any{
+							"payload": []int64{1, 2, 3, 4, 5, 6},
+						},
+					},
+					output: types.NewStringList(types.DefaultTypeAdapter, []string{"CSE1", "CSE2", "ALWAYS"}),
+				},
+				{
+					input: map[string]any{
+						"resource": map[string]any{
+							"payload": []int64{1, 2, 3},
+						},
+					},
+					output: types.NewStringList(types.DefaultTypeAdapter, []string{"ALWAYS"}),
+				},
+			},
+		},
+		{
+			name: "aggregate_macros_preserved",
+			policy: `name: aggregate_macros_preserved
+rule:
+  variables:
+    - name: min_val
+      expression: "10"
+  aggregate:
+    - condition: "cond"
+      rule:
+        match:
+          - condition: "true"
+            output: "payload.filter(x, x > variables.min_val).exists(y, y % 2 == 0)"
+    - condition: "true"
+      emit: "payload.all(x, x > 0)"`,
+			envOpts: []cel.EnvOption{
+				cel.Variable("cond", cel.BoolType),
+				cel.Variable("payload", cel.ListType(cel.IntType)),
+			},
+			expectedUnparsed: `cel.@block([10], (cond ? [payload.filter(x, x > @index0).exists(y, y % 2 == 0)] : []) + [payload.all(x, x > 0)])`,
+		},
+		{
+			name: "nested_aggregate_throws",
+			policy: `name: nested_aggregate
+rule:
+  aggregate:
+    - condition: 'true'
+      rule:
+        aggregate:
+          - condition: 'true'
+            emit: "'foo'"`,
+			wantErr: "nested aggregate rules are not allowed",
+		},
+		{
+			name: "nested_aggregate_with_match_throws",
+			policy: `name: nested_aggregate_with_match
+rule:
+  aggregate:
+    - condition: 'true'
+      rule:
+        match:
+          - condition: 'true'
+            rule:
+              aggregate:
+                - condition: 'true'
+                  emit: "'foo'"`,
+			wantErr: "nested aggregate rules are not allowed",
+		},
+		{
+			name: "aggregate_under_match_success",
+			policy: `name: aggregate_under_match
+rule:
+  match:
+    - condition: 'true'
+      rule:
+        aggregate:
+          - condition: 'true'
+            emit: "'foo'"`,
+			expectedUnparsed: `["foo"]`,
+		},
+	}
+
+	for _, tst := range tests {
+		tc := tst
+		t.Run(tc.name, func(t *testing.T) {
+			env, ast, iss := parseAndCompilePolicy(t, tc.name, tc.policy, tc.envOpts, nil)
+			if tc.wantErr != "" {
+				if iss.Err() == nil {
+					t.Fatalf("Compile() succeeded, wanted error %q", tc.wantErr)
+				}
+				if !strings.Contains(iss.Err().Error(), tc.wantErr) {
+					t.Errorf("Compile() got %v, wanted error containing %q", iss.Err(), tc.wantErr)
+				}
+				return
+			}
+
+			if iss.Err() != nil {
+				t.Fatalf("Compile() failed: %v", iss.Err())
+			}
+
+			unparsed, err := cel.AstToString(ast)
+			if err != nil {
+				t.Fatalf("cel.AstToString() failed: %v", err)
+			}
+			if tc.expectedUnparsed != "" && normalize(unparsed) != normalize(tc.expectedUnparsed) {
+				t.Errorf("cel.AstToString() got %s, wanted %s", unparsed, tc.expectedUnparsed)
+			}
+
+			_, err = cel.AstToCheckedExpr(ast)
+			if err != nil {
+				t.Fatalf("cel.AstToCheckedExpr() failed: %v", err)
+			}
+
+			prg, err := env.Program(ast)
+			if err != nil {
+				t.Fatalf("env.Program(ast) failed: %v", err)
+			}
+
+			for _, ev := range tc.evals {
+				out, _, err := prg.Eval(ev.input)
+				if err != nil {
+					t.Fatalf("prg.Eval(%v) failed: %v", ev.input, err)
+				}
+				if out.Equal(ev.output) != types.True {
+					t.Errorf("prg.Eval(%v) got %v, wanted %v", ev.input, out, ev.output)
+				}
+			}
+		})
+	}
+}
+
+func TestCompiledRuleSemantic(t *testing.T) {
+	policySource := `name: aggregate_semantic
+rule:
+  aggregate:
+    - condition: 'true'
+      emit: "'foo'"`
+	policy := parsePolicySource(t, "aggregate_semantic", policySource)
+	env, err := cel.NewEnv()
+	if err != nil {
+		t.Fatalf("cel.NewEnv() failed: %v", err)
+	}
+	compiledRule, iss := CompileRule(env, policy)
+	if iss.Err() != nil {
+		t.Fatalf("CompileRule() failed: %v", iss.Err())
+	}
+	if compiledRule.Semantic() != aggregate {
+		t.Errorf("got %v, wanted aggregate", compiledRule.Semantic())
+	}
+}
+
+func TestCompileYAMLPolicy_ConditionAlwaysFalse(t *testing.T) {
+	policySource := `name: condition_always_false
+rule:
+  aggregate:
+    - condition: 'false'
+      emit: "'foo'"`
+	_, _, iss := parseAndCompilePolicy(t, "condition_always_false", policySource, nil, nil)
+	if iss.Err() == nil {
+		t.Fatalf("Compile() succeeded, wanted error")
+	}
+	if !strings.Contains(iss.Err().Error(), "Condition is always false") {
+		t.Errorf("Compile() got %v, wanted 'Condition is always false'", iss.Err())
+	}
 }

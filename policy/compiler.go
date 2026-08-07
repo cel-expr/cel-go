@@ -34,6 +34,7 @@ type CompiledRule struct {
 	id        *ValueString
 	variables []*CompiledVariable
 	matches   []*CompiledMatch
+	semantic  SemanticType
 }
 
 // SourceID returns the source metadata identifier associated with the compiled rule.
@@ -56,11 +57,21 @@ func (r *CompiledRule) Matches() []*CompiledMatch {
 	return r.matches[:]
 }
 
+// Semantic returns the evaluation semantic for the compiled rule.
+func (r *CompiledRule) Semantic() SemanticType {
+	return r.semantic
+}
+
 // OutputType returns the output type of the first match clause as all match clauses
 // are validated for agreement prior to construction fo the CompiledRule.
 func (r *CompiledRule) OutputType() *cel.Type {
 	// It's a compilation error if the output types of the matches don't agree
-	for _, m := range r.Matches() {
+	matches := r.Matches()
+	if len(matches) > 0 {
+		m := matches[0]
+		if r.semantic == aggregate {
+			return cel.ListType(m.OutputType())
+		}
 		return m.OutputType()
 	}
 	return cel.DynType
@@ -69,6 +80,9 @@ func (r *CompiledRule) OutputType() *cel.Type {
 // HasOptionalOutput returns whether the rule returns a concrete or optional value.
 // The rule may return an optional value if all match expressions under the rule are conditional.
 func (r *CompiledRule) HasOptionalOutput() bool {
+	if r.semantic == aggregate {
+		return false
+	}
 	optionalOutput := false
 	for _, m := range r.Matches() {
 		if m.NestedRule() != nil && m.NestedRule().HasOptionalOutput() {
@@ -297,7 +311,7 @@ func CompileRule(env *cel.Env, p *Policy, opts ...CompilerOption) (*CompiledRule
 			c.env = env
 		}
 	}
-	return c.compileRule(p.Rule(), p, c.env, iss)
+	return c.compileRule(p.Rule(), p, c.env, iss, false)
 }
 
 type compiler struct {
@@ -310,7 +324,10 @@ type compiler struct {
 	nestedCount          int
 }
 
-func (c *compiler) compileRule(r *Rule, p *Policy, ruleEnv *cel.Env, iss *cel.Issues) (*CompiledRule, *cel.Issues) {
+func (c *compiler) compileRule(r *Rule, p *Policy, ruleEnv *cel.Env, iss *cel.Issues, hasAggregateAncestor bool) (*CompiledRule, *cel.Issues) {
+	if hasAggregateAncestor && r.semantic == aggregate {
+		iss.ReportErrorAtID(r.SourceID(), "nested aggregate rules are not allowed")
+	}
 	compiledVars := make([]*CompiledVariable, len(r.Variables()))
 	for i, v := range r.Variables() {
 		exprSrc := c.relSource(v.Expression())
@@ -379,7 +396,8 @@ func (c *compiler) compileRule(r *Rule, p *Policy, ruleEnv *cel.Env, iss *cel.Is
 			continue
 		}
 		if m.HasRule() {
-			nestedRule, ruleIss := c.compileRule(m.Rule(), p, ruleEnv, iss)
+			nextHasAggregateAncestor := hasAggregateAncestor || r.semantic == aggregate
+			nestedRule, ruleIss := c.compileRule(m.Rule(), p, ruleEnv, iss, nextHasAggregateAncestor)
 			iss = iss.Append(ruleIss)
 			compiledMatches = append(compiledMatches, &CompiledMatch{
 				exprID:     m.exprID,
@@ -401,6 +419,7 @@ func (c *compiler) compileRule(r *Rule, p *Policy, ruleEnv *cel.Env, iss *cel.Is
 		id:        r.id,
 		variables: compiledVars,
 		matches:   compiledMatches,
+		semantic:  r.semantic,
 	}
 
 	// Note: Consider supporting configurable policy validators that take the policy, rule, and issues
@@ -453,10 +472,14 @@ func (c *compiler) checkUnreachableCode(rule *CompiledRule, iss *cel.Issues) {
 		m := compiledMatches[i]
 		triviallyTrue := m.ConditionIsLiteral(types.True)
 
+		if m.ConditionIsLiteral(types.False) {
+			iss.ReportErrorAtID(m.SourceID(), "Condition is always false")
+		}
+
 		// If the match is a single output or a nested rule that always returns a value, it is
 		// exhaustive. If the condition is trivially true, then all subsequent branches are unreachable.
 		isExhaustive := triviallyTrue && (m.NestedRule() == nil || !m.NestedRule().HasOptionalOutput())
-		if isExhaustive && i != matchCount-1 {
+		if rule.semantic == firstMatch && isExhaustive && i != matchCount-1 {
 			if m.Output() != nil {
 				iss.ReportErrorAtID(m.SourceID(), "match creates unreachable outputs")
 			}

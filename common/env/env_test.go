@@ -1534,7 +1534,7 @@ func unmarshalYAML(t *testing.T, data []byte) *Config {
 	t.Helper()
 	config, err := ConfigFromYAML(data)
 	if err != nil {
-		t.Fatalf("ConfigFromYaml(%q) failed: %v", string(data), err)
+		t.Fatalf("ConfigFromYAML(%q) failed: %v", string(data), err)
 	}
 	return config
 }
