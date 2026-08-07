@@ -270,6 +270,9 @@ ERROR: testdata/errors/policy.yaml:45:16: incompatible output types: block has o
  | ........^
 ERROR: testdata/errors_unreachable/policy.yaml:36:13: match creates unreachable outputs
  |           - output: |
+ | ............^
+ERROR: testdata/errors_unreachable/policy.yaml:38:13: Condition is always false
+ |           - condition: "false"
  | ............^`,
 		},
 		{
@@ -277,6 +280,30 @@ ERROR: testdata/errors_unreachable/policy.yaml:36:13: match creates unreachable 
 			err: `ERROR: testdata/nested_incompatible_outputs/policy.yaml:22:9: incompatible output types: block has output type string, but previous outputs have type bool
  |         match:
  | ........^`,
+		},
+		{
+			name: "aggregate_errors",
+			err: `ERROR: testdata/aggregate_errors/policy.yaml:21:13: match creates unreachable outputs
+ |           - condition: "true"
+ | ............^
+ERROR: testdata/aggregate_errors/policy.yaml:24:22: incompatible output types: block has output type int, but previous outputs have type optional_type(string)
+ |             output: "403"
+ | .....................^`,
+		},
+		{
+			name: "aggregate_list_errors",
+			err: `ERROR: testdata/aggregate_list_errors/policy.yaml:21:13: match creates unreachable outputs
+ |           - condition: "true"
+ | ............^
+ERROR: testdata/aggregate_list_errors/policy.yaml:24:22: incompatible output types: block has output type int, but previous outputs have type list(string)
+ |             output: "403"
+ | .....................^`,
+		},
+		{
+			name: "aggregate_nested_mixed_semantics",
+			err: `ERROR: testdata/aggregate_nested_mixed_semantics/policy.yaml:23:15: nested aggregate rules are not allowed
+ |               aggregate:
+ | ..............^`,
 		},
 	}
 )

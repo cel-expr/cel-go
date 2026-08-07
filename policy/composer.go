@@ -92,7 +92,7 @@ func (c *RuleComposer) Compose(r *CompiledRule) (*cel.Ast, *cel.Issues) {
 		return nil, iss
 	}
 	unnester := &ruleUnnesterImpl{
-		nextVarIndex: len(composer.varIndices),
+		nextVarIndex:     len(composer.varIndices),
 		varIndices:       composer.varIndices,
 		exprUnnestHeight: c.exprUnnestHeight,
 	}
@@ -159,7 +159,7 @@ func (opt *ruleComposerImpl) exitScope() {
 func (opt *ruleComposerImpl) Optimize(ctx *cel.OptimizerContext, a *ast.AST) *ast.AST {
 	// The input to optimize is a dummy expression which is completely replaced according
 	// to the configuration of the rule composition graph.
-	ruleExpr := opt.optimizeRule(ctx, opt.rule)
+	ruleExpr := opt.optimizeRule(ctx, opt.rule, false)
 
 	// If there were no variables, return the expression.
 	if len(opt.varIndices) == 0 {
@@ -180,7 +180,7 @@ func (opt *ruleComposerImpl) Optimize(ctx *cel.OptimizerContext, a *ast.AST) *as
 	return ctx.NewAST(blockExpr)
 }
 
-func (opt *ruleComposerImpl) optimizeRule(ctx *cel.OptimizerContext, r *CompiledRule) ast.Expr {
+func (opt *ruleComposerImpl) optimizeRule(ctx *cel.OptimizerContext, r *CompiledRule, isAggregateParent bool) ast.Expr {
 	// Visitor to rewrite variables-prefixed identifiers with index names.
 	opt.enterScope()
 	defer opt.exitScope()
@@ -189,13 +189,13 @@ func (opt *ruleComposerImpl) optimizeRule(ctx *cel.OptimizerContext, r *Compiled
 		opt.registerVariable(ctx, v)
 	}
 
+	isAggregate := r.semantic == aggregate
+	returnList := isAggregateParent || isAggregate
+
 	matches := r.Matches()
 	matchCount := len(matches)
 	var output compositionStep = nil
-	// If the rule has an optional output, the last result in the ternary should return
-	// `optional.none`. This output is implicit and created here to reflect the desired
-	// last possible output of this type of rule.
-	if r.HasOptionalOutput() {
+	if !isAggregate && r.HasOptionalOutput() {
 		output = newOptionalCompositionStep(ctx, ctx.NewLiteral(types.True), ctx.NewCall("optional.none"))
 	}
 	// Build the rule subgraph.
@@ -203,29 +203,37 @@ func (opt *ruleComposerImpl) optimizeRule(ctx *cel.OptimizerContext, r *Compiled
 		m := matches[i]
 		cond := ctx.CopyASTAndMetadata(m.Condition().NativeRep())
 
-		// If the output is non-nil, then it is considered a non-optional output since
-		// it is explictly stated. If the rule itself is optional, then the base case value
-		// of output being optional.none() will convert the non-optional value to an optional
-		// one.
+		var currentStep compositionStep
 		if m.Output() != nil {
 			out := ctx.CopyASTAndMetadata(m.Output().Expr().NativeRep())
-			step := newNonOptionalCompositionStep(ctx, cond, out)
-			output = step.combine(output)
-			continue
+			if returnList {
+				outList := ctx.NewList([]ast.Expr{out}, []int32{})
+				currentStep = newNonOptionalCompositionStep(ctx, cond, outList)
+			} else {
+				currentStep = newNonOptionalCompositionStep(ctx, cond, out)
+			}
+		} else if m.NestedRule() != nil {
+			child := m.NestedRule()
+			nestedRule := opt.optimizeRule(ctx, child, returnList)
+			nestedHasOptional := child.HasOptionalOutput()
+			if nestedHasOptional {
+				currentStep = newOptionalCompositionStep(ctx, cond, nestedRule)
+			} else {
+				currentStep = newNonOptionalCompositionStep(ctx, cond, nestedRule)
+			}
 		}
 
-		// If the match has a nested rule, then compute the rule and whether it has
-		// an optional return value.
-		child := m.NestedRule()
-		nestedRule := opt.optimizeRule(ctx, child)
-		nestedHasOptional := child.HasOptionalOutput()
-		if nestedHasOptional {
-			step := newOptionalCompositionStep(ctx, cond, nestedRule)
-			output = step.combine(output)
-			continue
+		if isAggregate {
+			output = opt.combineAggregate(ctx, currentStep, output)
+		} else {
+			output = currentStep.combine(output)
 		}
-		step := newNonOptionalCompositionStep(ctx, cond, nestedRule)
-		output = step.combine(output)
+	}
+
+	if output == nil {
+		if returnList {
+			output = newNonOptionalCompositionStep(ctx, ctx.NewLiteral(types.True), ctx.NewList([]ast.Expr{}, []int32{}))
+		}
 	}
 
 	matchExpr := output.expr()
@@ -233,6 +241,23 @@ func (opt *ruleComposerImpl) optimizeRule(ctx *cel.OptimizerContext, r *Compiled
 	ast.PostOrderVisit(matchExpr, identVisitor)
 
 	return matchExpr
+}
+
+func (opt *ruleComposerImpl) combineAggregate(ctx *cel.OptimizerContext, step, accumulatedStep compositionStep) compositionStep {
+	trueCondition := ctx.NewLiteral(types.True)
+	currentListPart := step.expr()
+	var conditionalListPart ast.Expr
+	if step.isConditional() {
+		emptyList := ctx.NewList([]ast.Expr{}, []int32{})
+		conditionalListPart = ctx.NewCall(operators.Conditional, step.condition(), currentListPart, emptyList)
+	} else {
+		conditionalListPart = currentListPart
+	}
+	if accumulatedStep == nil {
+		return newNonOptionalCompositionStep(ctx, trueCondition, conditionalListPart)
+	}
+	concatenated := ctx.NewCall(operators.Add, conditionalListPart, accumulatedStep.expr())
+	return newNonOptionalCompositionStep(ctx, trueCondition, concatenated)
 }
 
 func (opt *ruleComposerImpl) rewriteVariableName(ctx *cel.OptimizerContext) ast.Visitor {
@@ -265,7 +290,7 @@ func (opt *ruleComposerImpl) registerVariable(ctx *cel.OptimizerContext, v *Comp
 		celType:  v.Declaration().Type()}
 	opt.varIndices = append(opt.varIndices, vi)
 	if len(opt.scopes) > 0 {
-		opt.scopes[len(opt.scopes) - 1][varName] = len(opt.varIndices) - 1 
+		opt.scopes[len(opt.scopes)-1][varName] = len(opt.varIndices) - 1
 	}
 	opt.nextVarIndex++
 }
@@ -492,6 +517,9 @@ func (s nonOptionalCompositionStep) combine(step compositionStep) compositionSte
 		}
 		// The `step` is pruned away by a unconditional non-optional step `s`.
 		// Likely a candidate for dead-code warnings.
+		return s
+	}
+	if !s.isConditional() {
 		return s
 	}
 	return newNonOptionalCompositionStep(ctx,

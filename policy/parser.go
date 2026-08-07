@@ -25,11 +25,12 @@ import (
 	"github.com/google/cel-go/common/ast"
 )
 
-type semanticType int
+type SemanticType int
 
 const (
-	unspecified semanticType = iota
+	unspecified SemanticType = iota
 	firstMatch
+	aggregate
 )
 
 // NewPolicy creates a policy object which references a policy source and source information.
@@ -38,7 +39,7 @@ func NewPolicy(src *Source, info *ast.SourceInfo) *Policy {
 		metadata: map[string]any{},
 		source:   src,
 		info:     info,
-		semantic: firstMatch,
+		semantic: unspecified,
 		imports:  []*Import{},
 	}
 }
@@ -49,11 +50,27 @@ type Policy struct {
 	description ValueString
 	imports     []*Import
 	rule        *Rule
-	semantic    semanticType
+	semantic    SemanticType
 	info        *ast.SourceInfo
 	source      *Source
 
 	metadata map[string]any
+}
+
+// Semantic returns the evaluation semantic for the policy.
+func (p *Policy) Semantic() SemanticType {
+	if p.semantic == unspecified {
+		return firstMatch
+	}
+	return p.semantic
+}
+
+// SetSemantic configures the evaluation semantic for the policy.
+func (p *Policy) SetSemantic(s SemanticType) {
+	if p.semantic != unspecified && p.semantic != s {
+		return
+	}
+	p.semantic = s
 }
 
 // Source returns the policy file contents as a CEL source object.
@@ -179,6 +196,7 @@ func NewRule(exprID int64) *Rule {
 		exprID:    exprID,
 		variables: []*Variable{},
 		matches:   []*Match{},
+		semantic:  unspecified,
 	}
 }
 
@@ -189,6 +207,28 @@ type Rule struct {
 	description *ValueString
 	variables   []*Variable
 	matches     []*Match
+	semantic    SemanticType
+}
+
+// Semantic returns the evaluation semantic for the rule.
+func (r *Rule) Semantic() SemanticType {
+	if r.semantic == unspecified {
+		return firstMatch
+	}
+	return r.semantic
+}
+
+// SetSemantic configures the evaluation semantic for the rule.
+func (r *Rule) SetSemantic(s SemanticType) {
+	if r.semantic != unspecified && r.semantic != s {
+		return
+	}
+	r.semantic = s
+}
+
+// SourceID returns the source identifier associated with the rule.
+func (r *Rule) SourceID() int64 {
+	return r.exprID
 }
 
 // ID returns the id value of the rule if it is set.
@@ -249,6 +289,7 @@ func (r *Rule) getExplanationOutputRule() *Rule {
 	er := Rule{
 		id:          r.id,
 		description: r.description,
+		semantic:    r.semantic,
 	}
 	er.AddVariables(r.Variables())
 	for _, match := range r.matches {
@@ -769,8 +810,18 @@ func (p *parserImpl) ParseRule(ctx ParserContext, policy *Policy, node *yaml.Nod
 			r.SetDescription(ctx.NewString(val))
 		case "variables":
 			p.parseVariables(ctx, policy, r, val)
-		case "match":
-			p.parseMatches(ctx, policy, r, val)
+		case "match", "aggregate":
+			sem := firstMatch
+			if fieldName == "aggregate" {
+				sem = aggregate
+			}
+			if r.semantic != unspecified && r.semantic != sem {
+				p.ReportErrorAtID(tagID, "Only one of 'match' or 'aggregate' may be set in a rule")
+			} else {
+				r.SetSemantic(sem)
+				policy.SetSemantic(sem)
+				p.parseMatches(ctx, policy, r, val)
+			}
 		default:
 			p.visitor.RuleTag(ctx, tagID, fieldName, val, policy, r)
 		}
@@ -841,16 +892,27 @@ func (p *parserImpl) parseMatches(ctx ParserContext, policy *Policy, r *Rule, no
 		return
 	}
 	for _, val := range node.Content {
-		r.AddMatch(p.ParseMatch(ctx, policy, val))
+		r.AddMatch(p.parseMatchInternal(ctx, policy, r, val))
 	}
 }
 
 // ParseMatch  will parse the current yaml node as though it is the entry point to a match.
 func (p *parserImpl) ParseMatch(ctx ParserContext, policy *Policy, node *yaml.Node) *Match {
+	return p.parseMatchInternal(ctx, policy, nil, node)
+}
+
+func (p *parserImpl) parseMatchInternal(ctx ParserContext, policy *Policy, r *Rule, node *yaml.Node) *Match {
 	m, id := ctx.NewMatch(node)
 	if p.assertYAMLType(id, node, yamlMap) == nil || !p.checkMapValid(ctx, id, node) {
 		return m
 	}
+	ruleSem := firstMatch
+	if r != nil {
+		ruleSem = r.Semantic()
+	} else {
+		ruleSem = policy.Semantic()
+	}
+	isAggregate := ruleSem == aggregate
 	m.SetCondition(ValueString{ID: ctx.NextID(), Value: "true"})
 	p.RangeMap(node, func(key, val *yaml.Node) bool {
 		keyID := ctx.CollectMetadata(key)
@@ -858,7 +920,12 @@ func (p *parserImpl) ParseMatch(ctx ParserContext, policy *Policy, node *yaml.No
 		switch fieldName {
 		case "condition":
 			m.SetCondition(ctx.NewString(val))
-		case "output":
+		case "output", "emit":
+			if fieldName == "output" && isAggregate {
+				p.ReportErrorAtID(keyID, "Rule aggregate requires 'emit' tag instead of 'output'")
+			} else if fieldName == "emit" && !isAggregate {
+				p.ReportErrorAtID(keyID, "Rule match requires 'output' tag instead of 'emit'")
+			}
 			if m.HasRule() {
 				p.ReportErrorAtID(keyID, "only the rule or the output may be set")
 			}
@@ -868,7 +935,7 @@ func (p *parserImpl) ParseMatch(ctx ParserContext, policy *Policy, node *yaml.No
 				p.ReportErrorAtID(keyID, "explanation can only be set on output match cases, not nested rules")
 			}
 			m.SetExplanation(ctx.NewString(val))
-		case "rule":
+		case "rule", "match", "aggregate":
 			if m.HasOutput() {
 				p.ReportErrorAtID(keyID, "only the rule or the output may be set")
 			}
