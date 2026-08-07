@@ -46,6 +46,18 @@ func TestConstantFoldingOptimizer(t *testing.T) {
 			folded: `[1, 3, 6]`,
 		},
 		{
+			expr:   `[1, 2] + [3, 4]`,
+			folded: `[1, 2, 3, 4]`,
+		},
+		{
+			expr:   `[x, 1] + [2, y]`,
+			folded: `[x, 1, 2, y]`,
+		},
+		{
+			expr:   `[1] + [x] + [2]`,
+			folded: `[1, x, 2]`,
+		},
+		{
 			expr:   `6 in [1, 1 + 2, 1 + (2 + 3)]`,
 			folded: `true`,
 		},
@@ -516,7 +528,7 @@ func TestConstantFoldingOptimizer(t *testing.T) {
 		},
 		{
 			expr:   `[1] + [x]`,
-			folded: `[1] + [x]`,
+			folded: `[1, x]`,
 		},
 
 		{
