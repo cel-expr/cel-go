@@ -167,9 +167,17 @@ func (o *protoObj) Value() any {
 	return o.value
 }
 
-type protoObjField struct {
-	fd protoreflect.FieldDescriptor
-	v  protoreflect.Value
+// AggregateSize implements the AggregateSizeVisitor interface method.
+func (o *protoObj) AggregateSize(sizer AggregateSizer) uint32 {
+	if o.value == nil {
+		return 0
+	}
+	total := uint32(1)
+	o.value.ProtoReflect().Range(func(fd protoreflect.FieldDescriptor, v protoreflect.Value) bool {
+		total = safeAddUint32(total, sizer.AggregateSize(v))
+		return true
+	})
+	return total
 }
 
 func (o *protoObj) format(sb *strings.Builder) {

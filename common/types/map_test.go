@@ -1252,3 +1252,98 @@ func (m proxyLegacyMap) Iterator() traits.Iterator {
 func (m proxyLegacyMap) Size() ref.Val {
 	return m.proxy.Size()
 }
+
+func TestMapCalculateSize(t *testing.T) {
+	adapter := DefaultTypeAdapter
+
+	// Setup helper data
+	l := NewRefValList(adapter, []ref.Val{Int(2), Int(3)})
+	refValMap := NewRefValMap(adapter, map[ref.Val]ref.Val{
+		String("a"): Int(1),
+		String("b"): l,
+	})
+
+	ifaceMap := NewStringInterfaceMap(adapter, map[string]any{
+		"a": int64(1),
+		"b": []any{int64(2), int64(3)},
+	})
+
+	mutMap := NewMutableMap(adapter, map[ref.Val]ref.Val{
+		String("a"): Int(1),
+		String("b"): l,
+	})
+	// Initial evaluation before insert to test aggSize reset
+	_ = mutMap.(AggregateSizeVisitor).AggregateSize(NewSizeCalculator())
+	mutMap.Insert(String("c"), Int(4))
+
+	reg, err := NewRegistry(&proto3pb.TestAllTypes{})
+	if err != nil {
+		t.Fatalf("NewRegistry() failed: %v", err)
+	}
+	msg := &proto3pb.TestAllTypes{
+		MapStringString: map[string]string{
+			"a": "b",
+			"c": "d",
+		},
+	}
+	pbMsg := reg.NativeToValue(msg).(traits.Indexer)
+	pm := pbMsg.Get(String("map_string_string")).(traits.Mapper)
+
+	tests := []struct {
+		name string
+		val  ref.Val
+		want uint32
+	}{
+		{
+			name: "empty_ref_val_map",
+			val:  NewRefValMap(adapter, map[ref.Val]ref.Val{}),
+			want: 1,
+		},
+		{
+			name: "ref_val_map_nested",
+			val:  refValMap,
+			want: 7,
+		},
+		{
+			name: "string_interface_map",
+			val:  ifaceMap,
+			want: 7,
+		},
+		{
+			name: "string_string_map",
+			val:  NewStringStringMap(adapter, map[string]string{"k1": "v1", "k2": "v2"}),
+			want: 9,
+		},
+		{
+			name: "mutable_map_after_insert",
+			val:  mutMap,
+			want: 9,
+		},
+		{
+			name: "proto_map",
+			val:  pm,
+			want: 5,
+		},
+		{
+			name: "nil_proto_map",
+			val:  &protoMap{},
+			want: 0,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			sizer, ok := tc.val.(AggregateSizeVisitor)
+			if !ok {
+				t.Fatalf("expected AggregateSizeVisitor implementation for %T", tc.val)
+			}
+			if got := sizer.AggregateSize(NewSizeCalculator()); got != tc.want {
+				t.Errorf("got aggregate size %d, want %d", got, tc.want)
+			}
+			// Caching check (memoized aggSize)
+			if got := sizer.AggregateSize(NewSizeCalculator()); got != tc.want {
+				t.Errorf("memoized AggregateSize() got %d, want %d", got, tc.want)
+			}
+		})
+	}
+}

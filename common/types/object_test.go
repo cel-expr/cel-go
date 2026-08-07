@@ -257,3 +257,26 @@ func TestProtoObjectConvertToType(t *testing.T) {
 		t.Error("identity type conversion failed")
 	}
 }
+
+func TestProtoObjectCalculateSize(t *testing.T) {
+	msg := &exprpb.ParsedExpr{
+		SourceInfo: &exprpb.SourceInfo{
+			LineOffsets: []int32{1, 2, 3},
+		},
+	}
+	reg := newTestRegistry(t, ProtoTypeDefs(msg))
+	objVal := reg.NativeToValue(msg)
+	sizer, ok := objVal.(AggregateSizeVisitor)
+	if !ok {
+		t.Fatalf("expected AggregateSizeVisitor implementation for protoObj")
+	}
+	// 1 (protoObj container) + SourceInfo field (1 container + 1 list container + 3 list elements = 5) = 6
+	if got := sizer.AggregateSize(NewSizeCalculator()); got != 6 {
+		t.Errorf("got aggregate size %d, want 6", got)
+	}
+
+	nilObj := &protoObj{}
+	if got := nilObj.AggregateSize(NewSizeCalculator()); got != 0 {
+		t.Errorf("got nil protoObj aggregate size %d, want 0", got)
+	}
+}

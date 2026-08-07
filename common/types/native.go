@@ -363,6 +363,23 @@ func (o *nativeObj) Value() any {
 	return o.val
 }
 
+// AggregateSize implements the AggregateSizeVisitor interface method.
+func (o *nativeObj) AggregateSize(sizer AggregateSizer) uint32 {
+	refVal := reflect.Indirect(o.refValue)
+	if !refVal.IsValid() {
+		return 0
+	}
+	total := uint32(1)
+	for _, fieldType := range o.valType.fieldsByName {
+		fieldValue := refVal.FieldByIndex(fieldType.Index)
+		if !fieldValue.IsValid() || fieldValue.IsZero() {
+			continue
+		}
+		total = safeAddUint32(total, sizer.AggregateSize(fieldValue))
+	}
+	return total
+}
+
 func newNativeTypes(rawType reflect.Type, fieldNameHandler NativeTypesFieldNameHandler) ([]*NativeType, error) {
 	nt, err := newNativeType(rawType, fieldNameHandler)
 	if err != nil {

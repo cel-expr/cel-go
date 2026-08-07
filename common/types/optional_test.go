@@ -185,3 +185,22 @@ func TestOptionalValue(t *testing.T) {
 		t.Errorf("OptionalNone.Value() got %v, wanted nil", OptionalNone.Value())
 	}
 }
+
+func TestOptionalCalculateSize(t *testing.T) {
+	calc := NewSizeCalculator()
+	none := OptionalNone
+	if sizer, ok := any(none).(AggregateSizeVisitor); !ok || sizer.AggregateSize(calc) != 0 {
+		t.Errorf("expected 0 for OptionalNone")
+	}
+
+	someScalar := OptionalOf(Int(42))
+	if sizer, ok := any(someScalar).(AggregateSizeVisitor); !ok || sizer.AggregateSize(calc) != 2 {
+		t.Errorf("got %d for OptionalOf(scalar), want 2", sizer.AggregateSize(calc))
+	}
+
+	l := NewRefValList(DefaultTypeAdapter, []ref.Val{Int(1), Int(2)})
+	someList := OptionalOf(l)
+	if sizer, ok := any(someList).(AggregateSizeVisitor); !ok || sizer.AggregateSize(calc) != 4 {
+		t.Errorf("got %d for OptionalOf(list of 2), want 4", sizer.AggregateSize(calc))
+	}
+}
