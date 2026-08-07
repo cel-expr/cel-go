@@ -427,6 +427,31 @@ Example:
 
     proto.hasExt(msg, google.expr.proto2.test.int32_ext) // returns true || false
 
+## Maps
+
+Extended functions for map manipulation.
+
+CEL has no operator for combining two maps: the `+` operator concatenates
+strings, bytes, and lists, but is not defined for maps.
+
+### Maps.Merge
+
+Returns a new map containing the entries of both arguments. When a key is
+present in both, the value from the second argument wins. Neither input is
+modified.
+
+The merge is shallow: a value that is itself a map is replaced rather than
+merged recursively.
+
+    maps.merge(map(K, V), map(K, V)) -> map(K, V)
+
+Examples:
+
+    maps.merge({}, {}) // {}
+    maps.merge({'a': 1}, {'b': 2}) // {'a': 1, 'b': 2}
+    maps.merge({'a': 1}, {'a': 2}) // {'a': 2}
+    maps.merge({'a': {'x': 1}}, {'a': {'y': 2}}) // {'a': {'y': 2}}
+
 ## Lists
 
 Extended functions for list manipulation. As a general note, all indices are

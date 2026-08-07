@@ -55,6 +55,7 @@ var (
 		"encoders":               ext.Encoders(),
 		"sets":                   ext.Sets(),
 		"lists":                  ext.Lists(),
+		"maps":                   ext.Maps(),
 		"two_var_comprehensions": ext.TwoVarComprehensions(),
 	}
 )
