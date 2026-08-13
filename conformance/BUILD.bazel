@@ -17,6 +17,7 @@ _ALL_TESTS = [
     "@dev_cel_expr//tests/simple:testdata/fp_math.textproto",
     "@dev_cel_expr//tests/simple:testdata/integer_math.textproto",
     "@dev_cel_expr//tests/simple:testdata/lists.textproto",
+    "@dev_cel_expr//tests/simple:testdata/lists_ext.textproto",
     "@dev_cel_expr//tests/simple:testdata/logic.textproto",
     "@dev_cel_expr//tests/simple:testdata/macros.textproto",
     "@dev_cel_expr//tests/simple:testdata/macros2.textproto",

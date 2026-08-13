@@ -88,6 +88,7 @@ func init() {
 		cel.Types(&test2pb.TestAllTypes{}, &test2pb.Proto2ExtensionScopedMessage{}, &test3pb.TestAllTypes{}),
 		ext.Bindings(),
 		ext.Encoders(),
+		ext.Lists(),
 		ext.Math(),
 		ext.Protos(),
 		ext.Strings(),

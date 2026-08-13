@@ -37,15 +37,19 @@ bazel_dep(
 bazel_dep(name = "rules_shell", version = "0.6.1")
 bazel_dep(name = "rules_license", version = "1.0.0")
 
-
 # local_path_override(
 #     module_name = "cel-spec",
 #     path = "../cel-spec",
 # )
 bazel_dep(
     name = "cel-spec",
-    version = "0.25.1",
+    version = "0.25.2",
     repo_name = "dev_cel_expr",
+)
+git_override(
+    module_name = "cel-spec",
+    commit = "ba58ae5007845f3a1279b488cdeb79645ce958bb",
+    remote = "https://github.com/cel-expr/cel-spec",
 )
 
 go_sdk = use_extension("@io_bazel_rules_go//go:extensions.bzl", "go_sdk")
