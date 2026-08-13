@@ -234,9 +234,13 @@ func (p *typeDescParser) parseTypeParamIdent() (string, error) {
 }
 
 func (p *typeDescParser) skipWhitespace() {
-	for p.pos < p.length && p.text[p.pos] == ' ' {
+	for p.pos < p.length && isWhitespace(p.text[p.pos]) {
 		p.pos++
 	}
+}
+
+func isWhitespace(c byte) bool {
+	return c == ' ' || c == '\t' || c == '\n' || c == '\r'
 }
 
 func isAlpha(c byte) bool {

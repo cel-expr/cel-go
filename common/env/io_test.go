@@ -51,6 +51,18 @@ func TestParseTypeDesc(t *testing.T) {
 			"map<int, list<string>>",
 			NewTypeDesc("map", NewTypeDesc("int"), NewTypeDesc("list", NewTypeDesc("string"))),
 		},
+		{
+			"list<\n\tint\n>",
+			NewTypeDesc("list", NewTypeDesc("int")),
+		},
+		{
+			"map<\r\n  string,\r\n  list<string>\r\n>",
+			NewTypeDesc("map", NewTypeDesc("string"), NewTypeDesc("list", NewTypeDesc("string"))),
+		},
+		{
+			"map<string,\tint>",
+			NewTypeDesc("map", NewTypeDesc("string"), NewTypeDesc("int")),
+		},
 	}
 	for _, tc := range tcs {
 		t.Run(tc.text, func(t *testing.T) {
@@ -235,6 +247,35 @@ functions:
           return:
             type_name: V
             is_type_param: true
+`,
+		},
+		{
+			name: "multiline and tab whitespace in types",
+			yamlIn: `name: user_env
+variables:
+  - name: user_lookup_table
+    type: >-
+      map<
+        string,
+        list<string>
+      >
+  - name: permissions
+    type: "map<string,\tint>"
+`,
+			yamlOut: `name: user_env
+variables:
+    - name: user_lookup_table
+      type_name: map
+      params:
+        - type_name: string
+        - type_name: list
+          params:
+            - type_name: string
+    - name: permissions
+      type_name: map
+      params:
+        - type_name: string
+        - type_name: int
 `,
 		},
 	}
