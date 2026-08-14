@@ -308,16 +308,10 @@ func (m *baseMap) AggregateSize(sizer AggregateSizer) uint32 {
 	if m.aggSize != 0 {
 		return m.aggSize
 	}
-	var total uint32 = 1
-	it := m.Iterator()
-	for it.HasNext() == True {
-		key := it.Next()
-		val, _ := m.Find(key)
-		total = safeAddUint32(total, sizer.AggregateSize(key))
-		total = safeAddUint32(total, sizer.AggregateSize(val))
-	}
-	m.aggSize = total
-	return total
+	f := foldableAggregateSizer{sizer: sizer, total: 1}
+	m.Fold(&f)
+	m.aggSize = f.total
+	return f.total
 }
 
 // String converts the map into a human-readable string.

@@ -24,6 +24,8 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"github.com/google/cel-go/common/types/ref"
+	"github.com/google/cel-go/common/types/traits"
+
 	proto3pb "github.com/google/cel-go/test/proto3pb"
 )
 
@@ -208,6 +210,31 @@ func TestCalculateSize(t *testing.T) {
 			val:  interopFoldableMap{Mapper: NewStringStringMap(DefaultTypeAdapter, map[string]string{"key": "val"})},
 			want: 7, // 1 (container) + 3 ("key") + 3 ("val") = 7
 		},
+		{
+			name: "custom_pure_mapper",
+			val:  customPureMapper{Mapper: NewStringStringMap(DefaultTypeAdapter, map[string]string{"key": "val"})},
+			want: 7, // 1 (container) + 3 ("key") + 3 ("val") = 7
+		},
+		{
+			name: "custom_sizer_struct_field",
+			val:  struct{ Sizer traits.Sizer }{Sizer: customSizerVal(42)},
+			want: 43, // 1 (struct container) + 42 (custom sizer) = 43
+		},
+		{
+			name: "custom_visitor_struct_field",
+			val:  struct{ Visitor customVisitorVal }{Visitor: customVisitorVal{Val: 1}},
+			want: 101, // 1 (struct container) + 100 (custom visitor) = 101
+		},
+		{
+			name: "custom_sizer_pointer",
+			val:  newCustomSizerPtr(42),
+			want: 42,
+		},
+		{
+			name: "custom_visitor_pointer",
+			val:  &customVisitorVal{Val: 1},
+			want: 100,
+		},
 	}
 
 	for _, tc := range tests {
@@ -218,6 +245,36 @@ func TestCalculateSize(t *testing.T) {
 			}
 		})
 	}
+}
+
+type customPureMapper struct {
+	traits.Mapper
+}
+
+type customSizerVal int
+
+func (c customSizerVal) Size() ref.Val {
+	return Int(c)
+}
+
+type customSizerPtr struct {
+	val int
+}
+
+func (c *customSizerPtr) Size() ref.Val {
+	return Int(c.val)
+}
+
+func newCustomSizerPtr(v int) *customSizerPtr {
+	return &customSizerPtr{val: v}
+}
+
+type customVisitorVal struct {
+	Val int
+}
+
+func (c customVisitorVal) AggregateSize(sizer AggregateSizer) uint32 {
+	return 100
 }
 
 func TestNativeObjCalculateSizeNil(t *testing.T) {
@@ -341,6 +398,66 @@ func TestSizeCalculatorOptions(t *testing.T) {
 		}
 		if got := calc.AggregateSize(m); got != math.MaxUint32 {
 			t.Errorf("AggregateSize for native nested map depth > 2 got %d, want MaxUint32", got)
+		}
+	})
+
+	t.Run("maxTraversal map limit", func(t *testing.T) {
+		calc := NewSizeCalculator(SizeCalculatorMaxTraversal(3))
+		m := NewRefValMap(adapter, map[ref.Val]ref.Val{
+			String("k1"): String("v1"),
+			String("k2"): String("v2"),
+		})
+		if got := calc.AggregateSize(m); got != math.MaxUint32 {
+			t.Errorf("AggregateSize for map traversal > 3 got %d, want MaxUint32", got)
+		}
+	})
+
+	t.Run("maxTraversal proto limit", func(t *testing.T) {
+		calc := NewSizeCalculator(SizeCalculatorMaxTraversal(2))
+		msg := &proto3pb.TestAllTypes{
+			SingleString: "hello",
+			SingleInt64:  42,
+		}
+		if got := calc.AggregateSize(msg); got != math.MaxUint32 {
+			t.Errorf("AggregateSize for proto traversal > 2 got %d, want MaxUint32", got)
+		}
+	})
+
+	t.Run("maxTraversal native struct limit", func(t *testing.T) {
+		calc := NewSizeCalculator(SizeCalculatorMaxTraversal(2))
+		s := struct{ A, B, C int }{A: 1, B: 2, C: 3}
+		if got := calc.AggregateSize(s); got != math.MaxUint32 {
+			t.Errorf("AggregateSize for native struct traversal > 2 got %d, want MaxUint32", got)
+		}
+	})
+
+	t.Run("maxTraversal native map limit", func(t *testing.T) {
+		calc := NewSizeCalculator(SizeCalculatorMaxTraversal(3))
+		m := map[string]int{"a": 1, "b": 2}
+		if got := calc.AggregateSize(m); got != math.MaxUint32 {
+			t.Errorf("AggregateSize for native map traversal > 3 got %d, want MaxUint32", got)
+		}
+	})
+
+	t.Run("maxTraversal native slice limit", func(t *testing.T) {
+		calc := NewSizeCalculator(SizeCalculatorMaxTraversal(3))
+		slice := []string{"a", "b", "c"}
+		if got := calc.AggregateSize(slice); got != math.MaxUint32 {
+			t.Errorf("AggregateSize for native slice traversal > 3 got %d, want MaxUint32", got)
+		}
+	})
+
+	t.Run("zero depth limit saturation", func(t *testing.T) {
+		calc := NewSizeCalculator(SizeCalculatorMaxDepth(0))
+		if got := calc.AggregateSize(Int(42)); got != math.MaxUint32 {
+			t.Errorf("AggregateSize with depth 0 got %d, want MaxUint32", got)
+		}
+	})
+
+	t.Run("zero traversal limit saturation", func(t *testing.T) {
+		calc := NewSizeCalculator(SizeCalculatorMaxTraversal(0))
+		if got := calc.AggregateSize(Int(42)); got != math.MaxUint32 {
+			t.Errorf("AggregateSize with traversal 0 got %d, want MaxUint32", got)
 		}
 	})
 }
@@ -570,6 +687,14 @@ func BenchmarkCalculateSizeScaled(b *testing.B) {
 				_ = calc.AggregateSize(customMap)
 			}
 		})
+		b.Run(fmt.Sprintf("Amortized/custom_pure_map/N=%d", size), func(b *testing.B) {
+			b.ReportAllocs()
+			calc := NewSizeCalculator()
+			pureMap := customPureMapper{Mapper: builtinMap}
+			for i := 0; i < b.N; i++ {
+				_ = calc.AggregateSize(pureMap)
+			}
+		})
 
 		// First-time / Uncached calculation
 		b.Run(fmt.Sprintf("FirstTime/builtin_list/N=%d", size), func(b *testing.B) {
@@ -601,6 +726,14 @@ func BenchmarkCalculateSizeScaled(b *testing.B) {
 			calc := NewSizeCalculator()
 			for i := 0; i < b.N; i++ {
 				m := interopFoldableMap{Mapper: NewRefValMap(adapter, mapEntries)}
+				_ = calc.AggregateSize(m)
+			}
+		})
+		b.Run(fmt.Sprintf("FirstTime/custom_pure_map/N=%d", size), func(b *testing.B) {
+			b.ReportAllocs()
+			calc := NewSizeCalculator()
+			for i := 0; i < b.N; i++ {
+				m := customPureMapper{Mapper: NewRefValMap(adapter, mapEntries)}
 				_ = calc.AggregateSize(m)
 			}
 		})

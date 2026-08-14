@@ -27,3 +27,17 @@ type AggregateSizeVisitor interface {
 	// AggregateSize returns the total count of nested atomic elements (capped at math.MaxUint32).
 	AggregateSize(sizer AggregateSizer) uint32
 }
+
+// Helper for computing aggregate sizes of traits.Foldable types.
+type foldableAggregateSizer struct {
+	sizer AggregateSizer
+	total uint32
+}
+
+// FoldEntry implements the traits.FoldEntry interface method and counts the aggregate size
+// keys and values.
+func (f *foldableAggregateSizer) FoldEntry(k, v any) bool {
+	f.total = safeAddUint32(f.total, f.sizer.AggregateSize(k))
+	f.total = safeAddUint32(f.total, f.sizer.AggregateSize(v))
+	return true
+}
