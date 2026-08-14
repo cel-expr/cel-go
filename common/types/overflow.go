@@ -436,10 +436,7 @@ func safeAddUint32(a, b uint32) uint32 {
 }
 
 func safeUint32FromInt(n int) uint32 {
-	if n < 0 {
-		return 0
-	}
-	if uint64(n) > math.MaxUint32 {
+	if n < 0 || uint64(n) > math.MaxUint32 {
 		return math.MaxUint32
 	}
 	return uint32(n)
