@@ -158,6 +158,7 @@ var (
 		expr         string
 		composed     string
 		composerOpts []ComposerOption
+		envOpts      []cel.EnvOption
 		outputType   *cel.Type
 	}{
 		{
@@ -230,6 +231,30 @@ var (
 		((now.getHours() < 24) ? optional.of(@index4 + "!!!") : optional.none()))],
 		(now.getHours() >= 20) ? @index5 : optional.of(@index3.format([@index0, @index2])))`,
 			outputType: cel.OptionalType(cel.StringType),
+		},
+		{
+			name:         "agent_tool_execution_governance",
+			composerOpts: []ComposerOption{ExpressionUnnestHeight(2)},
+			envOpts: []cel.EnvOption{
+				cel.Function("classifier.has_credit_card",
+					cel.Overload("classifier_has_credit_card", []*cel.Type{cel.DynType}, cel.BoolType,
+						cel.UnaryBinding(func(args ref.Val) ref.Val {
+							if m, ok := args.(traits.Mapper); ok {
+								return types.Bool(m.Contains(types.String("cc")) == types.True)
+							}
+							return types.False
+						}))),
+				cel.Function("classifier.has_email_or_phone",
+					cel.Overload("classifier_has_email_or_phone", []*cel.Type{cel.DynType}, cel.BoolType,
+						cel.UnaryBinding(func(args ref.Val) ref.Val {
+							if m, ok := args.(traits.Mapper); ok {
+								return types.Bool(m.Contains(types.String("email")) == types.True || m.Contains(types.String("phone")) == types.True)
+							}
+							return types.False
+						}))),
+			},
+			composed: `cel.@block([tool.is_mutation && request.env == "prod", tool.is_mutation ? ["REQUIRE_PEER_CONFIRMATION"] : [], classifier.has_email_or_phone(tool.call.args) ? ["REDACT_PII"] : [], tool.call.args.batch_size > 10000, tool.call.args.batch_size > 1000, tool.call.args.batch_size > 100, request.is_emergency ? ["REQUIRE_VP_APPROVAL"] : (@index0 ? ["REQUIRE_TECH_LEAD_2FA"] : @index1)], @index6 + ((classifier.has_credit_card(tool.call.args) ? ["REDACT_PCI"] : @index2) + (@index3 ? ["THROTTLE_TIER_3"] : (@index4 ? ["THROTTLE_TIER_2"] : (@index5 ? ["THROTTLE_TIER_1"] : [])))))`,
+			outputType: cel.ListType(cel.StringType),
 		},
 	}
 

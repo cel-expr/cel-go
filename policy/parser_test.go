@@ -148,32 +148,12 @@ rule:
 		{
 			txt: `
 rule:
-  aggregate:
-    - condition: "true"
-      output: "'foo'"`,
-			err: `ERROR: <input>:5:7: Rule aggregate requires 'emit' tag instead of 'output'
- |       output: "'foo'"
- | ......^`,
-		},
-		{
-			txt: `
-rule:
-  match:
-    - condition: "true"
-      emit: "'foo'"`,
-			err: `ERROR: <input>:5:7: Rule match requires 'output' tag instead of 'emit'
- |       emit: "'foo'"
- | ......^`,
-		},
-		{
-			txt: `
-rule:
   match:
     - condition: "true"
       output: "'foo'"
   aggregate:
     - condition: "true"
-      emit: "'bar'"`,
+      output: "'bar'"`,
 			err: `ERROR: <input>:6:3: Only one of 'match' or 'aggregate' may be set in a rule
  |   aggregate:
  | ..^`,
@@ -257,7 +237,7 @@ rule:
   match:
     - output: 'true'
   aggregate:
-    - emit: 'true'`,
+    - output: 'true'`,
 			err: `ERROR: <input>:6:3: Only one of 'match' or 'aggregate' may be set in a rule
  |   aggregate:
  | ..^`,
@@ -267,32 +247,12 @@ rule:
 name: test
 rule:
   aggregate:
-    - emit: 'true'
+    - output: 'true'
   match:
     - output: 'true'`,
 			err: `ERROR: <input>:6:3: Only one of 'match' or 'aggregate' may be set in a rule
  |   match:
  | ..^`,
-		},
-		{
-			txt: `
-name: test
-rule:
-  aggregate:
-    - output: 'true'`,
-			err: `ERROR: <input>:5:7: Rule aggregate requires 'emit' tag instead of 'output'
- |     - output: 'true'
- | ......^`,
-		},
-		{
-			txt: `
-name: test
-rule:
-  match:
-    - emit: 'true'`,
-			err: `ERROR: <input>:5:7: Rule match requires 'output' tag instead of 'emit'
- |     - emit: 'true'
- | ......^`,
 		},
 	}
 

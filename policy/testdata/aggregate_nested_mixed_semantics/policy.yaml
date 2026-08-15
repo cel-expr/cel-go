@@ -22,4 +22,4 @@ rule:
             rule:
               aggregate:
                 - condition: "true"
-                  emit: "'foo'"
+                  output: "'foo'"

@@ -274,16 +274,18 @@ func parseAndCompilePolicy(t testing.TB, name string, policySource string, envOp
 	return env, ast, iss
 }
 
-func newRunner(name, expr string, parseOpts []ParserOption, opts ...cel.EnvOption) *runner {
+func newRunner(name, expr string, parseOpts []ParserOption, envOpts ...cel.EnvOption) *runner {
 	return &runner{
 		name:      name,
 		parseOpts: parseOpts,
+		envOpts:   envOpts,
 		expr:      expr}
 }
 
 type runner struct {
 	name      string
 	parseOpts []ParserOption
+	envOpts   []cel.EnvOption
 	env       *cel.Env
 	expr      string
 	prg       cel.Program
@@ -305,6 +307,12 @@ func (r *runner) compileRule(t testing.TB) (*cel.Env, *CompiledRule, *cel.Issues
 		ext.Bindings())
 	if err != nil {
 		t.Fatalf("cel.NewEnv() failed: %v", err)
+	}
+	if len(r.envOpts) > 0 {
+		env, err = env.Extend(r.envOpts...)
+		if err != nil {
+			t.Fatalf("env.Extend() with env options failed: %v", err)
+		}
 	}
 	// Configure declarations
 	env, err = env.Extend(FromConfig(config))
@@ -621,9 +629,9 @@ func TestCompileYAMLPolicy_Aggregate(t *testing.T) {
 rule:
   aggregate:
     - condition: 'true'
-      emit: '"PII"'
+      output: '"PII"'
     - condition: 'true'
-      emit: '"CONFIDENTIAL"'`,
+      output: '"CONFIDENTIAL"'`,
 			expectedUnparsed: `["PII"] + ["CONFIDENTIAL"]`,
 			evals: []testEval{
 				{
@@ -643,9 +651,9 @@ rule:
       expression: '"CONFIDENTIAL"'
   aggregate:
     - condition: 'true'
-      emit: 'variables.val1'
+      output: 'variables.val1'
     - condition: 'true'
-      emit: 'variables.val2'`,
+      output: 'variables.val2'`,
 			expectedUnparsed: `cel.@block(["PII", "CONFIDENTIAL"], [@index0] + [@index1])`,
 			evals: []testEval{
 				{
@@ -663,11 +671,11 @@ rule:
       expression: "5"
   aggregate:
     - condition: "size(resource.payload) > variables.threshold"
-      emit: '"CSE1"'
+      output: '"CSE1"'
     - condition: "size(resource.payload) > variables.threshold"
-      emit: '"CSE2"'
+      output: '"CSE2"'
     - condition: 'true'
-      emit: '"ALWAYS"'`,
+      output: '"ALWAYS"'`,
 			envOpts: []cel.EnvOption{
 				cel.Variable("resource", cel.MapType(cel.StringType, cel.ListType(cel.IntType))),
 			},
@@ -705,7 +713,7 @@ rule:
           - condition: "true"
             output: "payload.filter(x, x > variables.min_val).exists(y, y % 2 == 0)"
     - condition: "true"
-      emit: "payload.all(x, x > 0)"`,
+      output: "payload.all(x, x > 0)"`,
 			envOpts: []cel.EnvOption{
 				cel.Variable("cond", cel.BoolType),
 				cel.Variable("payload", cel.ListType(cel.IntType)),
@@ -721,7 +729,7 @@ rule:
       rule:
         aggregate:
           - condition: 'true'
-            emit: "'foo'"`,
+            output: "'foo'"`,
 			wantErr: "nested aggregate rules are not allowed",
 		},
 		{
@@ -736,7 +744,7 @@ rule:
             rule:
               aggregate:
                 - condition: 'true'
-                  emit: "'foo'"`,
+                  output: "'foo'"`,
 			wantErr: "nested aggregate rules are not allowed",
 		},
 		{
@@ -748,7 +756,7 @@ rule:
       rule:
         aggregate:
           - condition: 'true'
-            emit: "'foo'"`,
+            output: "'foo'"`,
 			expectedUnparsed: `["foo"]`,
 		},
 	}
@@ -807,7 +815,7 @@ func TestCompiledRuleSemantic(t *testing.T) {
 rule:
   aggregate:
     - condition: 'true'
-      emit: "'foo'"`
+      output: "'foo'"`
 	policy := parsePolicySource(t, "aggregate_semantic", policySource)
 	env, err := cel.NewEnv()
 	if err != nil {
@@ -827,7 +835,7 @@ func TestCompileYAMLPolicy_ConditionAlwaysFalse(t *testing.T) {
 rule:
   aggregate:
     - condition: 'false'
-      emit: "'foo'"`
+      output: "'foo'"`
 	_, _, iss := parseAndCompilePolicy(t, "condition_always_false", policySource, nil, nil)
 	if iss.Err() == nil {
 		t.Fatalf("Compile() succeeded, wanted error")

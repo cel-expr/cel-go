@@ -180,7 +180,7 @@ func (opt *ruleComposerImpl) Optimize(ctx *cel.OptimizerContext, a *ast.AST) *as
 	return ctx.NewAST(blockExpr)
 }
 
-func (opt *ruleComposerImpl) optimizeRule(ctx *cel.OptimizerContext, r *CompiledRule, isAggregateParent bool) ast.Expr {
+func (opt *ruleComposerImpl) optimizeRule(ctx *cel.OptimizerContext, r *CompiledRule, asList bool) ast.Expr {
 	// Visitor to rewrite variables-prefixed identifiers with index names.
 	opt.enterScope()
 	defer opt.exitScope()
@@ -190,7 +190,7 @@ func (opt *ruleComposerImpl) optimizeRule(ctx *cel.OptimizerContext, r *Compiled
 	}
 
 	isAggregate := r.semantic == aggregate
-	returnList := isAggregateParent || isAggregate
+	returnList := isAggregate || asList
 
 	matches := r.Matches()
 	matchCount := len(matches)
@@ -214,11 +214,10 @@ func (opt *ruleComposerImpl) optimizeRule(ctx *cel.OptimizerContext, r *Compiled
 			// one.
 			out := ctx.CopyASTAndMetadata(m.Output().Expr().NativeRep())
 			if returnList {
-				outList := ctx.NewList([]ast.Expr{out}, []int32{})
-				currentStep = newNonOptionalCompositionStep(ctx, cond, outList)
-			} else {
-				currentStep = newNonOptionalCompositionStep(ctx, cond, out)
+				out = ctx.NewList([]ast.Expr{out}, []int32{})
 			}
+			currentStep = newNonOptionalCompositionStep(ctx, cond, out)
+
 		} else if m.NestedRule() != nil {
 			// If the match has a nested rule, then compute the rule and whether it has
 			// an optional return value.
@@ -238,6 +237,10 @@ func (opt *ruleComposerImpl) optimizeRule(ctx *cel.OptimizerContext, r *Compiled
 			} else {
 				currentStep = newNonOptionalCompositionStep(ctx, cond, nestedRule)
 			}
+		} else {
+			// Report an error for an unknown rule kind:
+			ctx.ReportErrorAtID(cond.ID(), "unknown match kind: %v", m.SourceID())
+			return nil
 		}
 
 		if isAggregate {
@@ -247,10 +250,8 @@ func (opt *ruleComposerImpl) optimizeRule(ctx *cel.OptimizerContext, r *Compiled
 		}
 	}
 
-	if output == nil {
-		if returnList {
-			output = newNonOptionalCompositionStep(ctx, ctx.NewLiteral(types.True), ctx.NewList([]ast.Expr{}, []int32{}))
-		}
+	if output == nil && returnList {
+		output = newNonOptionalCompositionStep(ctx, ctx.NewLiteral(types.True), ctx.NewList([]ast.Expr{}, []int32{}))
 	}
 
 	matchExpr := output.expr()

@@ -171,7 +171,7 @@ func TestRuleComposerUnnest(t *testing.T) {
 	for _, tst := range composerUnnestTests {
 		tc := tst
 		t.Run(tc.name, func(t *testing.T) {
-			r := newRunner(tc.name, tc.expr, []ParserOption{})
+			r := newRunner(tc.name, tc.expr, []ParserOption{}, tc.envOpts...)
 			env, rule, iss := r.compileRule(t)
 			if iss.Err() != nil {
 				t.Fatalf("CompileRule() failed: %v", iss.Err())
@@ -214,9 +214,16 @@ func verifySourceInfoTransfer(t *testing.T, compiledRule *CompiledRule, composed
 			ranges:  &dstRanges})
 	}
 	ast.PostOrderVisit(composed.NativeRep().Expr(), &collectRanges{sourceInfo: composed.NativeRep().SourceInfo(), ranges: &dstRanges})
+	for _, v := range compiledRule.variables {
+		check(v.expr)
+	}
 	for _, match := range compiledRule.matches {
 		check(match.cond)
-		check(match.output.expr)
+		if match.output != nil {
+			check(match.output.expr)
+		} else if match.nestedRule != nil {
+			verifySourceInfoTransfer(t, match.nestedRule, composed)
+		}
 	}
 }
 

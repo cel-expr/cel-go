@@ -25,6 +25,7 @@ import (
 	"github.com/google/cel-go/common/ast"
 )
 
+// SemanticType describes the evaluation semantic for a given policy block.
 type SemanticType int
 
 const (
@@ -853,7 +854,7 @@ func (p *parserImpl) ParseVariable(ctx ParserContext, policy *Policy, node *yaml
 	return p.parseVariableObject(ctx, policy, v, node)
 }
 
-func (p *parserImpl) parseVariableInline(ctx ParserContext, policy *Policy, v *Variable, node *yaml.Node) *Variable {
+func (p *parserImpl) parseVariableInline(ctx ParserContext, _ *Policy, v *Variable, node *yaml.Node) *Variable {
 	iterations := 0
 	p.RangeMap(node, func(key, val *yaml.Node) bool {
 		keyVal := ctx.NewString(key)
@@ -906,13 +907,6 @@ func (p *parserImpl) parseMatchInternal(ctx ParserContext, policy *Policy, r *Ru
 	if p.assertYAMLType(id, node, yamlMap) == nil || !p.checkMapValid(ctx, id, node) {
 		return m
 	}
-	ruleSem := firstMatch
-	if r != nil {
-		ruleSem = r.Semantic()
-	} else {
-		ruleSem = policy.Semantic()
-	}
-	isAggregate := ruleSem == aggregate
 	m.SetCondition(ValueString{ID: ctx.NextID(), Value: "true"})
 	p.RangeMap(node, func(key, val *yaml.Node) bool {
 		keyID := ctx.CollectMetadata(key)
@@ -920,12 +914,7 @@ func (p *parserImpl) parseMatchInternal(ctx ParserContext, policy *Policy, r *Ru
 		switch fieldName {
 		case "condition":
 			m.SetCondition(ctx.NewString(val))
-		case "output", "emit":
-			if fieldName == "output" && isAggregate {
-				p.ReportErrorAtID(keyID, "Rule aggregate requires 'emit' tag instead of 'output'")
-			} else if fieldName == "emit" && !isAggregate {
-				p.ReportErrorAtID(keyID, "Rule match requires 'output' tag instead of 'emit'")
-			}
+		case "output":
 			if m.HasRule() {
 				p.ReportErrorAtID(keyID, "only the rule or the output may be set")
 			}
