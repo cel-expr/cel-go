@@ -16,9 +16,9 @@ package interpreter
 
 import (
 	"errors"
-	"math"
 
 	"github.com/google/cel-go/common"
+	"github.com/google/cel-go/common/cost"
 	"github.com/google/cel-go/common/overloads"
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
@@ -254,21 +254,21 @@ func (c *CostTracker) ActualCost() uint64 {
 }
 
 func (c *CostTracker) costCall(call InterpretableCall, args []ref.Val, result ref.Val) uint64 {
-	var cost uint64
+	var total uint64
 	if len(c.overloadTrackers) != 0 {
 		if tracker, found := c.overloadTrackers[call.OverloadID()]; found {
 			callCost := tracker(args, result)
 			if callCost != nil {
-				cost = safeAdd(cost, *callCost)
-				return cost
+				total = cost.SafeAdd(total, *callCost)
+				return total
 			}
 		}
 	}
 	if c.Estimator != nil {
 		callCost := c.Estimator.CallCost(call.Function(), call.OverloadID(), args, result)
 		if callCost != nil {
-			cost = safeAdd(cost, *callCost)
-			return cost
+			total = cost.SafeAdd(total, *callCost)
+			return total
 		}
 	}
 	// if user didn't specify, the default way of calculating runtime cost would be used.
@@ -276,13 +276,13 @@ func (c *CostTracker) costCall(call InterpretableCall, args []ref.Val, result re
 	switch call.OverloadID() {
 	// O(n) functions
 	case overloads.StartsWithString, overloads.EndsWithString:
-		cost = safeAdd(cost, uint64(math.Ceil(float64(actualSize(args[1]))*common.StringTraversalCostFactor)))
+		total = cost.SafeAdd(total, cost.SafeMultiplyByFactor(actualSize(args[1]), common.StringTraversalCostFactor))
 	case overloads.StringToBytes, overloads.BytesToString, overloads.ExtQuoteString, overloads.ExtFormatString:
-		cost = safeAdd(cost, uint64(math.Ceil(float64(actualSize(args[0]))*common.StringTraversalCostFactor)))
+		total = cost.SafeAdd(total, cost.SafeMultiplyByFactor(actualSize(args[0]), common.StringTraversalCostFactor))
 	case overloads.InList:
 		// If a list is composed entirely of constant values this is O(1), but we don't account for that here.
 		// We just assume all list containment checks are O(n).
-		cost = safeAdd(cost, actualSize(args[1]))
+		total = cost.SafeAdd(total, actualSize(args[1]))
 	// O(min(m, n)) functions
 	case overloads.LessString, overloads.GreaterString, overloads.LessEqualsString, overloads.GreaterEqualsString,
 		overloads.LessBytes, overloads.GreaterBytes, overloads.LessEqualsBytes, overloads.GreaterEqualsBytes,
@@ -293,28 +293,29 @@ func (c *CostTracker) costCall(call InterpretableCall, args []ref.Val, result re
 		lhsSize := actualSize(args[0])
 		rhsSize := actualSize(args[1])
 		minSize := min(rhsSize, lhsSize)
-		cost = safeAdd(cost, uint64(math.Ceil(float64(minSize)*common.StringTraversalCostFactor)))
+		total = cost.SafeAdd(total, cost.SafeMultiplyByFactor(minSize, common.StringTraversalCostFactor))
 	// O(m+n) functions
 	case overloads.AddString, overloads.AddBytes:
 		// In the worst case scenario, we would need to reallocate a new backing store and copy both operands over.
-		cost = safeAdd(cost, uint64(math.Ceil(float64(actualSize(args[0])+actualSize(args[1]))*common.StringTraversalCostFactor)))
+		argSize := cost.SafeAdd(actualSize(args[0]), actualSize(args[1]))
+		total = cost.SafeAdd(total, cost.SafeMultiplyByFactor(argSize, common.StringTraversalCostFactor))
 	// O(nm) functions
 	case overloads.Matches, overloads.MatchesString:
 		// https://swtch.com/~rsc/regexp/regexp1.html applies to RE2 implementation supported by CEL
 		// Add one to string length for purposes of cost calculation to prevent product of string and regex to be 0
 		// in case where string is empty but regex is still expensive.
-		strCost := uint64(math.Ceil((1.0 + float64(actualSize(args[0]))) * common.StringTraversalCostFactor))
+		strCost := cost.SafeMultiplyByFactor(cost.SafeAdd(1, actualSize(args[0])), common.StringTraversalCostFactor)
 		// We don't know how many expressions are in the regex, just the string length (a huge
 		// improvement here would be to somehow get a count the number of expressions in the regex or
 		// how many states are in the regex state machine and use that to measure regex cost).
 		// For now, we're making a guess that each expression in a regex is typically at least 4 chars
 		// in length.
-		regexCost := uint64(math.Ceil(float64(actualSize(args[1])) * common.RegexStringLengthCostFactor))
-		cost = safeAdd(cost, strCost*regexCost)
+		regexCost := cost.SafeMultiplyByFactor(actualSize(args[1]), common.RegexStringLengthCostFactor)
+		total = cost.SafeAdd(total, cost.SafeMultiply(strCost, regexCost))
 	case overloads.ContainsString:
-		strCost := uint64(math.Ceil(float64(actualSize(args[0])) * common.StringTraversalCostFactor))
-		substrCost := uint64(math.Ceil(float64(actualSize(args[1])) * common.StringTraversalCostFactor))
-		cost = safeAdd(cost, strCost*substrCost)
+		strCost := cost.SafeMultiplyByFactor(actualSize(args[0]), common.StringTraversalCostFactor)
+		substrCost := cost.SafeMultiplyByFactor(actualSize(args[1]), common.StringTraversalCostFactor)
+		total = cost.SafeAdd(total, cost.SafeMultiply(strCost, substrCost))
 
 	default:
 		// The following operations are assumed to have O(1) complexity.
@@ -324,10 +325,10 @@ func (c *CostTracker) costCall(call InterpretableCall, args []ref.Val, result re
 		// - Computing the size of strings, byte sequences, lists and maps.
 		// - Logical operations and all operators on fixed width scalars (comparisons, equality)
 		// - Any functions that don't have a declared cost either here or in provided ActualCostEstimator.
-		cost = safeAdd(cost, 1)
+		total = cost.SafeAdd(total, 1)
 
 	}
-	return cost
+	return total
 }
 
 // actualSize returns the size of the value for all traits.Sizer values, a fixed size for all proto-based
@@ -394,22 +395,4 @@ argloop:
 		return nil, false
 	}
 	return result, true
-}
-
-func safeAdd(x, y uint64, rest ...uint64) uint64 {
-	if y > 0 && x > math.MaxUint64-y {
-		return math.MaxUint64
-	}
-	next := x + y
-	if len(rest) == 0 {
-		return next
-	}
-	return safeAdd(next, rest[0], rest[1:]...)
-}
-
-func safeMul(x, y uint64) uint64 {
-	if y != 0 && x > math.MaxUint64/y {
-		return math.MaxUint64
-	}
-	return x * y
 }

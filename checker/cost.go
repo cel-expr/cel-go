@@ -19,6 +19,7 @@ import (
 
 	"github.com/google/cel-go/common"
 	"github.com/google/cel-go/common/ast"
+	"github.com/google/cel-go/common/cost"
 	"github.com/google/cel-go/common/overloads"
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/parser"
@@ -115,8 +116,8 @@ func FixedSizeEstimate(size uint64) SizeEstimate {
 // If add would result in an uint64 overflow, the result is math.MaxUint64.
 func (se SizeEstimate) Add(sizeEstimate SizeEstimate) SizeEstimate {
 	return SizeEstimate{
-		addUint64NoOverflow(se.Min, sizeEstimate.Min),
-		addUint64NoOverflow(se.Max, sizeEstimate.Max),
+		cost.SafeAdd(se.Min, sizeEstimate.Min),
+		cost.SafeAdd(se.Max, sizeEstimate.Max),
 	}
 }
 
@@ -124,8 +125,8 @@ func (se SizeEstimate) Add(sizeEstimate SizeEstimate) SizeEstimate {
 // If multiply would result in an uint64 overflow, the result is math.MaxUint64.
 func (se SizeEstimate) Multiply(sizeEstimate SizeEstimate) SizeEstimate {
 	return SizeEstimate{
-		multiplyUint64NoOverflow(se.Min, sizeEstimate.Min),
-		multiplyUint64NoOverflow(se.Max, sizeEstimate.Max),
+		cost.SafeMultiply(se.Min, sizeEstimate.Min),
+		cost.SafeMultiply(se.Max, sizeEstimate.Max),
 	}
 }
 
@@ -133,17 +134,17 @@ func (se SizeEstimate) Multiply(sizeEstimate SizeEstimate) SizeEstimate {
 // nearest integer of the result, rounded up.
 func (se SizeEstimate) MultiplyByCostFactor(costPerUnit float64) CostEstimate {
 	return CostEstimate{
-		multiplyByCostFactor(se.Min, costPerUnit),
-		multiplyByCostFactor(se.Max, costPerUnit),
+		cost.SafeMultiplyByFactor(se.Min, costPerUnit),
+		cost.SafeMultiplyByFactor(se.Max, costPerUnit),
 	}
 }
 
 // MultiplyByCost multiplies by the cost and returns the product.
 // If multiply would result in an uint64 overflow, the result is math.MaxUint64.
-func (se SizeEstimate) MultiplyByCost(cost CostEstimate) CostEstimate {
+func (se SizeEstimate) MultiplyByCost(estimate CostEstimate) CostEstimate {
 	return CostEstimate{
-		multiplyUint64NoOverflow(se.Min, cost.Min),
-		multiplyUint64NoOverflow(se.Max, cost.Max),
+		cost.SafeMultiply(se.Min, estimate.Min),
+		cost.SafeMultiply(se.Max, estimate.Max),
 	}
 }
 
@@ -176,25 +177,25 @@ func UnknownCostEstimate() CostEstimate {
 }
 
 // FixedCostEstimate returns a cost with a fixed min and max range.
-func FixedCostEstimate(cost uint64) CostEstimate {
-	return CostEstimate{Min: cost, Max: cost}
+func FixedCostEstimate(fixedCost uint64) CostEstimate {
+	return CostEstimate{Min: fixedCost, Max: fixedCost}
 }
 
 // Add adds the costs and returns the sum.
 // If add would result in an uint64 overflow for the min or max, the value is set to math.MaxUint64.
-func (ce CostEstimate) Add(cost CostEstimate) CostEstimate {
+func (ce CostEstimate) Add(estimate CostEstimate) CostEstimate {
 	return CostEstimate{
-		Min: addUint64NoOverflow(ce.Min, cost.Min),
-		Max: addUint64NoOverflow(ce.Max, cost.Max),
+		Min: cost.SafeAdd(ce.Min, estimate.Min),
+		Max: cost.SafeAdd(ce.Max, estimate.Max),
 	}
 }
 
 // Multiply multiplies by the cost and returns the product.
 // If multiply would result in an uint64 overflow, the result is math.MaxUint64.
-func (ce CostEstimate) Multiply(cost CostEstimate) CostEstimate {
+func (ce CostEstimate) Multiply(estimate CostEstimate) CostEstimate {
 	return CostEstimate{
-		Min: multiplyUint64NoOverflow(ce.Min, cost.Min),
-		Max: multiplyUint64NoOverflow(ce.Max, cost.Max),
+		Min: cost.SafeMultiply(ce.Min, estimate.Min),
+		Max: cost.SafeMultiply(ce.Max, estimate.Max),
 	}
 }
 
@@ -202,8 +203,8 @@ func (ce CostEstimate) Multiply(cost CostEstimate) CostEstimate {
 // nearest integer of the result, rounded up.
 func (ce CostEstimate) MultiplyByCostFactor(costPerUnit float64) CostEstimate {
 	return CostEstimate{
-		Min: multiplyByCostFactor(ce.Min, costPerUnit),
-		Max: multiplyByCostFactor(ce.Max, costPerUnit),
+		Min: cost.SafeMultiplyByFactor(ce.Min, costPerUnit),
+		Max: cost.SafeMultiplyByFactor(ce.Max, costPerUnit),
 	}
 }
 
@@ -217,37 +218,6 @@ func (ce CostEstimate) Union(size CostEstimate) CostEstimate {
 		result.Max = size.Max
 	}
 	return result
-}
-
-// addUint64NoOverflow adds non-negative ints. If the result is exceeds math.MaxUint64, math.MaxUint64
-// is returned.
-func addUint64NoOverflow(x, y uint64) uint64 {
-	if y > 0 && x > math.MaxUint64-y {
-		return math.MaxUint64
-	}
-	return x + y
-}
-
-// multiplyUint64NoOverflow multiplies non-negative ints. If the result is exceeds math.MaxUint64, math.MaxUint64
-// is returned.
-func multiplyUint64NoOverflow(x, y uint64) uint64 {
-	if y != 0 && x > math.MaxUint64/y {
-		return math.MaxUint64
-	}
-	return x * y
-}
-
-// multiplyByFactor multiplies an integer by a cost factor float and returns the nearest integer value, rounded up.
-func multiplyByCostFactor(x uint64, y float64) uint64 {
-	xFloat := float64(x)
-	if xFloat > 0 && y > 0 && xFloat > math.MaxUint64/y {
-		return math.MaxUint64
-	}
-	ceil := math.Ceil(xFloat * y)
-	if ceil >= doubleTwoTo64 {
-		return math.MaxUint64
-	}
-	return uint64(ceil)
 }
 
 // CostOption configures flags which affect cost computations.
@@ -465,32 +435,32 @@ func (c *coster) cost(e ast.Expr) CostEstimate {
 	if e == nil {
 		return CostEstimate{}
 	}
-	var cost CostEstimate
+	var estimate CostEstimate
 	switch e.Kind() {
 	case ast.LiteralKind:
-		cost = constCost
+		estimate = constCost
 	case ast.IdentKind:
-		cost = c.costIdent(e)
+		estimate = c.costIdent(e)
 	case ast.SelectKind:
-		cost = c.costSelect(e)
+		estimate = c.costSelect(e)
 	case ast.CallKind:
-		cost = c.costCall(e)
+		estimate = c.costCall(e)
 	case ast.ListKind:
-		cost = c.costCreateList(e)
+		estimate = c.costCreateList(e)
 	case ast.MapKind:
-		cost = c.costCreateMap(e)
+		estimate = c.costCreateMap(e)
 	case ast.StructKind:
-		cost = c.costCreateStruct(e)
+		estimate = c.costCreateStruct(e)
 	case ast.ComprehensionKind:
 		if c.isBind(e) {
-			cost = c.costBind(e)
+			estimate = c.costBind(e)
 		} else {
-			cost = c.costComprehension(e)
+			estimate = c.costComprehension(e)
 		}
 	default:
 		return CostEstimate{}
 	}
-	return cost
+	return estimate
 }
 
 func (c *coster) costIdent(e ast.Expr) CostEstimate {
@@ -1013,14 +983,14 @@ func computeExprSize(expr ast.Expr) *SizeEstimate {
 	default:
 		return nil
 	}
-	cost := FixedSizeEstimate(v)
-	return &cost
+	size := FixedSizeEstimate(v)
+	return &size
 }
 
 func computeTypeSize(t *types.Type) *SizeEstimate {
 	if isScalar(t) {
-		cost := FixedSizeEstimate(1)
-		return &cost
+		size := FixedSizeEstimate(1)
+		return &size
 	}
 	return nil
 }
@@ -1041,8 +1011,6 @@ func isScalar(t *types.Type) bool {
 }
 
 var (
-	doubleTwoTo64 = math.Ldexp(1.0, 64)
-
 	unknownSizeEstimate = SizeEstimate{Min: 0, Max: math.MaxUint64}
 	unknownCostEstimate = unknownSizeEstimate.MultiplyByCostFactor(1)
 

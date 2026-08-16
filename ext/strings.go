@@ -30,6 +30,7 @@ import (
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/checker"
 	"github.com/google/cel-go/common"
+	"github.com/google/cel-go/common/cost"
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/google/cel-go/common/types/traits"
@@ -972,7 +973,7 @@ func estimateStringReplaceCost(estimator checker.CostEstimator, target *checker.
 	searchCost := atLeastOne(targetSize).Multiply(needleSize).MultiplyByCostFactor(stringCostFactor)
 
 	replacementSize := estimateSize(estimator, args[1]).Add(fixedSizeEstimate(1))
-	allReplacedSize := safeMul(safeAdd(targetSize.Max, 1), replacementSize.Max)
+	allReplacedSize := cost.SafeMultiply(cost.SafeAdd(targetSize.Max, 1), replacementSize.Max)
 	resultMinSize := targetSize.Min
 	if resultMinSize > replacementSize.Min {
 		resultMinSize = replacementSize.Min
@@ -1017,10 +1018,10 @@ func estimateStringJoinCost(estimator checker.CostEstimator, target *checker.Ast
 	traversalCost := targetSize.Add(fixedSizeEstimate(1)).MultiplyByCostFactor(stringCostFactor)
 	// Result size: sum of element sizes + (n-1) * separator size.
 	// Worst case estimate: use list size * max element size + list size * separator size.
-	maxResultSize := safeAdd(safeMul(targetSize.Max, (safeAdd(1, sepSize.Max))), sepSize.Max)
+	maxResultSize := cost.SafeAdd(cost.SafeMultiply(targetSize.Max, cost.SafeAdd(1, sepSize.Max)), sepSize.Max)
 	resultSize := rangedSizeEstimate(0, maxResultSize)
-	cost := traversalCost.Add(resultSize.MultiplyByCostFactor(1)).Add(callCostEstimate)
-	return callEstimate(cost, &resultSize)
+	estimate := traversalCost.Add(resultSize.MultiplyByCostFactor(1)).Add(callCostEstimate)
+	return callEstimate(estimate, &resultSize)
 }
 
 // Runtime cost tracking functions for string extensions.
@@ -1030,24 +1031,23 @@ func estimateStringJoinCost(estimator checker.CostEstimator, target *checker.Ast
 
 // trackStringCharAtCost tracks runtime cost for O(n) string operations.
 func trackStringCharAtCost(args []ref.Val, result ref.Val) *uint64 {
-	size := float64(actualSize(args[0])) * stringCostFactor
-	cost := safeAdd(callCost, uint64(math.Ceil(size)), 1)
-	return &cost
+	total := cost.SafeAdd(callCost, cost.SafeMultiplyByFactor(actualSize(args[0]), stringCostFactor), 1)
+	return &total
 }
 
 // trackStringTransformCost tracks runtime cost for O(n) string operations.
 func trackStringTransformCost(args []ref.Val, result ref.Val) *uint64 {
-	transformCost := math.Ceil(float64(actualSize(args[0])) * stringCostFactor)
+	transformCost := cost.SafeMultiplyByFactor(actualSize(args[0]), stringCostFactor)
 	resultSize := actualSize(result)
-	cost := safeAdd(callCost, uint64(transformCost), resultSize)
-	return &cost
+	total := cost.SafeAdd(callCost, transformCost, resultSize)
+	return &total
 }
 
 // trackStringSearchCost tracks runtime cost for O(n*m) string search operations.
 func trackStringSearchCost(args []ref.Val, _ ref.Val) *uint64 {
-	searchCost := float64(actualSize(args[0])*actualSize(args[1])) * stringCostFactor
-	cost := safeAdd(uint64(math.Ceil(searchCost)), callCost)
-	return &cost
+	searchSize := cost.SafeMultiply(actualSize(args[0]), actualSize(args[1]))
+	total := cost.SafeAdd(cost.SafeMultiplyByFactor(searchSize, stringCostFactor), callCost)
+	return &total
 }
 
 // trackStringReplaceCost tracks runtime cost for string replace operations,
@@ -1061,24 +1061,24 @@ func trackStringReplaceCost(args []ref.Val, result ref.Val) *uint64 {
 	if needleSize == 0 {
 		needleSize = 1
 	}
-	searchCost := uint64(math.Ceil(float64(targetSize*needleSize) * stringCostFactor))
-	cost := safeAdd(callCost, searchCost, actualSize(result))
-	return &cost
+	searchCost := cost.SafeMultiplyByFactor(cost.SafeMultiply(targetSize, needleSize), stringCostFactor)
+	total := cost.SafeAdd(callCost, searchCost, actualSize(result))
+	return &total
 }
 
 // trackStringSplitCost tracks runtime cost for string split operations,
 // accounting for traversal and list allocation.
 func trackStringSplitCost(args []ref.Val, result ref.Val) *uint64 {
-	traversalCost := float64(safeAdd(actualSize(args[0]), 1)) * stringCostFactor
+	traversalCost := cost.SafeMultiplyByFactor(cost.SafeAdd(actualSize(args[0]), 1), stringCostFactor)
 	resultSize := actualSize(result)
-	cost := safeAdd(callCost, uint64(math.Ceil(traversalCost)), resultSize, common.ListCreateBaseCost)
-	return &cost
+	total := cost.SafeAdd(callCost, traversalCost, resultSize, common.ListCreateBaseCost)
+	return &total
 }
 
 // trackStringJoinCost tracks runtime cost for string join operations,
 // accounting for traversal and the size of the result.
 func trackStringJoinCost(args []ref.Val, result ref.Val) *uint64 {
-	traversalCost := float64(safeAdd(actualSize(args[0]), 1)) * stringCostFactor
-	cost := safeAdd(callCost, uint64(math.Ceil(traversalCost)), actualSize(result))
-	return &cost
+	traversalCost := cost.SafeMultiplyByFactor(cost.SafeAdd(actualSize(args[0]), 1), stringCostFactor)
+	total := cost.SafeAdd(callCost, traversalCost, actualSize(result))
+	return &total
 }

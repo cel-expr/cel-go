@@ -31,6 +31,7 @@ go_library(
         "//checker:go_default_library",
         "//common:go_default_library",
         "//common/ast:go_default_library",
+        "//common/cost:go_default_library",
         "//common/decls:go_default_library",
         "//common/env:go_default_library",
         "//common/operators:go_default_library",

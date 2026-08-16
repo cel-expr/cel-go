@@ -25,6 +25,7 @@ go_library(
         "//common:go_default_library",
         "//common/ast:go_default_library",
         "//common/containers:go_default_library",
+        "//common/cost:go_default_library",
         "//common/debug:go_default_library",
         "//common/decls:go_default_library",
         "//common/operators:go_default_library",
