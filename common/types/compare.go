@@ -16,10 +16,16 @@ package types
 
 import (
 	"math"
+	"math/big"
 
 	"github.com/google/cel-go/common/types/ref"
 )
 
+// compareDoubleInt compares a CEL double and int value for ordering purposes.
+//
+// Direct conversion of Int to float64 loses precision for integer values
+// outside the safe integer range of float64 (i.e., abs(i) > 2^53). Using
+// math/big.Float ensures an exact comparison without rounding errors.
 func compareDoubleInt(d Double, i Int) Int {
 	if d < math.MinInt64 {
 		return IntNegOne
@@ -27,13 +33,20 @@ func compareDoubleInt(d Double, i Int) Int {
 	if d > math.MaxInt64 {
 		return IntOne
 	}
-	return compareDouble(d, Double(i))
+	bf := new(big.Float).SetFloat64(float64(d))
+	bi := new(big.Float).SetInt64(int64(i))
+	return Int(bf.Cmp(bi))
 }
 
 func compareIntDouble(i Int, d Double) Int {
 	return -compareDoubleInt(d, i)
 }
 
+// compareDoubleUint compares a CEL double and uint value for ordering purposes.
+//
+// Direct conversion of Uint to float64 loses precision for values outside
+// the safe integer range of float64 (i.e., u > 2^53). Using math/big.Float
+// ensures an exact comparison without rounding errors.
 func compareDoubleUint(d Double, u Uint) Int {
 	if d < 0 {
 		return IntNegOne
@@ -41,7 +54,9 @@ func compareDoubleUint(d Double, u Uint) Int {
 	if d > math.MaxUint64 {
 		return IntOne
 	}
-	return compareDouble(d, Double(u))
+	bf := new(big.Float).SetFloat64(float64(d))
+	bu := new(big.Float).SetUint64(uint64(u))
+	return Int(bf.Cmp(bu))
 }
 
 func compareUintDouble(u Uint, d Double) Int {
