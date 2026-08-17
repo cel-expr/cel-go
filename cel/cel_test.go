@@ -1683,6 +1683,64 @@ func TestVariadicLogicalOperators(t *testing.T) {
 	}
 }
 
+func TestCostTrackingWithStateTracking(t *testing.T) {
+	// Cost tracking and state tracking install separate observers. Every observer has to see
+	// every evaluation step, whichever combination of them is configured.
+	env := testEnv(t, Variable("a", StringType))
+	ast, iss := env.Compile(`a.startsWith("x") && a.contains("yz")`)
+	if iss.Err() != nil {
+		t.Fatalf("env.Compile() failed: %v", iss.Err())
+	}
+	baseline, _ := evalCostAndState(t, env, ast, CostTracking(nil))
+	if baseline == 0 {
+		t.Fatalf("cost tracking alone reported a cost of 0")
+	}
+	tests := []struct {
+		name       string
+		opts       []ProgramOption
+		wantState  bool
+		wantEqCost bool
+	}{
+		{name: "cost", opts: []ProgramOption{CostTracking(nil)}, wantEqCost: true},
+		{name: "cost and state", opts: []ProgramOption{CostTracking(nil), EvalOptions(OptTrackState)},
+			wantState: true, wantEqCost: true},
+		{name: "cost and exhaustive", opts: []ProgramOption{CostTracking(nil), EvalOptions(OptExhaustiveEval)},
+			wantState: true, wantEqCost: true},
+	}
+	for _, tst := range tests {
+		tc := tst
+		t.Run(tc.name, func(t *testing.T) {
+			cost, hasState := evalCostAndState(t, env, ast, tc.opts...)
+			if tc.wantEqCost && cost != baseline {
+				t.Errorf("actual cost got %d, wanted %d", cost, baseline)
+			}
+			if hasState != tc.wantState {
+				t.Errorf("state tracked got %t, wanted %t", hasState, tc.wantState)
+			}
+		})
+	}
+}
+
+// evalCostAndState evaluates the ast and reports the tracked cost along with whether evaluation
+// state was recorded.
+func evalCostAndState(t *testing.T, env *Env, ast *Ast, opts ...ProgramOption) (uint64, bool) {
+	t.Helper()
+	prg, err := env.Program(ast, opts...)
+	if err != nil {
+		t.Fatalf("env.Program() failed: %v", err)
+	}
+	_, det, err := prg.Eval(map[string]any{"a": "xyz-abcdefghij"})
+	if err != nil {
+		t.Fatalf("prg.Eval() failed: %v", err)
+	}
+	cost := det.ActualCost()
+	if cost == nil {
+		t.Fatalf("det.ActualCost() returned nil")
+	}
+	state := det.State()
+	return *cost, state != nil && len(state.IDs()) != 0
+}
+
 func TestParseError(t *testing.T) {
 	env := testEnv(t)
 	_, iss := env.Parse("invalid & logical_and")

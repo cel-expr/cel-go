@@ -101,7 +101,6 @@ func EvalStateObserver(opts ...evalStateOption) PlannerOption {
 			return nil, errors.New("eval state factory not configured")
 		}
 		p.observers = append(p.observers, et)
-		p.decorators = append(p.decorators, decObserveEval(et.Observe))
 		return p, nil
 	}
 }

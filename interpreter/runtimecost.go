@@ -57,7 +57,6 @@ func CostObserver(opts ...costTrackPlanOption) PlannerOption {
 			return nil, errors.New("cost tracker factory not configured")
 		}
 		p.observers = append(p.observers, ct)
-		p.decorators = append(p.decorators, decObserveEval(ct.Observe))
 		return p, nil
 	}
 }
