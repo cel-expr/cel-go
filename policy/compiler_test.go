@@ -597,7 +597,9 @@ func exprLinesFromPolicy(policy *Policy) map[int]bool {
 			addExpectedLines(v.Expression())
 		}
 		for _, m := range r.Matches() {
-			addExpectedLines(m.Condition())
+			if !strings.HasPrefix(m.Condition().Value, "true") {
+				addExpectedLines(m.Condition())
+			}
 			if m.HasOutput() {
 				addExpectedLines(m.Output())
 			}

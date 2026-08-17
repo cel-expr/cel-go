@@ -194,13 +194,8 @@ func (opt *ruleComposerImpl) optimizeRule(ctx *cel.OptimizerContext, r *Compiled
 
 	matches := r.Matches()
 	matchCount := len(matches)
-	var output compositionStep = nil
-	// If the rule is non-aggregate and has an optional output, the last result in the ternary should return
-	// `optional.none`. This output is implicit and created here to reflect the desired
-	// last possible output of this type of rule.
-	if !returnList && r.HasOptionalOutput() {
-		output = newOptionalCompositionStep(ctx, ctx.NewLiteral(types.True), ctx.NewCall("optional.none"))
-	}
+	output := opt.createBaseStep(ctx, returnList, r.HasOptionalOutput())
+
 	// Build the rule subgraph.
 	for i := matchCount - 1; i >= 0; i-- {
 		m := matches[i]
@@ -231,8 +226,7 @@ func (opt *ruleComposerImpl) optimizeRule(ctx *cel.OptimizerContext, r *Compiled
 			//   though it may be wrapped into optional.of(...) if the outer rule produces optional output.
 			child := m.NestedRule()
 			nestedRule := opt.optimizeRule(ctx, child, returnList)
-			nestedHasOptional := !returnList && child.HasOptionalOutput()
-			if nestedHasOptional {
+			if child.HasOptionalOutput() {
 				currentStep = newOptionalCompositionStep(ctx, cond, nestedRule)
 			} else {
 				currentStep = newNonOptionalCompositionStep(ctx, cond, nestedRule)
@@ -250,15 +244,21 @@ func (opt *ruleComposerImpl) optimizeRule(ctx *cel.OptimizerContext, r *Compiled
 		}
 	}
 
-	if output == nil && returnList {
-		output = newNonOptionalCompositionStep(ctx, ctx.NewLiteral(types.True), ctx.NewList([]ast.Expr{}, []int32{}))
-	}
-
 	matchExpr := output.expr()
 	identVisitor := opt.rewriteVariableName(ctx)
 	ast.PostOrderVisit(matchExpr, identVisitor)
 
 	return matchExpr
+}
+
+func (opt *ruleComposerImpl) createBaseStep(ctx *cel.OptimizerContext, returnList, hasOptionalOutput bool) compositionStep {
+	if returnList {
+		return newNonOptionalCompositionStep(ctx, ctx.NewLiteral(types.True), ctx.NewList([]ast.Expr{}, []int32{}))
+	}
+	if hasOptionalOutput {
+		return newOptionalCompositionStep(ctx, ctx.NewLiteral(types.True), ctx.NewCall("optional.none"))
+	}
+	return nil
 }
 
 func (opt *ruleComposerImpl) combineAggregate(ctx *cel.OptimizerContext, step, accumulatedStep compositionStep) compositionStep {
@@ -271,7 +271,8 @@ func (opt *ruleComposerImpl) combineAggregate(ctx *cel.OptimizerContext, step, a
 	} else {
 		conditionalListPart = currentListPart
 	}
-	if accumulatedStep == nil {
+
+	if accumulatedStep.expr().Kind() == ast.ListKind && len(accumulatedStep.expr().AsList().Elements()) == 0 {
 		return newNonOptionalCompositionStep(ctx, trueCondition, conditionalListPart)
 	}
 	concatenated := ctx.NewCall(operators.Add, conditionalListPart, accumulatedStep.expr())
@@ -540,17 +541,12 @@ func (s nonOptionalCompositionStep) combine(step compositionStep) compositionSte
 	if !s.isConditional() {
 		return s
 	}
-	stepExpr := step.expr()
-	if step.isConditional() {
-		emptyList := ctx.NewList([]ast.Expr{}, []int32{})
-		stepExpr = ctx.NewCall(operators.Conditional, step.condition(), step.expr(), emptyList)
-	}
 	return newNonOptionalCompositionStep(ctx,
 		trueCondition,
 		ctx.NewCall(operators.Conditional,
 			s.condition(),
 			s.expr(),
-			stepExpr))
+			step.expr()))
 }
 
 // newOptionalCompositionStep returns an output step with an optional policy output.
