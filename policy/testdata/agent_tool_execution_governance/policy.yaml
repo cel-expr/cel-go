@@ -28,9 +28,9 @@ rule:
     # Dimension 2: Data Redaction (First-Match Specificity)
     - rule:
         match:
-          - condition: "classifier.has_credit_card(tool.call.args)"
+          - condition: "hasCreditCard(tool.call.args)"
             output: "'REDACT_PCI'"
-          - condition: "classifier.has_email_or_phone(tool.call.args)"
+          - condition: "hasEmailOrPhone(tool.call.args)"
             output: "'REDACT_PII'"
 
     # Dimension 3: Rate Limiting (First-Match Threshold Ladder)

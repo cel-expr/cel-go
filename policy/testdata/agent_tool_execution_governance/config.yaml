@@ -26,16 +26,16 @@ variables:
       - type_name: "string"
       - type_name: "dyn"
 functions:
-  - name: "classifier.has_credit_card"
+  - name: "hasCreditCard"
     overloads:
-      - id: "classifier_has_credit_card"
+      - id: "hasCreditCard"
         args:
           - type_name: "dyn"
         return:
           type_name: "bool"
-  - name: "classifier.has_email_or_phone"
+  - name: "hasEmailOrPhone"
     overloads:
-      - id: "classifier_has_email_or_phone"
+      - id: "hasEmailOrPhone"
         args:
           - type_name: "dyn"
         return:
