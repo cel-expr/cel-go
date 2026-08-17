@@ -19,6 +19,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"unicode"
 
 	"google.golang.org/protobuf/proto"
@@ -142,7 +143,12 @@ type baseMap struct {
 	// value is the native Go value upon which the map type operators.
 	value any
 
-	size    int
+	size int
+
+	// aggSize memoizes the aggregate size computed by the first completed sizing of this
+	// map. Accessed atomically since immutable maps may be shared across concurrent
+	// evaluations; zero means not yet computed. See the SizeCalculator documentation for
+	// the memoization contract.
 	aggSize uint32
 }
 
@@ -305,12 +311,14 @@ func (m *baseMap) Size() ref.Val {
 
 // AggregateSize implements the AggregateSizeVisitor interface method.
 func (m *baseMap) AggregateSize(sizer AggregateSizer) uint32 {
-	if m.aggSize != 0 {
-		return m.aggSize
+	if sz := atomic.LoadUint32(&m.aggSize); sz != 0 {
+		return sz
 	}
 	f := foldableAggregateSizer{sizer: sizer, total: 1}
 	m.Fold(&f)
-	m.aggSize = f.total
+	if cacheableAggregateSize(sizer) {
+		atomic.StoreUint32(&m.aggSize, f.total)
+	}
 	return f.total
 }
 
@@ -392,7 +400,7 @@ func (m *mutableMap) Insert(k, v ref.Val) ref.Val {
 	}
 	m.mutableValues[k] = v
 	m.size++
-	m.aggSize = 0
+	atomic.StoreUint32(&m.aggSize, 0)
 	return m
 }
 

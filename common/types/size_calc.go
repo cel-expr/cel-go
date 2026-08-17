@@ -66,6 +66,15 @@ func SizeCalculatorStringUnitLength(length int) SizeCalculatorOption {
 }
 
 // SizeCalculator calculates the recursive element size of values.
+//
+// Aggregate values may memoize their computed size on first calculation as an optimization
+// for repeated sizing of shared structures. The memoized size reflects the configuration of
+// the calculator which first sized the value; hosts requiring differently configured
+// calculators, e.g. distinct depth or traversal limits, should not share value instances
+// across them. Memoized totals are also a snapshot of the value's contents at first sizing:
+// hosts which mutate data underlying a sized aggregate, e.g. a proto message held as a list
+// element, will observe the total computed before the mutation. Sizes computed from
+// calculations aborted at the depth or traversal limits are never memoized.
 type SizeCalculator struct {
 	version          int
 	maxDepth         int
@@ -96,6 +105,7 @@ type sizeContext struct {
 	calc           *SizeCalculator
 	depth          int
 	traversalCount *int
+	limitExceeded  *bool
 }
 
 func (c sizeContext) childContext() sizeContext {
@@ -106,21 +116,67 @@ func (c sizeContext) childContext() sizeContext {
 func (c sizeContext) visitNode() bool {
 	*c.traversalCount++
 	if *c.traversalCount > c.calc.maxTraversal || c.depth > c.calc.maxDepth {
+		*c.limitExceeded = true
 		return false
 	}
 	return true
 }
 
+// aggregateSizeStatus exposes whether the in-flight size computation has exceeded the
+// calculator's depth or traversal limits.
+type aggregateSizeStatus interface {
+	aggregateSizeLimitExceeded() bool
+}
+
+// aggregateSizeLimitExceeded implements the aggregateSizeStatus interface method.
+func (c sizeContext) aggregateSizeLimitExceeded() bool {
+	return *c.limitExceeded
+}
+
+// cacheableAggregateSize reports whether a size computed with the given sizer is safe to
+// memoize on the value. Only totals from computations which verifiably stayed within the
+// calculator's depth and traversal limits are stable properties of the value; totals from
+// aborted computations depend on where in the traversal the value was encountered and would
+// poison the memoized size.
+func cacheableAggregateSize(sizer AggregateSizer) bool {
+	status, ok := sizer.(aggregateSizeStatus)
+	return ok && !status.aggregateSizeLimitExceeded()
+}
+
+// AggregateSizeEstimate captures the outcome of an aggregate size computation.
+//
+// The Size saturates at math.MaxUint32 when the accumulated element count overflows uint32.
+// LimitExceeded reports the computation was aborted because the value was too expensive to
+// traverse (too deep, or too many nodes visited); in that case Size is also math.MaxUint32,
+// but the value's true size may be smaller — the two conditions are distinguishable by the flag.
+type AggregateSizeEstimate struct {
+	Size          uint32
+	LimitExceeded bool
+}
+
 // AggregateSize returns the size of the input value, if known.
 // Otherwise, a unit size of 1 is returned.
+//
+// When the calculator's depth or traversal limits are exceeded, the size saturates to
+// math.MaxUint32. Use EstimateAggregateSize to distinguish limit-exceeded results from
+// genuine uint32 saturation.
 func (s *SizeCalculator) AggregateSize(val any) uint32 {
+	return s.EstimateAggregateSize(val).Size
+}
+
+// EstimateAggregateSize returns the aggregate size of the input value along with an indication
+// of whether the computation was aborted due to the calculator's depth or traversal limits.
+func (s *SizeCalculator) EstimateAggregateSize(val any) AggregateSizeEstimate {
 	traversals := 0
+	exceeded := false
 	ctx := sizeContext{
 		calc:           s,
 		depth:          1,
 		traversalCount: &traversals,
+		limitExceeded:  &exceeded,
 	}
-	return ctx.AggregateSize(val)
+	size := ctx.AggregateSize(val)
+	return AggregateSizeEstimate{Size: size, LimitExceeded: exceeded}
 }
 
 // stringSize converts a byte length to an element count where stringUnitLength bytes count
