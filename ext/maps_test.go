@@ -32,50 +32,50 @@ func TestMapsMerge(t *testing.T) {
 	}{
 		{
 			name: "both empty",
-			expr: `maps.merge({}, {}) == {}`,
+			expr: `{}.merge({}) == {}`,
 		},
 		{
 			name: "disjoint keys",
-			expr: `maps.merge({'a': 1}, {'b': 2}) == {'a': 1, 'b': 2}`,
+			expr: `{'a': 1}.merge({'b': 2}) == {'a': 1, 'b': 2}`,
 		},
 		{
 			name: "empty left",
-			expr: `maps.merge({}, {'b': 2}) == {'b': 2}`,
+			expr: `{}.merge({'b': 2}) == {'b': 2}`,
 		},
 		{
 			name: "empty right",
-			expr: `maps.merge({'a': 1}, {}) == {'a': 1}`,
+			expr: `{'a': 1}.merge({}) == {'a': 1}`,
 		},
 		{
 			name: "conflicting key takes the second value",
-			expr: `maps.merge({'a': 1}, {'a': 2}) == {'a': 2}`,
+			expr: `{'a': 1}.merge({'a': 2}) == {'a': 2}`,
 		},
 		{
 			name: "conflict among other keys",
-			expr: `maps.merge({'a': 1, 'b': 2}, {'b': 3, 'c': 4}) == {'a': 1, 'b': 3, 'c': 4}`,
+			expr: `{'a': 1, 'b': 2}.merge({'b': 3, 'c': 4}) == {'a': 1, 'b': 3, 'c': 4}`,
 		},
 		{
 			name: "map values are replaced, not merged",
-			expr: `maps.merge({'a': {'x': 1}}, {'a': {'y': 2}}) == {'a': {'y': 2}}`,
+			expr: `{'a': {'x': 1}}.merge({'a': {'y': 2}}) == {'a': {'y': 2}}`,
 		},
 		{
 			name: "int keys",
-			expr: `maps.merge({1: 'a'}, {2: 'b'}) == {1: 'a', 2: 'b'}`,
+			expr: `{1: 'a'}.merge({2: 'b'}) == {1: 'a', 2: 'b'}`,
 		},
 		{
 			name: "inputs are unchanged",
-			expr: `maps.merge({'a': 1}, {'a': 2}) == {'a': 2} && {'a': 1} == {'a': 1}`,
+			expr: `{'a': 1}.merge({'a': 2}) == {'a': 2} && {'a': 1} == {'a': 1}`,
 		},
 		{
 			name: "merging a variable",
-			expr: `maps.merge(x, {'b': 2}) == {'a': 1, 'b': 2}`,
+			expr: `x.merge({'b': 2}) == {'a': 1, 'b': 2}`,
 			vars: []cel.EnvOption{cel.Variable("x", cel.MapType(cel.StringType, cel.IntType))},
 			in:   map[string]any{"x": map[string]int64{"a": 1}},
 		},
 		{
 			name: "merge is associative when keys are disjoint",
-			expr: `maps.merge(maps.merge({'a': 1}, {'b': 2}), {'c': 3}) ==
-			       maps.merge({'a': 1}, maps.merge({'b': 2}, {'c': 3}))`,
+			expr: `{'a': 1}.merge({'b': 2}).merge({'c': 3}) ==
+			       {'a': 1}.merge({'b': 2}.merge({'c': 3}))`,
 		},
 	}
 
@@ -118,10 +118,10 @@ func TestMapsMergeTypeChecking(t *testing.T) {
 		name string
 		expr string
 	}{
-		{name: "list argument", expr: `maps.merge([1], [2])`},
-		{name: "string argument", expr: `maps.merge('a', 'b')`},
-		{name: "mixed arguments", expr: `maps.merge({'a': 1}, [2])`},
-		{name: "single argument", expr: `maps.merge({'a': 1})`},
+		{name: "list argument", expr: `[1].merge([2])`},
+		{name: "string argument", expr: `'a'.merge('b')`},
+		{name: "mixed arguments", expr: `{'a': 1}.merge([2])`},
+		{name: "single argument", expr: `{'a': 1}.merge()`},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -148,7 +148,7 @@ func TestMapsMergeNonMapArgs(t *testing.T) {
 		{name: "right is not a map", in: map[string]any{"x": map[string]int64{"a": 1}, "y": "b"}},
 		{name: "neither is a map", in: map[string]any{"x": 1, "y": 2}},
 	}
-	ast, iss := env.Compile(`maps.merge(x, y)`)
+	ast, iss := env.Compile(`x.merge(y)`)
 	if iss.Err() != nil {
 		t.Fatalf("env.Compile() failed: %v", iss.Err())
 	}
@@ -171,7 +171,7 @@ func TestMapsMergeCost(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cel.NewEnv() failed: %v", err)
 	}
-	ast, iss := env.Compile(`maps.merge({'a': 1, 'b': 2}, {'c': 3})`)
+	ast, iss := env.Compile(`{'a': 1, 'b': 2}.merge({'c': 3})`)
 	if iss.Err() != nil {
 		t.Fatalf("env.Compile() failed: %v", iss.Err())
 	}
@@ -204,8 +204,8 @@ func TestMapsMergeCost(t *testing.T) {
 func TestMapsMergeResultSize(t *testing.T) {
 	// A merge of a 2-entry and a 1-entry map holds 2 entries when every key
 	// collides and 3 when none do.
-	est := estimateMapsMergeCost(testCostHintEstimator{}, nil, []checker.AstNode{
-		testSizedNode{size: 2},
+	var target checker.AstNode = testSizedNode{size: 2}
+	est := estimateMapsMergeCost(testCostHintEstimator{}, &target, []checker.AstNode{
 		testSizedNode{size: 1},
 	})
 	if est == nil {

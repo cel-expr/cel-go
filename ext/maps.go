@@ -30,23 +30,23 @@ import (
 // strings, bytes, and lists, but is not defined for maps. This library provides
 // map combination as a named function.
 //
-// # Maps.Merge
+// # Merge
 //
-// Returns a new map containing the entries of both arguments. When a key is
-// present in both, the value from the second argument wins. Neither input is
+// Returns a new map containing the entries of both maps. When a key is
+// present in both, the value from the argument wins. Neither input is
 // modified.
 //
 // The merge is shallow: a value that is itself a map is replaced rather than
 // merged recursively.
 //
-//	maps.merge(map(K, V), map(K, V)) -> map(K, V)
+//	<map(K, V)>.merge(<map(K, V)>) -> <map(K, V)>
 //
 // Examples:
 //
-//	maps.merge({}, {}) // {}
-//	maps.merge({'a': 1}, {'b': 2}) // {'a': 1, 'b': 2}
-//	maps.merge({'a': 1}, {'a': 2}) // {'a': 2}
-//	maps.merge({'a': {'x': 1}}, {'a': {'y': 2}}) // {'a': {'y': 2}}, values are replaced, not merged
+//	{}.merge({}) // {}
+//	{'a': 1}.merge({'b': 2}) // {'a': 1, 'b': 2}
+//	{'a': 1}.merge({'a': 2}) // {'a': 2}
+//	{'a': {'x': 1}}.merge({'a': {'y': 2}}) // {'a': {'y': 2}}, values are replaced, not merged
 func Maps(options ...MapsOption) cel.EnvOption {
 	l := &mapsLib{}
 	for _, o := range options {
@@ -79,11 +79,11 @@ func (mapsLib) LibraryName() string {
 func (mapsLib) CompileOptions() []cel.EnvOption {
 	mapType := cel.MapType(cel.TypeParamType("K"), cel.TypeParamType("V"))
 	return []cel.EnvOption{
-		cel.Function("maps.merge",
-			cel.Overload("map_maps_merge_map", []*cel.Type{mapType, mapType}, mapType,
+		cel.Function("merge",
+			cel.MemberOverload("map_merge_map", []*cel.Type{mapType, mapType}, mapType,
 				cel.BinaryBinding(mapsMerge))),
 		cel.CostEstimatorOptions(
-			checker.OverloadCostEstimate("map_maps_merge_map", estimateMapsMergeCost),
+			checker.OverloadCostEstimate("map_merge_map", estimateMapsMergeCost),
 		),
 	}
 }
@@ -92,19 +92,19 @@ func (mapsLib) CompileOptions() []cel.EnvOption {
 func (mapsLib) ProgramOptions() []cel.ProgramOption {
 	return []cel.ProgramOption{
 		cel.CostTrackerOptions(
-			interpreter.OverloadCostTracker("map_maps_merge_map", trackMapsMergeCost),
+			interpreter.OverloadCostTracker("map_merge_map", trackMapsMergeCost),
 		),
 	}
 }
 
 // estimateMapsMergeCost charges for visiting every entry of both inputs and for
 // allocating the result map.
-func estimateMapsMergeCost(estimator checker.CostEstimator, _ *checker.AstNode, args []checker.AstNode) *checker.CallEstimate {
-	if len(args) != 2 {
+func estimateMapsMergeCost(estimator checker.CostEstimator, target *checker.AstNode, args []checker.AstNode) *checker.CallEstimate {
+	if target == nil || len(args) != 1 {
 		return nil
 	}
-	lhsSize := estimateSize(estimator, args[0])
-	rhsSize := estimateSize(estimator, args[1])
+	lhsSize := estimateSize(estimator, *target)
+	rhsSize := estimateSize(estimator, args[0])
 	entries := lhsSize.Add(rhsSize)
 	cost := entries.MultiplyByCostFactor(1).Add(mapAllocCost).Add(callCostEstimate)
 	// The result holds at least as many entries as the larger input, when every
