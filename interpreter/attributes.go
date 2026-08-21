@@ -1318,6 +1318,11 @@ func applyQualifiers(vars Activation, obj any, qualifiers []Qualifier) (any, boo
 			if err != nil {
 				return nil, false, err
 			}
+			if frame := AsFrame(vars); frame != nil {
+				if costs := frame.CostTracker(); costs != nil {
+					costs.Qualify(qual.ID())
+				}
+			}
 			if !present {
 				// We return optional none here with a presence of 'false' as the layers
 				// above will attempt to call types.OptionalOf() on a present value if any
@@ -1328,6 +1333,11 @@ func applyQualifiers(vars Activation, obj any, qualifiers []Qualifier) (any, boo
 			qualObj, err = qual.Qualify(vars, obj)
 			if err != nil {
 				return nil, false, err
+			}
+			if frame := AsFrame(vars); frame != nil {
+				if costs := frame.CostTracker(); costs != nil {
+					costs.Qualify(qual.ID())
+				}
 			}
 		}
 		obj = qualObj

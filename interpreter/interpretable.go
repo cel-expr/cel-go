@@ -247,10 +247,16 @@ func (test *evalTestOnly) Exec(frame *ExecutionFrame) ref.Val {
 	if err != nil {
 		return types.LabelErrNode(test.id, types.WrapErr(err))
 	}
+	var res ref.Val
 	if optVal, isOpt := val.(*types.Optional); isOpt {
-		return types.Bool(optVal.HasValue())
+		res = types.Bool(optVal.HasValue())
+	} else {
+		res = test.Adapter().NativeToValue(val)
 	}
-	return test.Adapter().NativeToValue(val)
+	if costs := frame.CostTracker(); costs != nil {
+		costs.EvalAttribute(test.id, true, res)
+	}
+	return res
 }
 
 // Eval implements the Interpretable interface method.
@@ -449,9 +455,16 @@ func (eq *evalEq) Exec(frame *ExecutionFrame) ref.Val {
 	unk, _ = types.MaybeMergeUnknowns(lVal, unk)
 	unk, _ = types.MaybeMergeUnknowns(rVal, unk)
 	if unk != nil {
+		if costs := frame.CostTracker(); costs != nil {
+			costs.EvalBinary(frame, eq.id, eq, lVal, rVal, unk)
+		}
 		return unk
 	}
-	return types.Equal(lVal, rVal)
+	res := types.Equal(lVal, rVal)
+	if costs := frame.CostTracker(); costs != nil {
+		costs.EvalBinary(frame, eq.id, eq, lVal, rVal, res)
+	}
+	return res
 }
 
 // Eval implements the Interpretable interface method.
@@ -499,9 +512,16 @@ func (ne *evalNe) Exec(frame *ExecutionFrame) ref.Val {
 	unk, _ = types.MaybeMergeUnknowns(lVal, unk)
 	unk, _ = types.MaybeMergeUnknowns(rVal, unk)
 	if unk != nil {
+		if costs := frame.CostTracker(); costs != nil {
+			costs.EvalBinary(frame, ne.id, ne, lVal, rVal, unk)
+		}
 		return unk
 	}
-	return types.Bool(types.Equal(lVal, rVal) != types.True)
+	res := types.Bool(types.Equal(lVal, rVal) != types.True)
+	if costs := frame.CostTracker(); costs != nil {
+		costs.EvalBinary(frame, ne.id, ne, lVal, rVal, res)
+	}
+	return res
 }
 
 // Eval implements the Interpretable interface method.
@@ -538,7 +558,11 @@ func (zero *evalZeroArity) ID() int64 {
 
 // Exec implements the InterpretableV2 interface method.
 func (zero *evalZeroArity) Exec(frame *ExecutionFrame) ref.Val {
-	return types.LabelErrNode(zero.id, zero.impl())
+	res := types.LabelErrNode(zero.id, zero.impl())
+	if costs := frame.CostTracker(); costs != nil {
+		costs.EvalZeroArity(frame, zero.id, zero, res)
+	}
+	return res
 }
 
 // Eval implements the Interpretable interface method.
@@ -579,22 +603,33 @@ func (un *evalUnary) ID() int64 {
 // Exec implements the InterpretableV2 interface method.
 func (un *evalUnary) Exec(frame *ExecutionFrame) ref.Val {
 	argVal := un.arg.Exec(frame)
-	// Early return if the argument to the function is unknown or error.
+	// Early return if the argument to the function is error in strict mode.
 	strict := !un.nonStrict
-	if strict && types.IsUnknownOrError(argVal) {
+	if strict && types.IsError(argVal) {
 		return argVal
 	}
+	if strict && types.IsUnknown(argVal) {
+		if costs := frame.CostTracker(); costs != nil {
+			costs.EvalUnary(frame, un.id, un, argVal, argVal)
+		}
+		return argVal
+	}
+	var res ref.Val
 	// If the implementation is bound and the argument value has the right traits required to
 	// invoke it, then call the implementation.
 	if un.impl != nil && (un.trait == 0 || (!strict && types.IsUnknownOrError(argVal)) || argVal.Type().HasTrait(un.trait)) {
-		return types.LabelErrNode(un.id, un.impl(argVal))
+		res = types.LabelErrNode(un.id, un.impl(argVal))
+	} else if argVal.Type().HasTrait(traits.ReceiverType) {
+		// Otherwise, if the argument is a ReceiverType attempt to invoke the receiver method on the
+		// operand (arg0).
+		res = types.LabelErrNode(un.id, argVal.(traits.Receiver).Receive(un.function, un.overload, []ref.Val{}))
+	} else {
+		res = types.NewErrWithNodeID(un.id, "no such overload: %s", un.function)
 	}
-	// Otherwise, if the argument is a ReceiverType attempt to invoke the receiver method on the
-	// operand (arg0).
-	if argVal.Type().HasTrait(traits.ReceiverType) {
-		return types.LabelErrNode(un.id, argVal.(traits.Receiver).Receive(un.function, un.overload, []ref.Val{}))
+	if costs := frame.CostTracker(); costs != nil {
+		costs.EvalUnary(frame, un.id, un, argVal, res)
 	}
-	return types.NewErrWithNodeID(un.id, "no such overload: %s", un.function)
+	return res
 }
 
 // Eval implements the Interpretable interface method.
@@ -649,20 +684,28 @@ func (bin *evalBinary) Exec(frame *ExecutionFrame) ref.Val {
 		unk, _ = types.MaybeMergeUnknowns(lVal, unk)
 		unk, _ = types.MaybeMergeUnknowns(rVal, unk)
 		if unk != nil {
+			if costs := frame.CostTracker(); costs != nil {
+				costs.EvalBinary(frame, bin.id, bin, lVal, rVal, unk)
+			}
 			return unk
 		}
 	}
+	var res ref.Val
 	// If the implementation is bound and the argument value has the right traits required to
 	// invoke it, then call the implementation.
 	if bin.impl != nil && (bin.trait == 0 || (!strict && types.IsUnknownOrError(lVal)) || lVal.Type().HasTrait(bin.trait)) {
-		return types.LabelErrNode(bin.id, bin.impl(lVal, rVal))
+		res = types.LabelErrNode(bin.id, bin.impl(lVal, rVal))
+	} else if lVal.Type().HasTrait(traits.ReceiverType) {
+		// Otherwise, if the argument is a ReceiverType attempt to invoke the receiver method on the
+		// operand (arg0).
+		res = types.LabelErrNode(bin.id, lVal.(traits.Receiver).Receive(bin.function, bin.overload, []ref.Val{rVal}))
+	} else {
+		res = types.NewErrWithNodeID(bin.id, "no such overload: %s", bin.function)
 	}
-	// Otherwise, if the argument is a ReceiverType attempt to invoke the receiver method on the
-	// operand (arg0).
-	if lVal.Type().HasTrait(traits.ReceiverType) {
-		return types.LabelErrNode(bin.id, lVal.(traits.Receiver).Receive(bin.function, bin.overload, []ref.Val{rVal}))
+	if costs := frame.CostTracker(); costs != nil {
+		costs.EvalBinary(frame, bin.id, bin, lVal, rVal, res)
 	}
-	return types.NewErrWithNodeID(bin.id, "no such overload: %s", bin.function)
+	return res
 }
 
 // Eval implements the Interpretable interface method.
@@ -726,20 +769,40 @@ func (fn *evalVarArgs) Exec(frame *ExecutionFrame) ref.Val {
 		}
 	}
 	if strict && unk != nil {
+		if costs := frame.CostTracker(); costs != nil {
+			costs.EvalVarArgs(frame, fn.id, fn, argVals, unk)
+		}
 		return unk
 	}
+	if len(argVals) == 0 {
+		var res ref.Val
+		if fn.impl != nil {
+			res = types.LabelErrNode(fn.id, fn.impl())
+		} else {
+			res = types.NewErrWithNodeID(fn.id, "no such overload: %s %d", fn.function, fn.id)
+		}
+		if costs := frame.CostTracker(); costs != nil {
+			costs.EvalZeroArity(frame, fn.id, fn, res)
+		}
+		return res
+	}
+	var res ref.Val
 	// If the implementation is bound and the argument value has the right traits required to
 	// invoke it, then call the implementation.
 	arg0 := argVals[0]
 	if fn.impl != nil && (fn.trait == 0 || (!strict && types.IsUnknownOrError(arg0)) || arg0.Type().HasTrait(fn.trait)) {
-		return types.LabelErrNode(fn.id, fn.impl(argVals...))
+		res = types.LabelErrNode(fn.id, fn.impl(argVals...))
+	} else if arg0.Type().HasTrait(traits.ReceiverType) {
+		// Otherwise, if the argument is a ReceiverType attempt to invoke the receiver method on the
+		// operand (arg0).
+		res = types.LabelErrNode(fn.id, arg0.(traits.Receiver).Receive(fn.function, fn.overload, argVals[1:]))
+	} else {
+		res = types.NewErrWithNodeID(fn.id, "no such overload: %s %d", fn.function, fn.id)
 	}
-	// Otherwise, if the argument is a ReceiverType attempt to invoke the receiver method on the
-	// operand (arg0).
-	if arg0.Type().HasTrait(traits.ReceiverType) {
-		return types.LabelErrNode(fn.id, arg0.(traits.Receiver).Receive(fn.function, fn.overload, argVals[1:]))
+	if costs := frame.CostTracker(); costs != nil {
+		costs.EvalVarArgs(frame, fn.id, fn, argVals, res)
 	}
-	return types.NewErrWithNodeID(fn.id, "no such overload: %s %d", fn.function, fn.id)
+	return res
 }
 
 // Eval implements the Interpretable interface method.
@@ -802,9 +865,16 @@ func (l *evalList) Exec(frame *ExecutionFrame) ref.Val {
 		elemVals = append(elemVals, elemVal)
 	}
 	if unk != nil {
+		if costs := frame.CostTracker(); costs != nil {
+			costs.CreateList(l.id, unk)
+		}
 		return unk
 	}
-	return types.NewRefValList(l.adapter, elemVals)
+	res := types.NewRefValList(l.adapter, elemVals)
+	if costs := frame.CostTracker(); costs != nil {
+		costs.CreateList(l.id, res)
+	}
+	return res
 }
 
 // Eval implements the Interpretable interface method.
@@ -865,9 +935,16 @@ func (m *evalMap) Exec(frame *ExecutionFrame) ref.Val {
 		entries[keyVal] = valVal
 	}
 	if unk != nil {
+		if costs := frame.CostTracker(); costs != nil {
+			costs.CreateMap(m.id, unk)
+		}
 		return unk
 	}
-	return types.NewRefValMap(m.adapter, entries)
+	res := types.NewRefValMap(m.adapter, entries)
+	if costs := frame.CostTracker(); costs != nil {
+		costs.CreateMap(m.id, res)
+	}
+	return res
 }
 
 // Eval implements the Interpretable interface method.
@@ -934,9 +1011,16 @@ func (o *evalObj) Exec(frame *ExecutionFrame) ref.Val {
 		fieldVals[field] = val
 	}
 	if unk != nil {
+		if costs := frame.CostTracker(); costs != nil {
+			costs.CreateStruct(o.id, unk)
+		}
 		return unk
 	}
-	return types.LabelErrNode(o.id, o.provider.NewValue(o.typeName, fieldVals))
+	res := types.LabelErrNode(o.id, o.provider.NewValue(o.typeName, fieldVals))
+	if costs := frame.CostTracker(); costs != nil {
+		costs.CreateStruct(o.id, res)
+	}
+	return res
 }
 
 // Eval implements the Interpretable interface method.
@@ -1446,7 +1530,13 @@ func (a *evalAttr) Exec(frame *ExecutionFrame) ref.Val {
 	if err != nil {
 		return types.LabelErrNode(a.ID(), types.WrapErr(err))
 	}
-	return a.adapter.NativeToValue(v)
+	res := a.adapter.NativeToValue(v)
+	if costs := frame.CostTracker(); costs != nil {
+		if _, isCond := a.attr.(*conditionalAttribute); !isCond {
+			costs.EvalAttribute(a.ID(), false, res)
+		}
+	}
+	return res
 }
 
 // Eval implements the Interpretable interface method.

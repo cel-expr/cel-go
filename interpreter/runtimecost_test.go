@@ -174,7 +174,7 @@ func computeCost(t *testing.T, expr string, vars []*decls.VariableDecl, ctx Acti
 	return costTracker.cost, est, err
 }
 
-func constructActivation(t *testing.T, in any) Activation {
+func constructActivation(t testing.TB, in any) Activation {
 	t.Helper()
 	if in == nil {
 		return EmptyActivation()
@@ -904,3 +904,83 @@ func TestRuntimeCost(t *testing.T) {
 		})
 	}
 }
+
+func BenchmarkCostTracking(b *testing.B) {
+	benchmarks := []struct {
+		name string
+		expr string
+		vars []*decls.VariableDecl
+		in   map[string]any
+	}{
+		{
+			name: "simple_comparison",
+			expr: "x > 10",
+			vars: []*decls.VariableDecl{decls.NewVariable("x", types.IntType)},
+			in:   map[string]any{"x": 15},
+		},
+		{
+			name: "function_calls",
+			expr: "str.startsWith('hello') && str.endsWith('world')",
+			vars: []*decls.VariableDecl{decls.NewVariable("str", types.StringType)},
+			in:   map[string]any{"str": "hello beautiful world"},
+		},
+		{
+			name: "comprehension",
+			expr: "[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(x, x * 2).filter(x, x > 10)",
+		},
+		{
+			name: "nested_comprehensions",
+			expr: "[1, 2, 3, 4, 5].all(i, [1, 2, 3, 4, 5].exists(j, i + j == 6))",
+		},
+	}
+
+	for _, bm := range benchmarks {
+		b.Run(bm.name, func(b *testing.B) {
+			s := common.NewTextSource(bm.expr)
+			p, err := parser.NewParser(parser.Macros(parser.AllMacros...))
+			if err != nil {
+				b.Fatalf("Failed to initialize parser: %v", err)
+			}
+			parsed, errs := p.Parse(s)
+			if len(errs.GetErrors()) != 0 {
+				b.Fatalf("Parse(%s) failed: %v", bm.expr, errs.GetErrors())
+			}
+
+			cont := containers.DefaultContainer
+			reg := newTestRegistry(b, types.ProtoTypeDefs(&proto3pb.TestAllTypes{}))
+			attrs := NewAttributeFactory(cont, reg, reg)
+			env := newTestEnv(b, cont, reg)
+			if len(bm.vars) > 0 {
+				err = env.AddIdents(bm.vars...)
+				if err != nil {
+					b.Fatalf("Failed to add idents: %v", err)
+				}
+			}
+			checked, errs := checker.Check(parsed, s, env)
+			if len(errs.GetErrors()) != 0 {
+				b.Fatalf("Check(%s) failed: %v", bm.expr, errs.GetErrors())
+			}
+
+			evalCostTracker, err := NewCostTracker(nil)
+			if err != nil {
+				b.Fatalf("NewCostTracker() failed: %v", err)
+			}
+			trackerFactory := func() (*CostTracker, error) {
+				return evalCostTracker.Clone()
+			}
+			interp := newStandardInterpreter(b, cont, reg, reg, attrs)
+			prg, err := interp.NewInterpretable(checked, CostObserver(CostTrackerFactory(trackerFactory)))
+			if err != nil {
+				b.Fatalf("NewInterpretable(%s) failed: %v", bm.expr, err)
+			}
+
+			ctx := constructActivation(b, bm.in)
+			b.ResetTimer()
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				prg.Eval(ctx)
+			}
+		})
+	}
+}
+
