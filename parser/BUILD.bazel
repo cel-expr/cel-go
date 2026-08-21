@@ -7,14 +7,14 @@ package(
 go_library(
     name = "go_default_library",
     srcs = [
+        "antlr_parser.go",
         "errors.go",
         "helper.go",
         "input.go",
         "lexer.go",
         "macro.go",
         "options.go",
-        "parser.go",
-        "pratt_parser.go",
+                "pratt_parser.go",
         "unescape.go",
         "unparser.go",
     ],

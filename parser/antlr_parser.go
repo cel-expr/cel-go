@@ -1,4 +1,4 @@
-// Copyright 2018 Google LLC
+// Copyright 2026 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,13 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package parser declares an expression parser with support for macro
-// expansion.
 package parser
 
 import (
 	"errors"
 	"fmt"
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -33,14 +32,14 @@ import (
 	"cel.dev/cel-go/parser/gen"
 )
 
-// Parser encapsulates the context necessary to perform parsing for different expressions.
-type Parser struct {
+// AntlrParser encapsulates the context necessary to perform ANTLR parsing for different expressions.
+type AntlrParser struct {
 	options
 }
 
-// NewParser builds and returns a new Parser using the provided options.
-func NewParser(opts ...Option) (*Parser, error) {
-	p := &Parser{}
+// NewAntlrParser builds and returns a new AntlrParser using the provided options.
+func NewAntlrParser(opts ...Option) (*AntlrParser, error) {
+	p := &AntlrParser{}
 	p.enableHiddenAccumulatorName = true
 	p.enableIdentEscapeSyntax = true
 	for _, opt := range opts {
@@ -55,7 +54,7 @@ func NewParser(opts ...Option) (*Parser, error) {
 		p.maxRecursionDepth = 250
 	}
 	if p.maxRecursionDepth == -1 {
-		p.maxRecursionDepth = int((^uint(0)) >> 1)
+		p.maxRecursionDepth = math.MaxInt
 	}
 	if p.errorRecoveryTokenLookaheadLimit == 0 {
 		p.errorRecoveryTokenLookaheadLimit = 256
@@ -64,45 +63,32 @@ func NewParser(opts ...Option) (*Parser, error) {
 		p.errorRecoveryLimit = 30
 	}
 	if p.errorRecoveryLimit == -1 {
-		p.errorRecoveryLimit = int((^uint(0)) >> 1)
+		p.errorRecoveryLimit = math.MaxInt
 	}
 	if p.expressionSizeCodePointLimit == 0 {
 		p.expressionSizeCodePointLimit = 100_000
 	}
 	if p.expressionSizeCodePointLimit == -1 {
-		p.expressionSizeCodePointLimit = int((^uint(0)) >> 1)
+		p.expressionSizeCodePointLimit = math.MaxInt
 	}
 	if p.maxExpressionNodeCount == 0 {
 		p.maxExpressionNodeCount = 100_000
 	}
 	if p.maxExpressionNodeCount == -1 {
-		p.maxExpressionNodeCount = int((^uint(0)) >> 1)
+		p.maxExpressionNodeCount = math.MaxInt
 	}
-	// Bool is false by default, so populateMacroCalls will be false by default
 	return p, nil
 }
 
-// mustNewParser does the work of NewParser and panics if an error occurs.
-//
-// This function is only intended for internal use and is for backwards compatibility in Parse and
-// ParseWithMacros, where we know the options will result in an error.
-func mustNewParser(opts ...Option) *Parser {
-	p, err := NewParser(opts...)
-	if err != nil {
-		panic(err)
-	}
-	return p
-}
-
 // Parse parses the expression represented by source and returns the result.
-func (p *Parser) Parse(source common.Source) (*ast.AST, *common.Errors) {
+func (p *AntlrParser) Parse(source common.Source) (*ast.AST, *common.Errors) {
 	errs := common.NewErrors(source)
 	accu := AccumulatorName
 	if p.enableHiddenAccumulatorName {
 		accu = HiddenAccumulatorName
 	}
 	fac := ast.NewExprFactoryWithAccumulator(accu)
-	impl := parser{
+	impl := antlrParser{
 		errors:                           &parseErrors{errs},
 		exprFactory:                      fac,
 		helper:                           newParserHelper(source, fac),
@@ -132,59 +118,11 @@ func (p *Parser) Parse(source common.Source) (*ast.AST, *common.Errors) {
 	return ast.NewAST(out, impl.helper.getSourceInfo()), errs
 }
 
-// reservedIds are not legal to use as variables.  We exclude them post-parse, as they *are* valid
-// field names for protos, and it would complicate the grammar to distinguish the cases.
-var reservedIds = map[string]struct{}{
-	"as":        {},
-	"break":     {},
-	"const":     {},
-	"continue":  {},
-	"else":      {},
-	"false":     {},
-	"for":       {},
-	"function":  {},
-	"if":        {},
-	"import":    {},
-	"in":        {},
-	"let":       {},
-	"loop":      {},
-	"package":   {},
-	"namespace": {},
-	"null":      {},
-	"return":    {},
-	"true":      {},
-	"var":       {},
-	"void":      {},
-	"while":     {},
-}
-
 func unescapeIdent(in string) (string, error) {
 	if len(in) <= 2 {
 		return "", errors.New("invalid escaped identifier: underflow")
 	}
 	return in[1 : len(in)-1], nil
-}
-
-// normalizeIdent returns the interpreted identifier.
-func (p *parser) normalizeIdent(ctx gen.IEscapeIdentContext) (string, error) {
-	switch ident := ctx.(type) {
-	case *gen.SimpleIdentifierContext:
-		return ident.GetId().GetText(), nil
-	case *gen.EscapedIdentifierContext:
-		if !p.enableIdentEscapeSyntax {
-			return "", errors.New("unsupported syntax: '`'")
-		}
-		return unescapeIdent(ident.GetId().GetText())
-	}
-	return "", errors.New("unsupported ident kind")
-}
-
-// Parse converts a source input a parsed expression.
-// This function calls ParseWithMacros with AllMacros.
-//
-// Deprecated: Use NewParser().Parse() instead.
-func Parse(source common.Source) (*ast.AST, *common.Errors) {
-	return mustNewParser(Macros(AllMacros...)).Parse(source)
 }
 
 type recursionError struct {
@@ -317,7 +255,7 @@ func (rl *recoveryLimitErrorStrategy) checkAttempts(recognizer antlr.Parser) {
 
 var _ antlr.ErrorStrategy = &recoveryLimitErrorStrategy{}
 
-type parser struct {
+type antlrParser struct {
 	gen.BaseCELVisitor
 	errors                           *parseErrors
 	exprFactory                      ast.ExprFactory
@@ -336,9 +274,23 @@ type parser struct {
 	enableIdentEscapeSyntax          bool
 }
 
-var _ gen.CELVisitor = (*parser)(nil)
+var _ gen.CELVisitor = (*antlrParser)(nil)
 
-func (p *parser) parse(expr runes.Buffer, desc string) ast.Expr {
+// normalizeIdent returns the interpreted identifier.
+func (p *antlrParser) normalizeIdent(ctx gen.IEscapeIdentContext) (string, error) {
+	switch ident := ctx.(type) {
+	case *gen.SimpleIdentifierContext:
+		return ident.GetId().GetText(), nil
+	case *gen.EscapedIdentifierContext:
+		if !p.enableIdentEscapeSyntax {
+			return "", errors.New("unsupported syntax: '`'")
+		}
+		return unescapeIdent(ident.GetId().GetText())
+	}
+	return "", errors.New("unsupported ident kind")
+}
+
+func (p *antlrParser) parse(expr runes.Buffer, desc string) ast.Expr {
 	lexer := gen.NewCELLexer(newCharStream(expr, desc))
 	lexer.RemoveErrorListeners()
 	lexer.AddErrorListener(p)
@@ -381,7 +333,7 @@ func (p *parser) parse(expr runes.Buffer, desc string) ast.Expr {
 }
 
 // Visitor implementations.
-func (p *parser) Visit(tree antlr.ParseTree) any {
+func (p *antlrParser) Visit(tree antlr.ParseTree) any {
 	t := unnest(tree)
 	switch tree := t.(type) {
 	case *gen.StartContext:
@@ -466,16 +418,15 @@ func (p *parser) Visit(tree antlr.ParseTree) any {
 		return p.reportError(common.NoLocation, "unknown parse element encountered: %s", txt)
 	}
 	return p.helper.newExpr(common.NoLocation)
-
 }
 
 // Visit a parse tree produced by CELParser#start.
-func (p *parser) VisitStart(ctx *gen.StartContext) any {
+func (p *antlrParser) VisitStart(ctx *gen.StartContext) any {
 	return p.Visit(ctx.Expr())
 }
 
 // Visit a parse tree produced by CELParser#expr.
-func (p *parser) VisitExpr(ctx *gen.ExprContext) any {
+func (p *antlrParser) VisitExpr(ctx *gen.ExprContext) any {
 	result := p.Visit(ctx.GetE()).(ast.Expr)
 	if ctx.GetOp() == nil {
 		return result
@@ -487,7 +438,7 @@ func (p *parser) VisitExpr(ctx *gen.ExprContext) any {
 }
 
 // Visit a parse tree produced by CELParser#conditionalOr.
-func (p *parser) VisitConditionalOr(ctx *gen.ConditionalOrContext) any {
+func (p *antlrParser) VisitConditionalOr(ctx *gen.ConditionalOrContext) any {
 	result := p.Visit(ctx.GetE()).(ast.Expr)
 	l := p.newLogicManager(operators.LogicalOr, result)
 	rest := ctx.GetE1()
@@ -503,7 +454,7 @@ func (p *parser) VisitConditionalOr(ctx *gen.ConditionalOrContext) any {
 }
 
 // Visit a parse tree produced by CELParser#conditionalAnd.
-func (p *parser) VisitConditionalAnd(ctx *gen.ConditionalAndContext) any {
+func (p *antlrParser) VisitConditionalAnd(ctx *gen.ConditionalAndContext) any {
 	result := p.Visit(ctx.GetE()).(ast.Expr)
 	l := p.newLogicManager(operators.LogicalAnd, result)
 	rest := ctx.GetE1()
@@ -519,7 +470,7 @@ func (p *parser) VisitConditionalAnd(ctx *gen.ConditionalAndContext) any {
 }
 
 // Visit a parse tree produced by CELParser#relation.
-func (p *parser) VisitRelation(ctx *gen.RelationContext) any {
+func (p *antlrParser) VisitRelation(ctx *gen.RelationContext) any {
 	opText := ""
 	if ctx.GetOp() != nil {
 		opText = ctx.GetOp().GetText()
@@ -534,7 +485,7 @@ func (p *parser) VisitRelation(ctx *gen.RelationContext) any {
 }
 
 // Visit a parse tree produced by CELParser#calc.
-func (p *parser) VisitCalc(ctx *gen.CalcContext) any {
+func (p *antlrParser) VisitCalc(ctx *gen.CalcContext) any {
 	opText := ""
 	if ctx.GetOp() != nil {
 		opText = ctx.GetOp().GetText()
@@ -548,12 +499,12 @@ func (p *parser) VisitCalc(ctx *gen.CalcContext) any {
 	return p.reportError(ctx, "operator not found")
 }
 
-func (p *parser) VisitUnary(ctx *gen.UnaryContext) any {
+func (p *antlrParser) VisitUnary(ctx *gen.UnaryContext) any {
 	return p.helper.newLiteralString(ctx, "<<error>>")
 }
 
 // Visit a parse tree produced by CELParser#LogicalNot.
-func (p *parser) VisitLogicalNot(ctx *gen.LogicalNotContext) any {
+func (p *antlrParser) VisitLogicalNot(ctx *gen.LogicalNotContext) any {
 	if len(ctx.GetOps())%2 == 0 {
 		return p.Visit(ctx.Member())
 	}
@@ -562,7 +513,7 @@ func (p *parser) VisitLogicalNot(ctx *gen.LogicalNotContext) any {
 	return p.globalCallOrMacro(opID, operators.LogicalNot, target)
 }
 
-func (p *parser) VisitNegate(ctx *gen.NegateContext) any {
+func (p *antlrParser) VisitNegate(ctx *gen.NegateContext) any {
 	if len(ctx.GetOps())%2 == 0 {
 		return p.Visit(ctx.Member())
 	}
@@ -572,7 +523,7 @@ func (p *parser) VisitNegate(ctx *gen.NegateContext) any {
 }
 
 // VisitSelect visits a parse tree produced by CELParser#Select.
-func (p *parser) VisitSelect(ctx *gen.SelectContext) any {
+func (p *antlrParser) VisitSelect(ctx *gen.SelectContext) any {
 	operand := p.Visit(ctx.Member()).(ast.Expr)
 	// Handle the error case where no valid identifier is specified.
 	if ctx.GetId() == nil || ctx.GetOp() == nil {
@@ -596,7 +547,7 @@ func (p *parser) VisitSelect(ctx *gen.SelectContext) any {
 }
 
 // VisitMemberCall visits a parse tree produced by CELParser#MemberCall.
-func (p *parser) VisitMemberCall(ctx *gen.MemberCallContext) any {
+func (p *antlrParser) VisitMemberCall(ctx *gen.MemberCallContext) any {
 	operand := p.Visit(ctx.Member()).(ast.Expr)
 	// Handle the error case where no valid identifier is specified.
 	if ctx.GetId() == nil {
@@ -608,7 +559,7 @@ func (p *parser) VisitMemberCall(ctx *gen.MemberCallContext) any {
 }
 
 // Visit a parse tree produced by CELParser#Index.
-func (p *parser) VisitIndex(ctx *gen.IndexContext) any {
+func (p *antlrParser) VisitIndex(ctx *gen.IndexContext) any {
 	target := p.Visit(ctx.Member()).(ast.Expr)
 	// Handle the error case where no valid identifier is specified.
 	if ctx.GetOp() == nil {
@@ -627,7 +578,7 @@ func (p *parser) VisitIndex(ctx *gen.IndexContext) any {
 }
 
 // Visit a parse tree produced by CELParser#CreateMessage.
-func (p *parser) VisitCreateMessage(ctx *gen.CreateMessageContext) any {
+func (p *antlrParser) VisitCreateMessage(ctx *gen.CreateMessageContext) any {
 	messageName := ""
 	for _, id := range ctx.GetIds() {
 		if len(messageName) != 0 {
@@ -644,7 +595,7 @@ func (p *parser) VisitCreateMessage(ctx *gen.CreateMessageContext) any {
 }
 
 // Visit a parse tree of field initializers.
-func (p *parser) VisitIFieldInitializerList(ctx gen.IFieldInitializerListContext) any {
+func (p *antlrParser) VisitIFieldInitializerList(ctx gen.IFieldInitializerListContext) any {
 	if ctx == nil || ctx.GetFields() == nil {
 		// This is the result of a syntax error handled elswhere, return empty.
 		return []ast.EntryExpr{}
@@ -681,7 +632,7 @@ func (p *parser) VisitIFieldInitializerList(ctx gen.IFieldInitializerListContext
 }
 
 // Visit a parse tree produced by CELParser#Ident.
-func (p *parser) VisitIdent(ctx *gen.IdentContext) any {
+func (p *antlrParser) VisitIdent(ctx *gen.IdentContext) any {
 	identName := ""
 	if ctx.GetLeadingDot() != nil {
 		identName = "."
@@ -700,7 +651,7 @@ func (p *parser) VisitIdent(ctx *gen.IdentContext) any {
 }
 
 // Visit a parse tree produced by CELParser#GlobalCallContext.
-func (p *parser) VisitGlobalCall(ctx *gen.GlobalCallContext) any {
+func (p *antlrParser) VisitGlobalCall(ctx *gen.GlobalCallContext) any {
 	identName := ""
 	if ctx.GetLeadingDot() != nil {
 		identName = "."
@@ -717,18 +668,17 @@ func (p *parser) VisitGlobalCall(ctx *gen.GlobalCallContext) any {
 	identName += id
 	opID := p.helper.id(ctx.GetOp())
 	return p.globalCallOrMacro(opID, identName, p.visitExprList(ctx.GetArgs())...)
-
 }
 
 // Visit a parse tree produced by CELParser#CreateList.
-func (p *parser) VisitCreateList(ctx *gen.CreateListContext) any {
+func (p *antlrParser) VisitCreateList(ctx *gen.CreateListContext) any {
 	listID := p.helper.id(ctx.GetOp())
 	elems, optionals := p.visitListInit(ctx.GetElems())
 	return p.helper.newList(listID, elems, optionals...)
 }
 
 // Visit a parse tree produced by CELParser#CreateStruct.
-func (p *parser) VisitCreateStruct(ctx *gen.CreateStructContext) any {
+func (p *antlrParser) VisitCreateStruct(ctx *gen.CreateStructContext) any {
 	structID := p.helper.id(ctx.GetOp())
 	entries := []ast.EntryExpr{}
 	if ctx.GetEntries() != nil {
@@ -738,7 +688,7 @@ func (p *parser) VisitCreateStruct(ctx *gen.CreateStructContext) any {
 }
 
 // Visit a parse tree produced by CELParser#mapInitializerList.
-func (p *parser) VisitMapInitializerList(ctx *gen.MapInitializerListContext) any {
+func (p *antlrParser) VisitMapInitializerList(ctx *gen.MapInitializerListContext) any {
 	if ctx == nil || ctx.GetKeys() == nil {
 		// This is the result of a syntax error handled elswhere, return empty.
 		return []ast.EntryExpr{}
@@ -768,7 +718,7 @@ func (p *parser) VisitMapInitializerList(ctx *gen.MapInitializerListContext) any
 }
 
 // Visit a parse tree produced by CELParser#Int.
-func (p *parser) VisitInt(ctx *gen.IntContext) any {
+func (p *antlrParser) VisitInt(ctx *gen.IntContext) any {
 	text := ctx.GetTok().GetText()
 	base := 10
 	if strings.HasPrefix(text, "0x") {
@@ -786,7 +736,7 @@ func (p *parser) VisitInt(ctx *gen.IntContext) any {
 }
 
 // Visit a parse tree produced by CELParser#Uint.
-func (p *parser) VisitUint(ctx *gen.UintContext) any {
+func (p *antlrParser) VisitUint(ctx *gen.UintContext) any {
 	text := ctx.GetTok().GetText()
 	// trim the 'u' designator included in the uint literal.
 	text = text[:len(text)-1]
@@ -803,7 +753,7 @@ func (p *parser) VisitUint(ctx *gen.UintContext) any {
 }
 
 // Visit a parse tree produced by CELParser#Double.
-func (p *parser) VisitDouble(ctx *gen.DoubleContext) any {
+func (p *antlrParser) VisitDouble(ctx *gen.DoubleContext) any {
 	txt := ctx.GetTok().GetText()
 	if ctx.GetSign() != nil {
 		txt = ctx.GetSign().GetText() + txt
@@ -813,44 +763,43 @@ func (p *parser) VisitDouble(ctx *gen.DoubleContext) any {
 		return p.reportError(ctx, "invalid double literal")
 	}
 	return p.helper.newLiteralDouble(ctx, f)
-
 }
 
 // Visit a parse tree produced by CELParser#String.
-func (p *parser) VisitString(ctx *gen.StringContext) any {
+func (p *antlrParser) VisitString(ctx *gen.StringContext) any {
 	s := p.unquote(ctx, ctx.GetTok().GetText(), false)
 	return p.helper.newLiteralString(ctx, s)
 }
 
 // Visit a parse tree produced by CELParser#Bytes.
-func (p *parser) VisitBytes(ctx *gen.BytesContext) any {
+func (p *antlrParser) VisitBytes(ctx *gen.BytesContext) any {
 	b := []byte(p.unquote(ctx, ctx.GetTok().GetText()[1:], true))
 	return p.helper.newLiteralBytes(ctx, b)
 }
 
 // Visit a parse tree produced by CELParser#BoolTrue.
-func (p *parser) VisitBoolTrue(ctx *gen.BoolTrueContext) any {
+func (p *antlrParser) VisitBoolTrue(ctx *gen.BoolTrueContext) any {
 	return p.helper.newLiteralBool(ctx, true)
 }
 
 // Visit a parse tree produced by CELParser#BoolFalse.
-func (p *parser) VisitBoolFalse(ctx *gen.BoolFalseContext) any {
+func (p *antlrParser) VisitBoolFalse(ctx *gen.BoolFalseContext) any {
 	return p.helper.newLiteralBool(ctx, false)
 }
 
 // Visit a parse tree produced by CELParser#Null.
-func (p *parser) VisitNull(ctx *gen.NullContext) any {
+func (p *antlrParser) VisitNull(ctx *gen.NullContext) any {
 	return p.helper.exprFactory.NewLiteral(p.helper.newID(ctx), types.NullValue)
 }
 
-func (p *parser) visitExprList(ctx gen.IExprListContext) []ast.Expr {
+func (p *antlrParser) visitExprList(ctx gen.IExprListContext) []ast.Expr {
 	if ctx == nil {
 		return []ast.Expr{}
 	}
 	return p.visitSlice(ctx.GetE())
 }
 
-func (p *parser) visitListInit(ctx gen.IListInitContext) ([]ast.Expr, []int32) {
+func (p *antlrParser) visitListInit(ctx gen.IListInitContext) ([]ast.Expr, []int32) {
 	if ctx == nil {
 		return []ast.Expr{}, []int32{}
 	}
@@ -874,7 +823,7 @@ func (p *parser) visitListInit(ctx gen.IListInitContext) ([]ast.Expr, []int32) {
 	return result, optionals
 }
 
-func (p *parser) visitSlice(expressions []gen.IExprContext) []ast.Expr {
+func (p *antlrParser) visitSlice(expressions []gen.IExprContext) []ast.Expr {
 	if expressions == nil {
 		return []ast.Expr{}
 	}
@@ -886,7 +835,7 @@ func (p *parser) visitSlice(expressions []gen.IExprContext) []ast.Expr {
 	return result
 }
 
-func (p *parser) unquote(ctx any, value string, isBytes bool) string {
+func (p *antlrParser) unquote(ctx any, value string, isBytes bool) string {
 	text, err := unescape(value, isBytes)
 	if err != nil {
 		p.reportError(ctx, "%s", err.Error())
@@ -895,14 +844,14 @@ func (p *parser) unquote(ctx any, value string, isBytes bool) string {
 	return text
 }
 
-func (p *parser) newLogicManager(function string, term ast.Expr) *logicManager {
+func (p *antlrParser) newLogicManager(function string, term ast.Expr) *logicManager {
 	if p.enableVariadicOperatorASTs {
 		return newVariadicLogicManager(p.exprFactory, function, term)
 	}
 	return newBalancingLogicManager(p.exprFactory, function, term)
 }
 
-func (p *parser) reportError(ctx any, format string, args ...any) ast.Expr {
+func (p *antlrParser) reportError(ctx any, format string, args ...any) ast.Expr {
 	var location common.Location
 	err := p.helper.newExpr(ctx)
 	switch c := ctx.(type) {
@@ -917,7 +866,7 @@ func (p *parser) reportError(ctx any, format string, args ...any) ast.Expr {
 }
 
 // ANTLR Parse listener implementations
-func (p *parser) SyntaxError(recognizer antlr.Recognizer, offendingSymbol any, line, column int, msg string, e antlr.RecognitionException) {
+func (p *antlrParser) SyntaxError(recognizer antlr.Recognizer, offendingSymbol any, line, column int, msg string, e antlr.RecognitionException) {
 	offset := p.helper.sourceInfo.ComputeOffset(int32(line), int32(column))
 	l := p.helper.getLocationByOffset(offset)
 	// Hack to keep existing error messages consistent with previous versions of CEL when a reserved word
@@ -938,33 +887,33 @@ func (p *parser) SyntaxError(recognizer antlr.Recognizer, offendingSymbol any, l
 	}
 }
 
-func (p *parser) ReportAmbiguity(recognizer antlr.Parser, dfa *antlr.DFA, startIndex, stopIndex int, exact bool, ambigAlts *antlr.BitSet, configs *antlr.ATNConfigSet) {
+func (p *antlrParser) ReportAmbiguity(recognizer antlr.Parser, dfa *antlr.DFA, startIndex, stopIndex int, exact bool, ambigAlts *antlr.BitSet, configs *antlr.ATNConfigSet) {
 	// Intentional
 }
 
-func (p *parser) ReportAttemptingFullContext(recognizer antlr.Parser, dfa *antlr.DFA, startIndex, stopIndex int, conflictingAlts *antlr.BitSet, configs *antlr.ATNConfigSet) {
+func (p *antlrParser) ReportAttemptingFullContext(recognizer antlr.Parser, dfa *antlr.DFA, startIndex, stopIndex int, conflictingAlts *antlr.BitSet, configs *antlr.ATNConfigSet) {
 	// Intentional
 }
 
-func (p *parser) ReportContextSensitivity(recognizer antlr.Parser, dfa *antlr.DFA, startIndex, stopIndex, prediction int, configs *antlr.ATNConfigSet) {
+func (p *antlrParser) ReportContextSensitivity(recognizer antlr.Parser, dfa *antlr.DFA, startIndex, stopIndex, prediction int, configs *antlr.ATNConfigSet) {
 	// Intentional
 }
 
-func (p *parser) globalCallOrMacro(exprID int64, function string, args ...ast.Expr) ast.Expr {
+func (p *antlrParser) globalCallOrMacro(exprID int64, function string, args ...ast.Expr) ast.Expr {
 	if expr, found := p.expandMacro(exprID, function, nil, args...); found {
 		return expr
 	}
 	return p.helper.newGlobalCall(exprID, function, args...)
 }
 
-func (p *parser) receiverCallOrMacro(exprID int64, function string, target ast.Expr, args ...ast.Expr) ast.Expr {
+func (p *antlrParser) receiverCallOrMacro(exprID int64, function string, target ast.Expr, args ...ast.Expr) ast.Expr {
 	if expr, found := p.expandMacro(exprID, function, target, args...); found {
 		return expr
 	}
 	return p.helper.newReceiverCall(exprID, function, target, args...)
 }
 
-func (p *parser) expandMacro(exprID int64, function string, target ast.Expr, args ...ast.Expr) (ast.Expr, bool) {
+func (p *antlrParser) expandMacro(exprID int64, function string, target ast.Expr, args ...ast.Expr) (ast.Expr, bool) {
 	macro, found := p.macros[makeMacroKey(function, len(args), target != nil)]
 	if !found {
 		macro, found = p.macros[makeVarArgMacroKey(function, target != nil)]
@@ -1008,14 +957,14 @@ func (p *parser) expandMacro(exprID int64, function string, target ast.Expr, arg
 	return expr, true
 }
 
-func (p *parser) checkAndIncrementRecursionDepth() {
+func (p *antlrParser) checkAndIncrementRecursionDepth() {
 	p.recursionDepth++
 	if p.recursionDepth > p.maxRecursionDepth {
 		panic(&recursionError{message: "max recursion depth exceeded"})
 	}
 }
 
-func (p *parser) decrementRecursionDepth() {
+func (p *antlrParser) decrementRecursionDepth() {
 	p.recursionDepth--
 }
 
