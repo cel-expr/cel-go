@@ -266,6 +266,14 @@ runtime bindings and error handling to do the right thing.
 * See the [CEL C++][3] toolchain (under development) for information about how
   to integrate CEL evaluation into other environments.
 
+### Why are there multiple entries for cel-go on pkg.go.dev?
+
+Due to historical changes in the module path defined in `go.mod`, documentation on `pkg.go.dev` is split across different paths depending on the version range:
+
+*   **[cel.dev/cel-go](https://pkg.go.dev/cel.dev/cel-go)**: Canonical path for **v0.32.0** and newer.
+*   **[github.com/google/cel-go](https://pkg.go.dev/github.com/google/cel-go)**: Path for versions **v0.2.0** through **v0.31.0**.
+*   **[github.com/cel-expr/cel-go](https://pkg.go.dev/github.com/cel-expr/cel-go)**: Only contains **v0.1.0** (tagged before `go.mod` was introduced).
+
 ### How can I contribute?
 
 * See [CONTRIBUTING.md](./CONTRIBUTING.md) to get started.
