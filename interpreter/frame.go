@@ -49,6 +49,9 @@ type evalContext struct {
 	// costs provides the context for tracking the evaluation costs.
 	costs *CostTracker
 
+	// memory provides the context for tracking peak memory during evaluation.
+	memory *memoryTrackerState
+
 	// ctx is the context for async call implementations to use.
 	ctx context.Context
 
@@ -128,6 +131,7 @@ func (f *ExecutionFrame) Close() {
 		f.ctx.interrupt = nil
 		f.ctx.state = nil
 		f.ctx.costs = nil
+		f.ctx.memory = nil
 		f.ctx.interrupted.Store(false)
 		f.ctx.interruptCheckCount.Store(0)
 		f.ctx.interruptCheckFrequency = 0

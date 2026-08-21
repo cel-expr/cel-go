@@ -141,6 +141,7 @@ type AttributePatternType = interpreter.AttributePattern
 type EvalDetails struct {
 	state       interpreter.EvalState
 	costTracker *interpreter.CostTracker
+	memTracker  *types.MemoryTracker
 }
 
 // State of the evaluation, non-nil if the OptTrackState or OptExhaustiveEval is specified
@@ -160,6 +161,26 @@ func (ed *EvalDetails) ActualCost() *uint64 {
 	}
 	cost := ed.costTracker.ActualCost()
 	return &cost
+}
+
+// PeakMemory returns the peak memory watermark observed through the course of execution when
+// `MemoryTracking` is enabled. Otherwise, returns nil if memory tracking was not enabled.
+func (ed *EvalDetails) PeakMemory() *uint32 {
+	if ed == nil || ed.memTracker == nil {
+		return nil
+	}
+	peak := ed.memTracker.Peak()
+	return &peak
+}
+
+// MemoryTracker returns the memory tracker associated with the evaluation when `MemoryTracking`
+// is enabled, which additionally reports whether any observed value was too expensive to size.
+// Otherwise, returns nil if memory tracking was not enabled.
+func (ed *EvalDetails) MemoryTracker() *types.MemoryTracker {
+	if ed == nil {
+		return nil
+	}
+	return ed.memTracker
 }
 
 // EvalResult encapsulates the response from a ConcurrentEval call.
@@ -189,6 +210,8 @@ type prog struct {
 	callCostEstimator interpreter.ActualCostEstimator
 	costOptions       []interpreter.CostTrackerOption
 	costLimit         *uint64
+	memoryOptions     []types.MemoryTrackerOption
+	memoryLimit       *uint32
 
 	// hasAsync indicates the planned expression contains an asynchronous function call, which can
 	// only be resolved by ConcurrentEval.
@@ -313,35 +336,51 @@ func newProgram(e *Env, a *ast.AST, opts []ProgramOption) (Program, error) {
 		plannerOptions = append(plannerOptions, interpreter.RegexProgramSizeLimit(limit))
 	}
 
-	// Enable exhaustive eval, state tracking and cost tracking last since they require a factory.
-	if p.evalOpts&(OptExhaustiveEval|OptTrackState|OptTrackCost) != 0 {
-		costOptCount := len(p.costOptions)
-		if p.costLimit != nil {
-			costOptCount++
-		}
-		costOpts := make([]interpreter.CostTrackerOption, 0, costOptCount)
-		costOpts = append(costOpts, p.costOptions...)
-		if p.costLimit != nil {
-			costOpts = append(costOpts, interpreter.CostTrackerLimit(*p.costLimit))
-		}
-		// Creating a new cost tracker for each evaluation causes significant work that
-		// needs to be repeated for each evaluation even though the cost tracker is
-		// mostly read-only once constructed. Therefore it gets constructed
-		// once now and later a cheap clone is used for each evaluation.
-		tracker, err := interpreter.NewCostTracker(p.callCostEstimator, costOpts...)
-		if err != nil {
-			return nil, fmt.Errorf("construct cost tracker: %w", err)
-		}
-		trackerFactory := func() (*interpreter.CostTracker, error) {
-			return tracker.Clone()
-		}
+	// Enable exhaustive eval, state tracking, cost tracking, and memory tracking last since they
+	// require a factory.
+	if p.evalOpts&(OptExhaustiveEval|OptTrackState|OptTrackCost|OptTrackMemory) != 0 {
 		var observers []interpreter.PlannerOption
 		if p.evalOpts&(OptExhaustiveEval|OptTrackState) != 0 {
 			// EvalStateObserver is required for OptExhaustiveEval.
 			observers = append(observers, interpreter.EvalStateObserver())
 		}
 		if p.evalOpts&OptTrackCost == OptTrackCost {
+			costOptCount := len(p.costOptions)
+			if p.costLimit != nil {
+				costOptCount++
+			}
+			costOpts := make([]interpreter.CostTrackerOption, 0, costOptCount)
+			costOpts = append(costOpts, p.costOptions...)
+			if p.costLimit != nil {
+				costOpts = append(costOpts, interpreter.CostTrackerLimit(*p.costLimit))
+			}
+			// Creating a new cost tracker for each evaluation causes significant work that
+			// needs to be repeated for each evaluation even though the cost tracker is
+			// mostly read-only once constructed. Therefore it gets constructed
+			// once now and later a cheap clone is used for each evaluation.
+			tracker, err := interpreter.NewCostTracker(p.callCostEstimator, costOpts...)
+			if err != nil {
+				return nil, fmt.Errorf("construct cost tracker: %w", err)
+			}
+			trackerFactory := func() (*interpreter.CostTracker, error) {
+				return tracker.Clone()
+			}
 			observers = append(observers, interpreter.CostObserver(interpreter.CostTrackerFactory(trackerFactory)))
+		}
+		if p.evalOpts&OptTrackMemory == OptTrackMemory {
+			memOptCount := len(p.memoryOptions)
+			if p.memoryLimit != nil {
+				memOptCount++
+			}
+			memOpts := make([]types.MemoryTrackerOption, 0, memOptCount)
+			memOpts = append(memOpts, p.memoryOptions...)
+			if p.memoryLimit != nil {
+				memOpts = append(memOpts, types.MemoryTrackerLimit(*p.memoryLimit))
+			}
+			memTrackerFactory := func() (*types.MemoryTracker, error) {
+				return types.NewMemoryTracker(memOpts...), nil
+			}
+			observers = append(observers, interpreter.MemoryObserver(interpreter.MemoryTrackerFactory(memTrackerFactory)))
 		}
 		// Enable exhaustive eval over a basic observer since it offers a superset of features.
 		if p.evalOpts&OptExhaustiveEval == OptExhaustiveEval {
@@ -406,6 +445,8 @@ func (p *prog) Eval(input any) (out ref.Val, det *EvalDetails, err error) {
 				det.state = o
 			case *interpreter.CostTracker:
 				det.costTracker = o
+			case *types.MemoryTracker:
+				det.memTracker = o
 			}
 		})
 	} else {
@@ -547,6 +588,8 @@ func (p *prog) ConcurrentEval(ctx context.Context, input any) <-chan EvalResult 
 						det.state = o
 					case *interpreter.CostTracker:
 						det.costTracker = o
+					case *types.MemoryTracker:
+						det.memTracker = o
 					}
 				})
 			} else {

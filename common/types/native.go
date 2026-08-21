@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -251,6 +252,7 @@ type nativeObj struct {
 	val      any
 	valType  *NativeType
 	refValue reflect.Value
+	aggSize  uint32
 }
 
 func (o *nativeObj) ConvertToNative(typeDesc reflect.Type) (any, error) {
@@ -365,6 +367,9 @@ func (o *nativeObj) Value() any {
 
 // AggregateSize implements the AggregateSizeVisitor interface method.
 func (o *nativeObj) AggregateSize(sizer AggregateSizer) uint32 {
+	if sz := atomic.LoadUint32(&o.aggSize); sz != 0 {
+		return sz
+	}
 	refVal := reflect.Indirect(o.refValue)
 	if !refVal.IsValid() {
 		return 0
@@ -376,6 +381,9 @@ func (o *nativeObj) AggregateSize(sizer AggregateSizer) uint32 {
 			continue
 		}
 		total = safeAddUint32(total, sizer.AggregateSize(fieldValue))
+	}
+	if cacheableAggregateSize(sizer) {
+		atomic.StoreUint32(&o.aggSize, total)
 	}
 	return total
 }

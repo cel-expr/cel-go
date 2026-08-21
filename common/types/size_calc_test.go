@@ -241,8 +241,8 @@ func TestCalculateSize(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			calculator := NewSizeCalculator()
-			if got := calculator.AggregateSize(tc.val); got != tc.want {
-				t.Errorf("AggregateSize(%v) got %d, want %d", tc.val, got, tc.want)
+			if got := calculator.ApproximateAggregateSize(tc.val).Size; got != tc.want {
+				t.Errorf("ApproximateAggregateSize(%v) got %d, want %d", tc.val, got, tc.want)
 			}
 		})
 	}
@@ -253,6 +253,26 @@ type customPureMapper struct {
 }
 
 type customSizerVal int
+
+func (c customSizerVal) ConvertToNative(typeDesc reflect.Type) (any, error) {
+	return int(c), nil
+}
+
+func (c customSizerVal) ConvertToType(typeVal ref.Type) ref.Val {
+	return Int(c)
+}
+
+func (c customSizerVal) Equal(other ref.Val) ref.Val {
+	return Bool(c == other)
+}
+
+func (c customSizerVal) Type() ref.Type {
+	return IntType
+}
+
+func (c customSizerVal) Value() any {
+	return int(c)
+}
 
 func (c customSizerVal) Size() ref.Val {
 	return Int(c)
@@ -299,26 +319,26 @@ func TestSizeCalculatorOptions(t *testing.T) {
 	t.Run("maxDepth default limit 5", func(t *testing.T) {
 		calc := NewSizeCalculator()
 		list5 := makeNestedList(4)
-		if got := calc.AggregateSize(list5); got == math.MaxUint32 {
-			t.Errorf("AggregateSize for depth 5 got MaxUint32, want calculated size")
+		if got := calc.ApproximateAggregateSize(list5); got.LimitExceeded || got.Size == math.MaxUint32 {
+			t.Errorf("ApproximateAggregateSize for depth 5 got %+v, want within limits", got)
 		}
 
 		list6 := makeNestedList(5)
-		if got := calc.AggregateSize(list6); got != math.MaxUint32 {
-			t.Errorf("AggregateSize for depth 6 got %d, want MaxUint32", got)
+		if got := calc.ApproximateAggregateSize(list6); !got.LimitExceeded || got.Size != math.MaxUint32 {
+			t.Errorf("ApproximateAggregateSize for depth 6 got %+v, want MaxUint32 and LimitExceeded", got)
 		}
 	})
 
 	t.Run("maxDepth custom option", func(t *testing.T) {
 		calc := NewSizeCalculator(SizeCalculatorMaxDepth(2))
 		list2 := makeNestedList(1)
-		if got := calc.AggregateSize(list2); got == math.MaxUint32 {
-			t.Errorf("AggregateSize for depth 2 got MaxUint32, want calculated size")
+		if got := calc.ApproximateAggregateSize(list2); got.LimitExceeded || got.Size == math.MaxUint32 {
+			t.Errorf("ApproximateAggregateSize for depth 2 got %+v, want within limits", got)
 		}
 
 		list3 := makeNestedList(2)
-		if got := calc.AggregateSize(list3); got != math.MaxUint32 {
-			t.Errorf("AggregateSize for depth 3 got %d, want MaxUint32", got)
+		if got := calc.ApproximateAggregateSize(list3); !got.LimitExceeded || got.Size != math.MaxUint32 {
+			t.Errorf("ApproximateAggregateSize for depth 3 got %+v, want MaxUint32 and LimitExceeded", got)
 		}
 	})
 
@@ -329,8 +349,8 @@ func TestSizeCalculatorOptions(t *testing.T) {
 			smallElems[i] = Int(i)
 		}
 		smallList := NewRefValList(adapter, smallElems)
-		if got := calc.AggregateSize(smallList); got == math.MaxUint32 {
-			t.Errorf("AggregateSize for 100 elements got MaxUint32, want calculated size")
+		if got := calc.ApproximateAggregateSize(smallList); got.LimitExceeded || got.Size == math.MaxUint32 {
+			t.Errorf("ApproximateAggregateSize for 100 elements got %+v, want within limits", got)
 		}
 
 		largeElems := make([]ref.Val, 10001)
@@ -338,21 +358,21 @@ func TestSizeCalculatorOptions(t *testing.T) {
 			largeElems[i] = Int(i)
 		}
 		largeList := NewRefValList(adapter, largeElems)
-		if got := calc.AggregateSize(largeList); got != math.MaxUint32 {
-			t.Errorf("AggregateSize for 10001 elements got %d, want MaxUint32", got)
+		if got := calc.ApproximateAggregateSize(largeList); !got.LimitExceeded || got.Size != math.MaxUint32 {
+			t.Errorf("ApproximateAggregateSize for 10001 elements got %+v, want MaxUint32 and LimitExceeded", got)
 		}
 	})
 
 	t.Run("maxTraversal custom option", func(t *testing.T) {
 		calc := NewSizeCalculator(SizeCalculatorMaxTraversal(5))
 		list4 := NewRefValList(adapter, []ref.Val{Int(1), Int(2), Int(3), Int(4)})
-		if got := calc.AggregateSize(list4); got == math.MaxUint32 {
-			t.Errorf("AggregateSize for 5 nodes got MaxUint32, want calculated size")
+		if got := calc.ApproximateAggregateSize(list4); got.LimitExceeded || got.Size == math.MaxUint32 {
+			t.Errorf("ApproximateAggregateSize for 5 nodes got %+v, want within limits", got)
 		}
 
 		list5 := NewRefValList(adapter, []ref.Val{Int(1), Int(2), Int(3), Int(4), Int(5)})
-		if got := calc.AggregateSize(list5); got != math.MaxUint32 {
-			t.Errorf("AggregateSize for 6 nodes got %d, want MaxUint32", got)
+		if got := calc.ApproximateAggregateSize(list5); !got.LimitExceeded || got.Size != math.MaxUint32 {
+			t.Errorf("ApproximateAggregateSize for 6 nodes got %+v, want MaxUint32 and LimitExceeded", got)
 		}
 	})
 
@@ -363,8 +383,8 @@ func TestSizeCalculatorOptions(t *testing.T) {
 				{Bb: 42},
 			},
 		}
-		if got := calc.AggregateSize(msg); got != math.MaxUint32 {
-			t.Errorf("AggregateSize for proto nested msg got %d, want MaxUint32", got)
+		if got := calc.ApproximateAggregateSize(msg); !got.LimitExceeded || got.Size != math.MaxUint32 {
+			t.Errorf("ApproximateAggregateSize for proto nested msg got %+v, want MaxUint32 and LimitExceeded", got)
 		}
 	})
 
@@ -375,8 +395,8 @@ func TestSizeCalculatorOptions(t *testing.T) {
 				String("subk"): String("subv"),
 			}),
 		})
-		if got := calc.AggregateSize(nestedMap); got != math.MaxUint32 {
-			t.Errorf("AggregateSize for nested map got %d, want MaxUint32", got)
+		if got := calc.ApproximateAggregateSize(nestedMap); !got.LimitExceeded || got.Size != math.MaxUint32 {
+			t.Errorf("ApproximateAggregateSize for nested map got %+v, want MaxUint32 and LimitExceeded", got)
 		}
 	})
 
@@ -387,8 +407,8 @@ func TestSizeCalculatorOptions(t *testing.T) {
 		type Level1 struct{ L2 Level2 }
 
 		obj := Level1{L2: Level2{L3: Level3{Val: "deep"}}}
-		if got := calc.AggregateSize(obj); got != math.MaxUint32 {
-			t.Errorf("AggregateSize for native struct depth > 2 got %d, want MaxUint32", got)
+		if got := calc.ApproximateAggregateSize(obj); !got.LimitExceeded || got.Size != math.MaxUint32 {
+			t.Errorf("ApproximateAggregateSize for native struct depth > 2 got %+v, want MaxUint32 and LimitExceeded", got)
 		}
 	})
 
@@ -397,8 +417,8 @@ func TestSizeCalculatorOptions(t *testing.T) {
 		m := map[string]map[string]string{
 			"outer": {"inner": "val"},
 		}
-		if got := calc.AggregateSize(m); got != math.MaxUint32 {
-			t.Errorf("AggregateSize for native nested map depth > 2 got %d, want MaxUint32", got)
+		if got := calc.ApproximateAggregateSize(m); !got.LimitExceeded || got.Size != math.MaxUint32 {
+			t.Errorf("ApproximateAggregateSize for native nested map depth > 2 got %+v, want MaxUint32 and LimitExceeded", got)
 		}
 	})
 
@@ -408,8 +428,8 @@ func TestSizeCalculatorOptions(t *testing.T) {
 			String("k1"): String("v1"),
 			String("k2"): String("v2"),
 		})
-		if got := calc.AggregateSize(m); got != math.MaxUint32 {
-			t.Errorf("AggregateSize for map traversal > 3 got %d, want MaxUint32", got)
+		if got := calc.ApproximateAggregateSize(m); !got.LimitExceeded || got.Size != math.MaxUint32 {
+			t.Errorf("ApproximateAggregateSize for map traversal > 3 got %+v, want MaxUint32 and LimitExceeded", got)
 		}
 	})
 
@@ -419,46 +439,46 @@ func TestSizeCalculatorOptions(t *testing.T) {
 			SingleString: "hello",
 			SingleInt64:  42,
 		}
-		if got := calc.AggregateSize(msg); got != math.MaxUint32 {
-			t.Errorf("AggregateSize for proto traversal > 2 got %d, want MaxUint32", got)
+		if got := calc.ApproximateAggregateSize(msg); !got.LimitExceeded || got.Size != math.MaxUint32 {
+			t.Errorf("ApproximateAggregateSize for proto traversal > 2 got %+v, want MaxUint32 and LimitExceeded", got)
 		}
 	})
 
 	t.Run("maxTraversal native struct limit", func(t *testing.T) {
 		calc := NewSizeCalculator(SizeCalculatorMaxTraversal(2))
 		s := struct{ A, B, C int }{A: 1, B: 2, C: 3}
-		if got := calc.AggregateSize(s); got != math.MaxUint32 {
-			t.Errorf("AggregateSize for native struct traversal > 2 got %d, want MaxUint32", got)
+		if got := calc.ApproximateAggregateSize(s); !got.LimitExceeded || got.Size != math.MaxUint32 {
+			t.Errorf("ApproximateAggregateSize for native struct traversal > 2 got %+v, want MaxUint32 and LimitExceeded", got)
 		}
 	})
 
 	t.Run("maxTraversal native map limit", func(t *testing.T) {
 		calc := NewSizeCalculator(SizeCalculatorMaxTraversal(3))
 		m := map[string]int{"a": 1, "b": 2}
-		if got := calc.AggregateSize(m); got != math.MaxUint32 {
-			t.Errorf("AggregateSize for native map traversal > 3 got %d, want MaxUint32", got)
+		if got := calc.ApproximateAggregateSize(m); !got.LimitExceeded || got.Size != math.MaxUint32 {
+			t.Errorf("ApproximateAggregateSize for native map traversal > 3 got %+v, want MaxUint32 and LimitExceeded", got)
 		}
 	})
 
 	t.Run("maxTraversal native slice limit", func(t *testing.T) {
 		calc := NewSizeCalculator(SizeCalculatorMaxTraversal(3))
 		slice := []string{"a", "b", "c"}
-		if got := calc.AggregateSize(slice); got != math.MaxUint32 {
-			t.Errorf("AggregateSize for native slice traversal > 3 got %d, want MaxUint32", got)
+		if got := calc.ApproximateAggregateSize(slice); !got.LimitExceeded || got.Size != math.MaxUint32 {
+			t.Errorf("ApproximateAggregateSize for native slice traversal > 3 got %+v, want MaxUint32 and LimitExceeded", got)
 		}
 	})
 
 	t.Run("zero depth limit saturation", func(t *testing.T) {
 		calc := NewSizeCalculator(SizeCalculatorMaxDepth(0))
-		if got := calc.AggregateSize(Int(42)); got != math.MaxUint32 {
-			t.Errorf("AggregateSize with depth 0 got %d, want MaxUint32", got)
+		if got := calc.ApproximateAggregateSize(Int(42)); !got.LimitExceeded || got.Size != math.MaxUint32 {
+			t.Errorf("ApproximateAggregateSize with depth 0 got %+v, want MaxUint32 and LimitExceeded", got)
 		}
 	})
 
 	t.Run("zero traversal limit saturation", func(t *testing.T) {
 		calc := NewSizeCalculator(SizeCalculatorMaxTraversal(0))
-		if got := calc.AggregateSize(Int(42)); got != math.MaxUint32 {
-			t.Errorf("AggregateSize with traversal 0 got %d, want MaxUint32", got)
+		if got := calc.ApproximateAggregateSize(Int(42)); !got.LimitExceeded || got.Size != math.MaxUint32 {
+			t.Errorf("ApproximateAggregateSize with traversal 0 got %+v, want MaxUint32 and LimitExceeded", got)
 		}
 	})
 }
@@ -532,7 +552,7 @@ func BenchmarkCalculateSizeAmortized(b *testing.B) {
 			b.ReportAllocs()
 			calculator := NewSizeCalculator()
 			for i := 0; i < b.N; i++ {
-				_ = calculator.AggregateSize(bm.val)
+				_ = calculator.ApproximateAggregateSize(bm.val)
 			}
 		})
 	}
@@ -632,7 +652,7 @@ func BenchmarkCalculateSizeDynamic(b *testing.B) {
 			calculator := NewSizeCalculator()
 			for i := 0; i < b.N; i++ {
 				val := bm.valFn()
-				_ = calculator.AggregateSize(val)
+				_ = calculator.ApproximateAggregateSize(val)
 			}
 		})
 	}
@@ -664,28 +684,28 @@ func BenchmarkCalculateSizeScaled(b *testing.B) {
 			b.ReportAllocs()
 			calc := NewSizeCalculator()
 			for i := 0; i < b.N; i++ {
-				_ = calc.AggregateSize(builtinList)
+				_ = calc.ApproximateAggregateSize(builtinList)
 			}
 		})
 		b.Run(fmt.Sprintf("Amortized/custom_list/N=%d", size), func(b *testing.B) {
 			b.ReportAllocs()
 			calc := NewSizeCalculator()
 			for i := 0; i < b.N; i++ {
-				_ = calc.AggregateSize(customList)
+				_ = calc.ApproximateAggregateSize(customList)
 			}
 		})
 		b.Run(fmt.Sprintf("Amortized/builtin_map/N=%d", size), func(b *testing.B) {
 			b.ReportAllocs()
 			calc := NewSizeCalculator()
 			for i := 0; i < b.N; i++ {
-				_ = calc.AggregateSize(builtinMap)
+				_ = calc.ApproximateAggregateSize(builtinMap)
 			}
 		})
 		b.Run(fmt.Sprintf("Amortized/custom_map/N=%d", size), func(b *testing.B) {
 			b.ReportAllocs()
 			calc := NewSizeCalculator()
 			for i := 0; i < b.N; i++ {
-				_ = calc.AggregateSize(customMap)
+				_ = calc.ApproximateAggregateSize(customMap)
 			}
 		})
 		b.Run(fmt.Sprintf("Amortized/custom_pure_map/N=%d", size), func(b *testing.B) {
@@ -693,7 +713,7 @@ func BenchmarkCalculateSizeScaled(b *testing.B) {
 			calc := NewSizeCalculator()
 			pureMap := customPureMapper{Mapper: builtinMap}
 			for i := 0; i < b.N; i++ {
-				_ = calc.AggregateSize(pureMap)
+				_ = calc.ApproximateAggregateSize(pureMap)
 			}
 		})
 
@@ -703,7 +723,7 @@ func BenchmarkCalculateSizeScaled(b *testing.B) {
 			calc := NewSizeCalculator()
 			for i := 0; i < b.N; i++ {
 				l := NewRefValList(adapter, listElems)
-				_ = calc.AggregateSize(l)
+				_ = calc.ApproximateAggregateSize(l)
 			}
 		})
 		b.Run(fmt.Sprintf("FirstTime/custom_list/N=%d", size), func(b *testing.B) {
@@ -711,7 +731,7 @@ func BenchmarkCalculateSizeScaled(b *testing.B) {
 			calc := NewSizeCalculator()
 			for i := 0; i < b.N; i++ {
 				l := proxyLegacyList{proxy: NewRefValList(adapter, listElems)}
-				_ = calc.AggregateSize(l)
+				_ = calc.ApproximateAggregateSize(l)
 			}
 		})
 		b.Run(fmt.Sprintf("FirstTime/builtin_map/N=%d", size), func(b *testing.B) {
@@ -719,7 +739,7 @@ func BenchmarkCalculateSizeScaled(b *testing.B) {
 			calc := NewSizeCalculator()
 			for i := 0; i < b.N; i++ {
 				m := NewRefValMap(adapter, mapEntries)
-				_ = calc.AggregateSize(m)
+				_ = calc.ApproximateAggregateSize(m)
 			}
 		})
 		b.Run(fmt.Sprintf("FirstTime/custom_map/N=%d", size), func(b *testing.B) {
@@ -727,7 +747,7 @@ func BenchmarkCalculateSizeScaled(b *testing.B) {
 			calc := NewSizeCalculator()
 			for i := 0; i < b.N; i++ {
 				m := interopFoldableMap{Mapper: NewRefValMap(adapter, mapEntries)}
-				_ = calc.AggregateSize(m)
+				_ = calc.ApproximateAggregateSize(m)
 			}
 		})
 		b.Run(fmt.Sprintf("FirstTime/custom_pure_map/N=%d", size), func(b *testing.B) {
@@ -735,7 +755,7 @@ func BenchmarkCalculateSizeScaled(b *testing.B) {
 			calc := NewSizeCalculator()
 			for i := 0; i < b.N; i++ {
 				m := customPureMapper{Mapper: NewRefValMap(adapter, mapEntries)}
-				_ = calc.AggregateSize(m)
+				_ = calc.ApproximateAggregateSize(m)
 			}
 		})
 	}
@@ -751,14 +771,14 @@ func BenchmarkCalculateSizeScaled(b *testing.B) {
 			b.ReportAllocs()
 			calc := NewSizeCalculator()
 			for i := 0; i < b.N; i++ {
-				_ = calc.AggregateSize(builtinNested)
+				_ = calc.ApproximateAggregateSize(builtinNested)
 			}
 		})
 		b.Run(fmt.Sprintf("Complexity/custom_nested_list/Depth=%d_Width=%d", depth, width), func(b *testing.B) {
 			b.ReportAllocs()
 			calc := NewSizeCalculator()
 			for i := 0; i < b.N; i++ {
-				_ = calc.AggregateSize(customNested)
+				_ = calc.ApproximateAggregateSize(customNested)
 			}
 		})
 	}
@@ -838,8 +858,8 @@ func TestSizeCalculatorStringUnitLength(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			calc := NewSizeCalculator(tc.opts...)
-			if got := calc.AggregateSize(tc.val); got != tc.want {
-				t.Errorf("AggregateSize(%v) got %d, want %d", tc.val, got, tc.want)
+			if got := calc.ApproximateAggregateSize(tc.val).Size; got != tc.want {
+				t.Errorf("ApproximateAggregateSize(%v) got %d, want %d", tc.val, got, tc.want)
 			}
 		})
 	}
@@ -850,7 +870,7 @@ func TestEstimateAggregateSize(t *testing.T) {
 
 	t.Run("within_limits", func(t *testing.T) {
 		calc := NewSizeCalculator()
-		est := calc.EstimateAggregateSize(NewRefValList(adapter, []ref.Val{Int(1), Int(2)}))
+		est := calc.ApproximateAggregateSize(NewRefValList(adapter, []ref.Val{Int(1), Int(2)}))
 		if est.Size != 3 || est.LimitExceeded {
 			t.Errorf("EstimateAggregateSize() got %+v, want {Size: 3, LimitExceeded: false}", est)
 		}
@@ -859,7 +879,7 @@ func TestEstimateAggregateSize(t *testing.T) {
 	t.Run("traversal_limit_exceeded", func(t *testing.T) {
 		calc := NewSizeCalculator(SizeCalculatorMaxTraversal(2))
 		list := NewRefValList(adapter, []ref.Val{Int(1), Int(2), Int(3)})
-		est := calc.EstimateAggregateSize(list)
+		est := calc.ApproximateAggregateSize(list)
 		if est.Size != math.MaxUint32 || !est.LimitExceeded {
 			t.Errorf("EstimateAggregateSize() got %+v, want {Size: MaxUint32, LimitExceeded: true}", est)
 		}
@@ -868,7 +888,7 @@ func TestEstimateAggregateSize(t *testing.T) {
 	t.Run("depth_limit_exceeded", func(t *testing.T) {
 		calc := NewSizeCalculator(SizeCalculatorMaxDepth(1))
 		list := NewRefValList(adapter, []ref.Val{NewRefValList(adapter, []ref.Val{Int(1)})})
-		est := calc.EstimateAggregateSize(list)
+		est := calc.ApproximateAggregateSize(list)
 		if est.Size != math.MaxUint32 || !est.LimitExceeded {
 			t.Errorf("EstimateAggregateSize() got %+v, want {Size: MaxUint32, LimitExceeded: true}", est)
 		}
@@ -882,7 +902,7 @@ func TestEstimateAggregateSize(t *testing.T) {
 			A: customSizerVal(math.MaxUint32),
 			B: customSizerVal(math.MaxUint32),
 		}
-		est := calc.EstimateAggregateSize(val)
+		est := calc.ApproximateAggregateSize(val)
 		if est.Size != math.MaxUint32 || est.LimitExceeded {
 			t.Errorf("EstimateAggregateSize() got %+v, want {Size: MaxUint32, LimitExceeded: false}", est)
 		}
@@ -901,11 +921,11 @@ func TestAggregateSizeConcurrentAccess(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			calc := NewSizeCalculator()
-			if got := calc.AggregateSize(sharedList); got != 4 {
-				t.Errorf("AggregateSize(list) got %d, want 4", got)
+			if got := calc.ApproximateAggregateSize(sharedList).Size; got != 4 {
+				t.Errorf("ApproximateAggregateSize(list) got %d, want 4", got)
 			}
-			if got := calc.AggregateSize(sharedMap); got != 3 {
-				t.Errorf("AggregateSize(map) got %d, want 3", got)
+			if got := calc.ApproximateAggregateSize(sharedMap).Size; got != 3 {
+				t.Errorf("ApproximateAggregateSize(map) got %d, want 3", got)
 			}
 		}()
 	}
@@ -921,11 +941,11 @@ func TestAggregateSizeAbortedComputationNotMemoized(t *testing.T) {
 	t.Run("list", func(t *testing.T) {
 		shared := NewRefValList(adapter, []ref.Val{Int(1), Int(2), Int(3), Int(4), Int(5)})
 		strict := NewSizeCalculator(SizeCalculatorMaxTraversal(2))
-		if est := strict.EstimateAggregateSize(shared); !est.LimitExceeded {
+		if est := strict.ApproximateAggregateSize(shared); !est.LimitExceeded {
 			t.Fatalf("strict EstimateAggregateSize() got %+v, want LimitExceeded", est)
 		}
 		generous := NewSizeCalculator()
-		est := generous.EstimateAggregateSize(shared)
+		est := generous.ApproximateAggregateSize(shared)
 		if est.Size != 6 || est.LimitExceeded {
 			t.Errorf("generous EstimateAggregateSize() got %+v, want {Size: 6, LimitExceeded: false}", est)
 		}
@@ -937,11 +957,11 @@ func TestAggregateSizeAbortedComputationNotMemoized(t *testing.T) {
 			Int(3): Int(4),
 		})
 		strict := NewSizeCalculator(SizeCalculatorMaxTraversal(2))
-		if est := strict.EstimateAggregateSize(shared); !est.LimitExceeded {
+		if est := strict.ApproximateAggregateSize(shared); !est.LimitExceeded {
 			t.Fatalf("strict EstimateAggregateSize() got %+v, want LimitExceeded", est)
 		}
 		generous := NewSizeCalculator()
-		est := generous.EstimateAggregateSize(shared)
+		est := generous.ApproximateAggregateSize(shared)
 		if est.Size != 5 || est.LimitExceeded {
 			t.Errorf("generous EstimateAggregateSize() got %+v, want {Size: 5, LimitExceeded: false}", est)
 		}
@@ -950,13 +970,13 @@ func TestAggregateSizeAbortedComputationNotMemoized(t *testing.T) {
 	t.Run("completed_computation_is_memoized", func(t *testing.T) {
 		shared := NewRefValList(adapter, []ref.Val{Int(1), Int(2)})
 		calc := NewSizeCalculator()
-		if got := calc.AggregateSize(shared); got != 3 {
-			t.Fatalf("AggregateSize() got %d, want 3", got)
+		if got := calc.ApproximateAggregateSize(shared).Size; got != 3 {
+			t.Fatalf("ApproximateAggregateSize() got %d, want 3", got)
 		}
 		// A subsequent sizing under a stricter budget serves the memoized total rather
 		// than recomputing (and aborting).
 		strict := NewSizeCalculator(SizeCalculatorMaxTraversal(2))
-		est := strict.EstimateAggregateSize(shared)
+		est := strict.ApproximateAggregateSize(shared)
 		if est.Size != 3 || est.LimitExceeded {
 			t.Errorf("strict EstimateAggregateSize() after memoization got %+v, want {Size: 3, LimitExceeded: false}", est)
 		}

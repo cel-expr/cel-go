@@ -16,9 +16,11 @@ package ext
 
 import (
 	"fmt"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"cel.dev/cel-go/cel"
 	"cel.dev/cel-go/checker"
@@ -184,6 +186,292 @@ func TestBindings(t *testing.T) {
 			asts = append(asts, cAst)
 			for _, ast := range asts {
 				testEvalWithCost(t, env, ast, tc.in, tc.actualCost)
+			}
+		})
+	}
+}
+
+// nestedBindExpr produces an exponentially amplified value through nested cel.bind calls:
+//
+//	cel.bind(a0, [0,1,2,3,4,5,6,7,8,9],
+//	  cel.bind(a1, [a0,a0,a0,a0,a0,a0,a0,a0,a0,a0],
+//	    ... cel.bind(aN, [aN-1 x10], aN == aN)))
+//
+// Each level is physically a 10-element list of references to the level below, so the
+// logical element count grows by 10x per level while the physical allocation stays small.
+func nestedBindExpr(levels int) string {
+	expr := fmt.Sprintf("a%d == a%d", levels, levels)
+	for i := levels; i >= 1; i-- {
+		refs := strings.TrimSuffix(strings.Repeat(fmt.Sprintf("a%d,", i-1), 10), ",")
+		expr = fmt.Sprintf("cel.bind(a%d, [%s], %s)", i, refs, expr)
+	}
+	return fmt.Sprintf("cel.bind(a0, [0,1,2,3,4,5,6,7,8,9], %s)", expr)
+}
+
+func TestBindingsMemoryPeakAmplification(t *testing.T) {
+	// The tracked peak reflects the full logical element count of the largest bound value:
+	// size(a0) = 11, and size(aN) = 1 + 10*size(aN-1). Each bound level is a list of
+	// references to a single shared instance whose aggregate size is memoized on first
+	// computation, so sizing each level costs ~11 traversals while remaining exact — the
+	// calculator's traversal and depth budgets never bind on the shared structure.
+	tests := []struct {
+		levels   int
+		wantPeak uint32
+	}{
+		{levels: 2, wantPeak: 1111},
+		{levels: 4, wantPeak: 111111},
+	}
+	env, err := cel.NewEnv(Bindings())
+	if err != nil {
+		t.Fatalf("cel.NewEnv(Bindings()) failed: %v", err)
+	}
+	for _, tc := range tests {
+		t.Run(fmt.Sprintf("levels_%d", tc.levels), func(t *testing.T) {
+			expr := nestedBindExpr(tc.levels)
+			ast, iss := env.Compile(expr)
+			if iss.Err() != nil {
+				t.Fatalf("env.Compile(%v) failed: %v", expr, iss.Err())
+			}
+			prg, err := env.Program(ast, cel.MemoryTracking())
+			if err != nil {
+				t.Fatalf("env.Program() failed: %v", err)
+			}
+			out, details, err := prg.Eval(cel.NoVars())
+			if err != nil {
+				t.Fatalf("prg.Eval() failed: %v", err)
+			}
+			if out != types.True {
+				t.Errorf("prg.Eval() got %v, wanted true", out)
+			}
+			peak := details.PeakMemory()
+			if peak == nil {
+				t.Fatal("EvalDetails.PeakMemory() got nil, wanted non-nil peak")
+			}
+			if *peak != tc.wantPeak {
+				t.Errorf("EvalDetails.PeakMemory() got %d, wanted %d", *peak, tc.wantPeak)
+			}
+			if details.MemoryTracker().CalculationLimitExceeded() {
+				t.Error("MemoryTracker.CalculationLimitExceeded() got true, wanted false for exact memoized sizing")
+			}
+		})
+	}
+}
+
+func TestBindingsMemoryLimitAmplification(t *testing.T) {
+	// With eight amplification levels the logical size is ~10^9 elements while the physical
+	// structure is ~90 small lists sharing backing storage. The memory limit must trip while
+	// the bound values are being constructed, long before the a8 == a8 comparison would
+	// attempt to traverse the logical structure.
+	//
+	// Because each level's aggregate size is memoized on the shared list instances, sizing
+	// stays exact (size(aN) = 1 + 10*size(aN-1)) at ~11 traversals per level, and the
+	// calculator's traversal and depth budgets never bind under either configuration below.
+	// The limit trips at the a5 binding, whose exact logical size of 1,111,111 elements
+	// exceeds the 1M limit. Since sizing walks shared references without materializing the
+	// logical value, the Go-native allocations stay flat (~20KB) regardless of the
+	// calculator budgets — the flat allocation bound below asserts exactly that.
+	env, err := cel.NewEnv(Bindings())
+	if err != nil {
+		t.Fatalf("cel.NewEnv(Bindings()) failed: %v", err)
+	}
+	expr := nestedBindExpr(8)
+	ast, iss := env.Compile(expr)
+	if iss.Err() != nil {
+		t.Fatalf("env.Compile() failed: %v", iss.Err())
+	}
+
+	tests := []struct {
+		name string
+		opts []cel.ProgramOption
+	}{
+		{
+			name: "default_calculator_limits",
+			opts: []cel.ProgramOption{cel.MemoryLimit(1_000_000)},
+		},
+		{
+			name: "custom_calculator_limits_100k_traversals_10_deep",
+			opts: []cel.ProgramOption{
+				cel.MemoryTracking(
+					types.MemoryTrackerSizeCalculator(types.NewSizeCalculator(
+						types.SizeCalculatorMaxTraversal(100_000),
+						types.SizeCalculatorMaxDepth(10)))),
+				cel.MemoryLimit(1_000_000),
+			},
+		},
+	}
+
+	// Subtests share process-global MemStats and must not run in parallel.
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			prg, err := env.Program(ast, tc.opts...)
+			if err != nil {
+				t.Fatalf("env.Program() failed: %v", err)
+			}
+			var before, after runtime.MemStats
+			runtime.GC()
+			runtime.ReadMemStats(&before)
+			_, _, err = prg.Eval(cel.NoVars())
+			runtime.ReadMemStats(&after)
+
+			if err == nil || !strings.Contains(err.Error(), "memory limit exceeded") {
+				t.Fatalf("prg.Eval() got error %v, wanted error containing 'memory limit exceeded'", err)
+			}
+			allocated := after.TotalAlloc - before.TotalAlloc
+			t.Logf("evaluation allocated %d bytes", allocated)
+			// Measured allocation is ~20KB in either configuration; 1MiB provides ample
+			// headroom for incidental runtime allocations while still proving the sizing
+			// pass allocates nothing proportional to the traversal budget or the logical
+			// value size.
+			const maxAllocBytes = 1 << 20 // 1MiB
+			if allocated > maxAllocBytes {
+				t.Errorf("evaluation allocated %d bytes, wanted less than %d", allocated, maxAllocBytes)
+			}
+		})
+	}
+}
+
+// doublingStringBindExpr doubles the input string s through nested cel.bind calls:
+//
+//	cel.bind(a0, s, cel.bind(a1, a0 + a0, ... cel.bind(aN, aN-1 + aN-1, aN == aN)))
+//
+// Unlike list concatenation, string concatenation materializes a new backing string at each
+// level, so the physical allocation doubles alongside the logical size.
+func doublingStringBindExpr(levels int) string {
+	expr := fmt.Sprintf("a%d == a%d", levels, levels)
+	for i := levels; i >= 1; i-- {
+		expr = fmt.Sprintf("cel.bind(a%d, a%d + a%d, %s)", i, i-1, i-1, expr)
+	}
+	return fmt.Sprintf("cel.bind(a0, s, %s)", expr)
+}
+
+func TestBindingsMemoryLimitStringConcat(t *testing.T) {
+	// A 1MiB input string doubled per bind level. The doublings rapidly exceed the 1M unit
+	// memory limit, so evaluation must terminate while the bound values are still being
+	// constructed; unchecked, the doublings would allocate ~510MiB cumulative through a8.
+	env, err := cel.NewEnv(Bindings(), cel.Variable("s", cel.StringType))
+	if err != nil {
+		t.Fatalf("cel.NewEnv(Bindings()) failed: %v", err)
+	}
+	in := map[string]any{"s": strings.Repeat("a", 1<<20)}
+	compile := func(levels int) *cel.Ast {
+		ast, iss := env.Compile(doublingStringBindExpr(levels))
+		if iss.Err() != nil {
+			t.Fatalf("env.Compile() failed: %v", iss.Err())
+		}
+		return ast
+	}
+	measure := func(t *testing.T, prg cel.Program) (time.Duration, uint64, error) {
+		var before, after runtime.MemStats
+		runtime.GC()
+		runtime.ReadMemStats(&before)
+		start := time.Now()
+		_, _, err := prg.Eval(in)
+		elapsed := time.Since(start)
+		runtime.ReadMemStats(&after)
+		return elapsed, after.TotalAlloc - before.TotalAlloc, err
+	}
+
+	// Subtests share process-global MemStats and must not run in parallel.
+	t.Run("limit_trips_mid_amplification", func(t *testing.T) {
+		prg, err := env.Program(compile(8), cel.MemoryLimit(1_000_000))
+		if err != nil {
+			t.Fatalf("env.Program() failed: %v", err)
+		}
+		elapsed, allocated, err := measure(t, prg)
+		if err == nil || !strings.Contains(err.Error(), "memory limit exceeded") {
+			t.Fatalf("prg.Eval() got error %v, wanted error containing 'memory limit exceeded'", err)
+		}
+		t.Logf("limit tripped in %v after allocating %d bytes", elapsed, allocated)
+		// The enforcement point follows the materialization of the offending value, so a
+		// few doublings of intermediates is the expected floor; the bound proves the
+		// remaining exponential trajectory (~510MiB unchecked) was halted.
+		const maxAllocBytes = 64 << 20 // 64MiB
+		if allocated > maxAllocBytes {
+			t.Errorf("evaluation allocated %d bytes, wanted less than %d", allocated, maxAllocBytes)
+		}
+		if elapsed > 5*time.Second {
+			t.Errorf("evaluation took %v, wanted under 5s", elapsed)
+		}
+	})
+
+	t.Run("unchecked_go_layer_baseline", func(t *testing.T) {
+		// The same workload the tripped case performed (doubling through 16MiB) without
+		// memory tracking: quantifies the Go-layer time and allocation the limit raced
+		// against, and the tracking overhead paid by the tripped case.
+		prg, err := env.Program(compile(4))
+		if err != nil {
+			t.Fatalf("env.Program() failed: %v", err)
+		}
+		elapsed, allocated, err := measure(t, prg)
+		if err != nil {
+			t.Fatalf("prg.Eval() failed: %v", err)
+		}
+		t.Logf("unchecked baseline completed in %v allocating %d bytes", elapsed, allocated)
+		const maxAllocBytes = 64 << 20 // 64MiB
+		if allocated > maxAllocBytes {
+			t.Errorf("evaluation allocated %d bytes, wanted less than %d", allocated, maxAllocBytes)
+		}
+	})
+}
+
+func BenchmarkBindingsMemoryAmplification(b *testing.B) {
+	env, err := cel.NewEnv(Bindings())
+	if err != nil {
+		b.Fatalf("cel.NewEnv(Bindings()) failed: %v", err)
+	}
+	compile := func(levels int) *cel.Ast {
+		ast, iss := env.Compile(nestedBindExpr(levels))
+		if iss.Err() != nil {
+			b.Fatalf("env.Compile() failed: %v", iss.Err())
+		}
+		return ast
+	}
+	ast2 := compile(2)
+	ast8 := compile(8)
+	customCalc := cel.MemoryTracking(
+		types.MemoryTrackerSizeCalculator(types.NewSizeCalculator(
+			types.SizeCalculatorMaxTraversal(100_000),
+			types.SizeCalculatorMaxDepth(10))))
+
+	benchmarks := []struct {
+		name    string
+		ast     *cel.Ast
+		opts    []cel.ProgramOption
+		wantErr bool
+	}{
+		// Successful evaluation of the 2-level expression, without and with tracking, to
+		// isolate the per-eval overhead of watermark observation and sizing.
+		{name: "levels_2_no_tracking", ast: ast2},
+		{name: "levels_2_tracking", ast: ast2, opts: []cel.ProgramOption{cel.MemoryTracking()}},
+		// Enforcement trip on the 8-level expression: sizing runs until the calculator's
+		// traversal budget aborts, the saturated watermark trips the limit, and evaluation
+		// unwinds through the cancellation panic.
+		{
+			name:    "levels_8_limit_default_calculator",
+			ast:     ast8,
+			opts:    []cel.ProgramOption{cel.MemoryLimit(1_000_000)},
+			wantErr: true,
+		},
+		{
+			name:    "levels_8_limit_custom_calculator_100k_10",
+			ast:     ast8,
+			opts:    []cel.ProgramOption{customCalc, cel.MemoryLimit(1_000_000)},
+			wantErr: true,
+		},
+	}
+	for _, bm := range benchmarks {
+		b.Run(bm.name, func(b *testing.B) {
+			prg, err := env.Program(bm.ast, bm.opts...)
+			if err != nil {
+				b.Fatalf("env.Program() failed: %v", err)
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				_, _, err := prg.Eval(cel.NoVars())
+				if bm.wantErr != (err != nil) {
+					b.Fatalf("prg.Eval() got err=%v, wantErr=%v", err, bm.wantErr)
+				}
 			}
 		})
 	}

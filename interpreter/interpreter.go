@@ -76,6 +76,10 @@ const (
 	// CostLimitExceeded indicates that the operation was cancelled in response to the actual cost limit being
 	// exceeded.
 	CostLimitExceeded
+
+	// MemoryLimitExceeded indicates that the operation was cancelled in response to the peak memory limit
+	// being exceeded.
+	MemoryLimitExceeded
 )
 
 // evalStateOption configures the evalStateFactory behavior.
