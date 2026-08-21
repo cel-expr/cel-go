@@ -7,6 +7,7 @@ package(
 go_library(
     name = "go_default_library",
     srcs = [
+        "antlr_parser.go",
         "errors.go",
         "helper.go",
         "input.go",

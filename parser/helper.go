@@ -152,6 +152,18 @@ func (p *parserHelper) newExpr(ctx any) ast.Expr {
 	return p.exprFactory.NewUnspecifiedExpr(p.newID(ctx))
 }
 
+// computeOffset converts a 0-based character offset from the local source content to
+// the corresponding absolute character offset in the parent SourceInfo (e.g. for RelativeSource).
+// If the location cannot be resolved or the source is nil, the original offset is returned.
+func (p *parserHelper) computeOffset(offset int32) int32 {
+	if p.source != nil {
+		if loc, found := p.source.OffsetLocation(offset); found {
+			return p.sourceInfo.ComputeOffsetAbsolute(int32(loc.Line()), int32(loc.Column()))
+		}
+	}
+	return offset
+}
+
 func (p *parserHelper) id(ctx any) int64 {
 	var offset ast.OffsetRange
 	switch c := ctx.(type) {
@@ -163,8 +175,8 @@ func (p *parserHelper) id(ctx any) int64 {
 		offset.Start = p.sourceInfo.ComputeOffset(int32(c.GetLine()), int32(c.GetColumn()))
 		offset.Stop = offset.Start + int32(len(c.GetText()))
 	case token:
-		offset.Start = c.start
-		offset.Stop = c.end
+		offset.Start = p.computeOffset(c.start)
+		offset.Stop = p.computeOffset(c.end)
 	case common.Location:
 		offset.Start = p.sourceInfo.ComputeOffsetAbsolute(int32(c.Line()), int32(c.Column()))
 		offset.Stop = offset.Start
@@ -182,7 +194,7 @@ func (p *parserHelper) id(ctx any) int64 {
 
 func (p *parserHelper) idFromOffsets(start, stop int32) int64 {
 	id := p.nextID
-	p.sourceInfo.SetOffsetRange(id, ast.OffsetRange{Start: start, Stop: stop})
+	p.sourceInfo.SetOffsetRange(id, ast.OffsetRange{Start: p.computeOffset(start), Stop: p.computeOffset(stop)})
 	p.nextID++
 	return id
 }

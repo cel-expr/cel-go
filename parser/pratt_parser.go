@@ -288,7 +288,7 @@ func (p *prattParser) synchronizeOnDelimiter() {
 }
 
 func (p *prattParser) reportError(ctx any, format string, args ...any) ast.Expr {
-	if p.errorCount > p.errorRecoveryLimit {
+	if p.isRecoveryLimitExceeded() {
 		return p.helper.newExpr(common.NoLocation)
 	}
 	p.errorCount++
@@ -302,13 +302,11 @@ func (p *prattParser) reportError(ctx any, format string, args ...any) ast.Expr 
 	default:
 		location = p.helper.getLocation(err.ID())
 	}
-	if p.errorCount == p.errorRecoveryLimit+1 {
-		p.errors.syntaxError(location, fmt.Sprintf("error recovery attempt limit exceeded: %d", p.errorRecoveryLimit))
-		p.peekTok = token{kind: tokEnd, start: p.length, end: p.length}
-		return err
-	}
 	if p.errorCount <= p.errorReportingLimit {
 		p.errors.reportErrorAtID(err.ID(), location, format, args...)
+	}
+	if p.isRecoveryLimitExceeded() {
+		p.peekTok = token{kind: tokEnd, start: p.length, end: p.length}
 	}
 	return err
 }
@@ -389,7 +387,7 @@ func (p *prattParser) normalizeIdent(tok token, allowQuoted bool) string {
 			return ""
 		}
 		if !p.enableIdentEscapeSyntax {
-			p.reportError(tok, "unsupported syntax '`'")
+			p.reportError(tok, "unsupported syntax: '`'")
 		}
 		if len(text) < 2 || text[len(text)-1] != '`' {
 			p.reportError(tok, "unterminated quoted identifier")
@@ -418,8 +416,13 @@ func (p *prattParser) parse() ast.Expr {
 	if p.recursionLimitExceeded || p.isRecoveryLimitExceeded() {
 		return expr
 	}
-	if p.peekTok.kind != tokEnd && p.peekTok.kind != tokError {
-		p.reportError(p.peekTok, "Syntax error: mismatched input '%s' expecting <EOF>", p.tokenText(p.peekTok))
+	if p.peekTok.kind != tokEnd {
+		if p.peekTok.kind != tokError {
+			p.reportError(p.peekTok, "Syntax error: mismatched input '%s' expecting <EOF>", p.tokenText(p.peekTok))
+		}
+		for p.peekTok.kind != tokEnd && !p.isRecoveryLimitExceeded() {
+			p.nextToken()
+		}
 	}
 	return expr
 }
@@ -481,8 +484,8 @@ func (p *prattParser) parseLogicalChain(lhs ast.Expr, opInfo binaryOpInfo) ast.E
 	l := p.newLogicManager(opInfo.name, lhs)
 	for p.peekTok.kind == opInfo.kind {
 		opTok := p.nextToken()
-		opID := p.nextID(opTok)
 		rhs := p.parseBinaryAndTernary(opInfo.precedence + 1)
+		opID := p.nextID(opTok)
 		l.addTerm(opID, rhs)
 	}
 	return l.toExpr()
@@ -548,8 +551,13 @@ func (p *prattParser) parseSelectorChainTail(lhs ast.Expr) ast.Expr {
 			}
 			lhs = p.helper.newGlobalCall(opID, opName, lhs, index)
 		case tokLeftBrace:
-			if structName, ok := p.extractStructName(lhs); ok {
-				lhs = p.parseStruct(lhs.ID(), structName)
+			if rng, found := p.helper.sourceInfo.GetOffsetRange(lhs.ID()); found {
+				if structName, ok := p.extractStructName(lhs); ok {
+					objID := p.helper.id(rng)
+					lhs = p.parseStruct(objID, structName)
+				} else {
+					return lhs
+				}
 			} else {
 				return lhs
 			}
