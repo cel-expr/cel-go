@@ -178,7 +178,6 @@ func TestExtendCheckerParity(t *testing.T) {
 	}
 }
 
-
 func TestCompile(t *testing.T) {
 	prg, err := Compile(`"hello " + name`, Variable("name", StringType))
 	if err != nil {

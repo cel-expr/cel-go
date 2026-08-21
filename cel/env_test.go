@@ -194,7 +194,6 @@ func TestEnvExtendDisableDeclaration(t *testing.T) {
 	}
 }
 
-
 func TestEnvCheckExtendRace(t *testing.T) {
 	t.Parallel()
 	for i := 0; i < 500; i++ {
@@ -327,8 +326,6 @@ func TestEnvConcurrentExtendWithMutation(t *testing.T) {
 	}
 	wg.Wait()
 }
-
-
 
 func TestEnvPartialVarsError(t *testing.T) {
 	env := testEnv(t)

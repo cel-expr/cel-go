@@ -116,3 +116,79 @@ func TestSafeCeil(t *testing.T) {
 		})
 	}
 }
+
+func TestSizeEstimate(t *testing.T) {
+	s1 := FixedSizeEstimate(5)
+	s2 := FixedSizeEstimate(10)
+	if got := s1.Add(s2); got.Min != 15 || got.Max != 15 {
+		t.Errorf("s1.Add(s2) = %v, want {15, 15}", got)
+	}
+	if got := s1.Multiply(s2); got.Min != 50 || got.Max != 50 {
+		t.Errorf("s1.Multiply(s2) = %v, want {50, 50}", got)
+	}
+	if got := s1.Union(s2); got.Min != 5 || got.Max != 10 {
+		t.Errorf("s1.Union(s2) = %v, want {5, 10}", got)
+	}
+	if got := s1.MultiplyByCostFactor(0.5); got.Min != 3 || got.Max != 3 {
+		t.Errorf("s1.MultiplyByCostFactor(0.5) = %v, want {3, 3}", got)
+	}
+	if got := s1.MultiplyByCost(FixedCostEstimate(4)); got.Min != 20 || got.Max != 20 {
+		t.Errorf("s1.MultiplyByCost(4) = %v, want {20, 20}", got)
+	}
+	if got := s1.AsCost(); got.Min != 5 || got.Max != 5 {
+		t.Errorf("s1.AsCost() = %v, want {5, 5}", got)
+	}
+	if got := UnknownSizeEstimate(); got.Min != 0 || got.Max != math.MaxUint64 {
+		t.Errorf("UnknownSizeEstimate() = %v, want {0, MaxUint64}", got)
+	}
+	if got := RangedSizeEstimate(3, 8); got.Min != 3 || got.Max != 8 {
+		t.Errorf("RangedSizeEstimate(3, 8) = %v, want {3, 8}", got)
+	}
+	if got := AtLeastOne(FixedSizeEstimate(0)); got.Min != 1 || got.Max != 1 {
+		t.Errorf("AtLeastOne(0) = %v, want {1, 1}", got)
+	}
+}
+
+func TestCostEstimate(t *testing.T) {
+	c1 := FixedCostEstimate(5)
+	c2 := FixedCostEstimate(10)
+	if got := c1.Add(c2); got.Min != 15 || got.Max != 15 {
+		t.Errorf("c1.Add(c2) = %v, want {15, 15}", got)
+	}
+	if got := c1.Multiply(c2); got.Min != 50 || got.Max != 50 {
+		t.Errorf("c1.Multiply(c2) = %v, want {50, 50}", got)
+	}
+	if got := c1.Union(c2); got.Min != 5 || got.Max != 10 {
+		t.Errorf("c1.Union(c2) = %v, want {5, 10}", got)
+	}
+	if got := c1.MultiplyByCostFactor(0.5); got.Min != 3 || got.Max != 3 {
+		t.Errorf("c1.MultiplyByCostFactor(0.5) = %v, want {3, 3}", got)
+	}
+	if got := UnknownCostEstimate(); got.Min != 0 || got.Max != math.MaxUint64 {
+		t.Errorf("UnknownCostEstimate() = %v, want {0, MaxUint64}", got)
+	}
+}
+
+func TestExtCostHelpers(t *testing.T) {
+	sz := FixedSizeEstimate(10)
+	costEst, resSz := EstimateStringScan(sz)
+	if costEst.Min != 1 || costEst.Max != 1 {
+		t.Errorf("EstimateStringScan cost = %v, want {1, 1}", costEst)
+	}
+	if resSz == nil || resSz.Min != 10 || resSz.Max != 10 {
+		t.Errorf("EstimateStringScan resSz = %v, want {10, 10}", resSz)
+	}
+
+	allocCost, allocSz := EstimateListAlloc(sz, 0.5)
+	if allocCost.Min != 15 || allocCost.Max != 15 {
+		t.Errorf("EstimateListAlloc cost = %v, want {15, 15}", allocCost)
+	}
+	if allocSz == nil || allocSz.Min != 10 || allocSz.Max != 10 {
+		t.Errorf("EstimateListAlloc allocSz = %v, want {10, 10}", allocSz)
+	}
+
+	callEst := NewCallEstimate(costEst, resSz)
+	if callEst.CostEstimate != costEst || callEst.ResultSize != resSz {
+		t.Errorf("NewCallEstimate = %v, want CostEstimate=%v ResultSize=%v", callEst, costEst, resSz)
+	}
+}
