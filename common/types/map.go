@@ -314,12 +314,21 @@ func (m *baseMap) AggregateSize(sizer AggregateSizer) uint32 {
 	if sz := atomic.LoadUint32(&m.aggSize); sz != 0 {
 		return sz
 	}
-	f := foldableAggregateSizer{sizer: sizer, total: 1}
-	m.Fold(&f)
-	if cacheableAggregateSize(sizer) {
-		atomic.StoreUint32(&m.aggSize, f.total)
+	var total uint32
+	if m.value != nil {
+		if t, ok := getMapElementsAggregateSize(sizer, m.value); ok {
+			total = t
+		}
 	}
-	return f.total
+	if total == 0 {
+		f := foldableAggregateSizer{sizer: sizer, total: 1}
+		m.Fold(&f)
+		total = f.total
+	}
+	if cacheableAggregateSize(sizer) {
+		atomic.StoreUint32(&m.aggSize, total)
+	}
+	return total
 }
 
 // String converts the map into a human-readable string.
@@ -331,7 +340,7 @@ func (m *baseMap) String() string {
 	for it.HasNext() == True {
 		k := it.Next()
 		v, _ := m.Find(k)
-		sb.WriteString(fmt.Sprintf("%v: %v", k, v))
+		fmt.Fprintf(&sb, "%v: %v", k, v)
 		if i != m.size-1 {
 			sb.WriteString(", ")
 		}
@@ -710,7 +719,8 @@ func (a *stringIfaceMapAccessor) Fold(f traits.Folder) {
 // accessing protoreflect.Map values.
 type protoMap struct {
 	Adapter
-	value *pb.Map
+	value   *pb.Map
+	aggSize uint32
 }
 
 // Contains returns whether the map contains the given key.
@@ -935,12 +945,18 @@ func (m *protoMap) AggregateSize(sizer AggregateSizer) uint32 {
 	if m.value == nil {
 		return 0
 	}
+	if sz := atomic.LoadUint32(&m.aggSize); sz != 0 {
+		return sz
+	}
 	total := uint32(1)
 	m.value.Range(func(k protoreflect.MapKey, v protoreflect.Value) bool {
 		total = safeAddUint32(total, sizer.AggregateSize(k))
 		total = safeAddUint32(total, sizer.AggregateSize(v))
 		return true
 	})
+	if cacheableAggregateSize(sizer) {
+		atomic.StoreUint32(&m.aggSize, total)
+	}
 	return total
 }
 

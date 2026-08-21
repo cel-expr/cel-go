@@ -19,6 +19,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"sync/atomic"
 
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
@@ -36,6 +37,7 @@ type protoObj struct {
 	value     proto.Message
 	typeDesc  *pb.TypeDescription
 	typeValue ref.Val
+	aggSize   uint32
 }
 
 // NewObject returns an object based on a proto.Message value which handles
@@ -172,11 +174,17 @@ func (o *protoObj) AggregateSize(sizer AggregateSizer) uint32 {
 	if o.value == nil {
 		return 0
 	}
+	if sz := atomic.LoadUint32(&o.aggSize); sz != 0 {
+		return sz
+	}
 	total := uint32(1)
 	o.value.ProtoReflect().Range(func(fd protoreflect.FieldDescriptor, v protoreflect.Value) bool {
 		total = safeAddUint32(total, sizer.AggregateSize(v))
 		return true
 	})
+	if cacheableAggregateSize(sizer) {
+		atomic.StoreUint32(&o.aggSize, total)
+	}
 	return total
 }
 

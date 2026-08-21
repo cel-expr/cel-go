@@ -37,16 +37,18 @@ func TestMemoryTrackerTrack(t *testing.T) {
 		}
 	})
 
-	t.Run("call_inputs_combined_watermark", func(t *testing.T) {
-		// Models the inputs to a.join(', ') where the list and separator coexist.
+	t.Run("consecutive_watermarks", func(t *testing.T) {
 		tracker := NewMemoryTracker()
-		list := NewRefValList(adapter, []ref.Val{String("a"), String("b")})
-		sep := String(", ")
-		if got := tracker.Track(list, sep); got != 4 {
-			t.Errorf("Track(list, sep) got %d, want 4 (3 list + 1 separator)", got)
+		list := NewRefValList(adapter, []ref.Val{Int(1), Int(2)})
+		if got := tracker.Track(list); got != 3 {
+			t.Errorf("Track(list) got %d, want 3", got)
 		}
-		if got := tracker.Peak(); got != 4 {
-			t.Errorf("Peak() got %d, want 4", got)
+		arg := Int(0)
+		if got := tracker.Track(arg); got != 1 {
+			t.Errorf("Track(arg) got %d, want 1", got)
+		}
+		if got := tracker.Peak(); got != 3 {
+			t.Errorf("Peak() got %d, want 3", got)
 		}
 	})
 
@@ -63,7 +65,7 @@ func TestMemoryTrackerTrack(t *testing.T) {
 		// Models the output of a + a, a string twice the size of its inputs.
 		tracker := NewMemoryTracker()
 		in := String(strings.Repeat("a", 50))
-		tracker.Track(in, in)
+		tracker.Track(in)
 		out := String(strings.Repeat("a", 100))
 		tracker.Track(out)
 		if got := tracker.Peak(); got != 10 {
@@ -71,10 +73,10 @@ func TestMemoryTrackerTrack(t *testing.T) {
 		}
 	})
 
-	t.Run("saturating_sum", func(t *testing.T) {
+	t.Run("saturating_value", func(t *testing.T) {
 		tracker := NewMemoryTracker()
 		big := customSizerVal(math.MaxUint32)
-		if got := tracker.Track(big, big); got != math.MaxUint32 {
+		if got := tracker.Track(big); got != math.MaxUint32 {
 			t.Errorf("Track() got %d, want MaxUint32", got)
 		}
 		if got := tracker.Peak(); got != math.MaxUint32 {
@@ -104,7 +106,7 @@ func TestMemoryTrackerSample(t *testing.T) {
 	t.Run("default_interval_samples_every_value", func(t *testing.T) {
 		tracker := NewMemoryTracker()
 		for i := 0; i < 3; i++ {
-			if got := tracker.Sample(Int(i)); got != 1 {
+			if got := tracker.Sample(1, Int(i)); got != 1 {
 				t.Errorf("Sample() got %d, want 1", got)
 			}
 		}
@@ -116,13 +118,13 @@ func TestMemoryTrackerSample(t *testing.T) {
 	t.Run("interval_skips_intermediate_samples", func(t *testing.T) {
 		tracker := NewMemoryTracker(MemoryTrackerSampleInterval(3))
 		list := NewRefValList(adapter, []ref.Val{Int(1), Int(2)})
-		if got := tracker.Sample(list); got != 0 {
-			t.Errorf("Sample() #1 got %d, want 0 (skipped)", got)
+		if got := tracker.Sample(1, list); got != 3 {
+			t.Errorf("Sample() #1 got %d, want 3 (computed on first observation)", got)
 		}
-		if got := tracker.Sample(list); got != 0 {
+		if got := tracker.Sample(1, list); got != 0 {
 			t.Errorf("Sample() #2 got %d, want 0 (skipped)", got)
 		}
-		if got := tracker.Sample(list); got != 3 {
+		if got := tracker.Sample(1, list); got != 3 {
 			t.Errorf("Sample() #3 got %d, want 3 (computed)", got)
 		}
 		if got := tracker.Peak(); got != 3 {
@@ -130,9 +132,34 @@ func TestMemoryTrackerSample(t *testing.T) {
 		}
 	})
 
+	t.Run("per_id_tracking", func(t *testing.T) {
+		tracker := NewMemoryTracker(MemoryTrackerSampleInterval(2))
+		list := NewRefValList(adapter, []ref.Val{Int(1), Int(2)})
+		// id 1: sample 1 (computed on first observation)
+		if got := tracker.Sample(1, list); got != 3 {
+			t.Errorf("Sample(1) #1 got %d, want 3", got)
+		}
+		// id 2: sample 1 (computed on first observation)
+		if got := tracker.Sample(2, list); got != 3 {
+			t.Errorf("Sample(2) #1 got %d, want 3", got)
+		}
+		// id 1: sample 2 (computed, multiple of 2)
+		if got := tracker.Sample(1, list); got != 3 {
+			t.Errorf("Sample(1) #2 got %d, want 3", got)
+		}
+		// id 2: sample 2 (computed, multiple of 2)
+		if got := tracker.Sample(2, list); got != 3 {
+			t.Errorf("Sample(2) #2 got %d, want 3", got)
+		}
+		// id 1: sample 3 (skipped)
+		if got := tracker.Sample(1, list); got != 0 {
+			t.Errorf("Sample(1) #3 got %d, want 0", got)
+		}
+	})
+
 	t.Run("zero_interval_clamped_to_one", func(t *testing.T) {
 		tracker := NewMemoryTracker(MemoryTrackerSampleInterval(0))
-		if got := tracker.Sample(Int(1)); got != 1 {
+		if got := tracker.Sample(1, Int(1)); got != 1 {
 			t.Errorf("Sample() got %d, want 1", got)
 		}
 	})
@@ -172,4 +199,5 @@ func TestMemoryTrackerVersion(t *testing.T) {
 
 // Interface conformance check: the tracker's calculator remains usable as an AggregateSizer
 // by visitor implementations.
+var _ ref.Val = customSizerVal(0)
 var _ traits.Sizer = customSizerVal(0)

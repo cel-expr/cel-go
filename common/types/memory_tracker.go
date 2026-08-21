@@ -14,6 +14,10 @@
 
 package types
 
+import (
+	"cel.dev/cel-go/common/types/ref"
+)
+
 const (
 	defaultMemoryTrackerSampleInterval = 1
 )
@@ -27,7 +31,8 @@ type MemoryTrackerOption func(*MemoryTracker)
 // tracking observations and terminate evaluation as appropriate.
 func MemoryTrackerLimit(limit uint32) MemoryTrackerOption {
 	return func(t *MemoryTracker) {
-		t.limit = &limit
+		t.limit = limit
+		t.hasLimit = true
 	}
 }
 
@@ -57,24 +62,23 @@ func MemoryTrackerSizeCalculator(calc *SizeCalculator) MemoryTrackerOption {
 //
 // Memory is measured in aggregate element counts as computed by a SizeCalculator, with all
 // arithmetic saturating at math.MaxUint32. The tracker is independent of any interpreter
-// implementation; evaluators feed it observations at points where values materialize:
+// implementation; evaluators feed it observations at the points where values materialize
+// during evaluation, such as resolved attributes, call results, constructed aggregates, and
+// values built up within comprehensions or bind initializers.
 //
-//   - inputs and outputs of calls (e.g. the target and arguments of a.join(', '))
-//   - resolved attribute values (e.g. the value of a.b.c)
-//   - values built up within literal blocks, comprehensions, and bind initializers
-//
-// The peak is the largest single observation, where one Track call observes a set of
-// coexistent values as a single watermark.
+// The peak is the largest single observation, where one Track call observes a value
+// as a watermark.
 //
 // A MemoryTracker is stateful and intended for use by a single evaluation at a time; it is
 // not safe for concurrent use.
 type MemoryTracker struct {
 	version        int
 	calc           *SizeCalculator
-	limit          *uint32
+	limit          uint32
+	hasLimit       bool
 	sampleInterval uint32
 
-	sampleCount       uint32
+	sampleCounts      map[int64]uint32
 	peak              uint32
 	calcLimitExceeded bool
 }
@@ -100,41 +104,60 @@ func (t *MemoryTracker) Version() int {
 	return t.version
 }
 
-// Track observes a set of coexistent values as a single watermark, returning their combined
-// aggregate size with saturation at math.MaxUint32.
-//
-// Call sites with multiple live values, such as the input arguments to a function call,
-// should be tracked in a single call so the watermark reflects their combined footprint.
-//
-// Within observers, consider whether to choose the aggregated argument sizes, the result size,
-// or both when working with allocating operations.
-func (t *MemoryTracker) Track(vals ...any) uint32 {
-	total := uint32(0)
-	for _, val := range vals {
-		est := t.calc.EstimateAggregateSize(val)
-		if est.LimitExceeded {
-			t.calcLimitExceeded = true
+// Track observes a value as a watermark, returning its aggregate size with saturation at math.MaxUint32.
+func (t *MemoryTracker) Track(val ref.Val) uint32 {
+	if val == nil {
+		return 0
+	}
+	switch v := val.(type) {
+	case Bool, Int, Uint, Double, Duration, Timestamp, Null, *Type, *Err, *Unknown:
+		if 1 > t.peak {
+			t.peak = 1
 		}
-		total = safeAddUint32(total, est.Size)
+		return 1
+	case String:
+		sz := t.calc.stringSize(len(v))
+		if sz > t.peak {
+			t.peak = sz
+		}
+		return sz
+	case Bytes:
+		sz := t.calc.stringSize(len(v))
+		if sz > t.peak {
+			t.peak = sz
+		}
+		return sz
 	}
-	if total > t.peak {
-		t.peak = total
+
+	est := t.calc.ApproximateAggregateSize(val)
+	if est.LimitExceeded {
+		t.calcLimitExceeded = true
 	}
-	return total
+	if est.Size > t.peak {
+		t.peak = est.Size
+	}
+	return est.Size
 }
 
-// Sample observes a value subject to the tracker's sample interval, returning the value's
-// aggregate size when computed, or zero when the observation is skipped.
+// Sample observes a value for a specific node ID subject to the tracker's sample interval,
+// returning the value's aggregate size when computed, or zero when the observation is skipped.
+//
+// The first observation of any node ID is always tracked; subsequent observations are sampled
+// at multiples of the sample interval.
 //
 // Sample is intended for high-frequency observation points, such as accumulator values built
 // up by comprehension loops or bind initializers, where sizing every iteration would be
 // prohibitively expensive.
-func (t *MemoryTracker) Sample(val any) uint32 {
-	t.sampleCount++
-	if t.sampleInterval > 1 && t.sampleCount%t.sampleInterval != 0 {
-		return 0
+func (t *MemoryTracker) Sample(id int64, val ref.Val) uint32 {
+	if t.sampleCounts == nil {
+		t.sampleCounts = make(map[int64]uint32)
 	}
-	return t.Track(val)
+	t.sampleCounts[id]++
+	count := t.sampleCounts[id]
+	if count == 1 || t.sampleInterval <= 1 || count%t.sampleInterval == 0 {
+		return t.Track(val)
+	}
+	return 0
 }
 
 // Peak returns the largest single watermark observed, saturating at math.MaxUint32.
@@ -145,7 +168,7 @@ func (t *MemoryTracker) Peak() uint32 {
 // ExceedsLimit indicates whether the peak observed memory exceeds the configured limit.
 // When no limit is configured, ExceedsLimit always returns false.
 func (t *MemoryTracker) ExceedsLimit() bool {
-	return t.limit != nil && t.peak > *t.limit
+	return t.hasLimit && t.peak > t.limit
 }
 
 // CalculationLimitExceeded indicates whether any tracked value was too expensive to size,

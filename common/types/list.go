@@ -274,9 +274,17 @@ func (l *baseList) AggregateSize(sizer AggregateSizer) uint32 {
 	if sz := atomic.LoadUint32(&l.aggSize); sz != 0 {
 		return sz
 	}
-	total := uint32(1)
-	for i := range l.size {
-		total = safeAddUint32(total, sizer.AggregateSize(l.get(i)))
+	var total uint32
+	if l.value != nil {
+		if t, ok := getSliceElementsAggregateSize(sizer, l.value); ok {
+			total = t
+		}
+	}
+	if total == 0 {
+		total = uint32(1)
+		for i := range l.size {
+			total = safeAddUint32(total, sizer.AggregateSize(l.get(i)))
+		}
 	}
 	if cacheableAggregateSize(sizer) {
 		atomic.StoreUint32(&l.aggSize, total)
@@ -365,6 +373,7 @@ type concatList struct {
 	prevList   traits.Lister
 	nextList   traits.Lister
 	cachedSize ref.Val
+	aggSize    uint32
 }
 
 func newConcatList(adapter Adapter, prevList, nextList traits.Lister) ref.Val {
@@ -499,7 +508,14 @@ func (l *concatList) Size() ref.Val {
 
 // AggregateSize implements the AggregateSizeVisitor interface method.
 func (l *concatList) AggregateSize(sizer AggregateSizer) uint32 {
-	return safeAddUint32(sizer.AggregateSize(l.prevList), sizer.AggregateSize(l.nextList))
+	if sz := atomic.LoadUint32(&l.aggSize); sz != 0 {
+		return sz
+	}
+	total := safeAddUint32(sizer.AggregateSize(l.prevList), sizer.AggregateSize(l.nextList))
+	if cacheableAggregateSize(sizer) {
+		atomic.StoreUint32(&l.aggSize, total)
+	}
+	return total
 }
 
 // String converts the concatenated list to a human-readable string.
