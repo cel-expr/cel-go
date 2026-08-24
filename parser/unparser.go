@@ -519,11 +519,7 @@ func isComplexOperator(expr ast.Expr) bool {
 func isAmbiguousUnaryOperand(expr ast.Expr) bool {
 	switch expr.Kind() {
 	case ast.CallKind:
-		call := expr.AsCall()
-		if call.IsMemberFunction() || len(call.Args()) != 1 {
-			return false
-		}
-		fun := call.FunctionName()
+		fun := expr.AsCall().FunctionName()
 		return fun == operators.LogicalNot || fun == operators.Negate
 	case ast.LiteralKind:
 		switch lit := expr.AsLiteral().(type) {
