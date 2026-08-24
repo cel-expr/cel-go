@@ -231,6 +231,22 @@ func (f *ExecutionFrame) CheckInterrupt() bool {
 	return false
 }
 
+// CostTracker returns the active CostTracker for this evaluation pass, or nil.
+func (f *ExecutionFrame) CostTracker() *CostTracker {
+	if f.ctx == nil {
+		return nil
+	}
+	return f.ctx.costs
+}
+
+// SetCostTracker sets the active CostTracker for this evaluation pass.
+func (f *ExecutionFrame) SetCostTracker(tracker *CostTracker) {
+	if f.ctx == nil {
+		f.ctx = evalContextPool.Get().(*evalContext)
+	}
+	f.ctx.costs = tracker
+}
+
 // ComputeResult tracks and computes the result of the given asynchronous function.
 //
 // The first invocation for a given (node id, args) tuple registers the call state and returns an

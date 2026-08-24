@@ -51,15 +51,16 @@ func newPlanner(disp Dispatcher,
 
 // planner is an implementation of the interpretablePlanner interface.
 type planner struct {
-	disp        Dispatcher
-	provider    types.Provider
-	adapter     types.Adapter
-	attrFactory AttributeFactory
-	container   *containers.Container
-	refMap      map[int64]*ast.ReferenceInfo
-	typeMap     map[int64]*types.Type
-	decorators  []InterpretableDecoratorV2
-	observers   []StatefulObserver
+	disp               Dispatcher
+	provider           types.Provider
+	adapter            types.Adapter
+	attrFactory        AttributeFactory
+	container          *containers.Container
+	refMap             map[int64]*ast.ReferenceInfo
+	typeMap            map[int64]*types.Type
+	decorators         []InterpretableDecoratorV2
+	observers          []StatefulObserver
+	costTrackerFactory func() (*CostTracker, error)
 }
 
 type planBuilder struct {
@@ -84,6 +85,9 @@ func (p *planner) Plan(expr ast.Expr) (InterpretableV2, error) {
 	i, err := pb.plan(expr)
 	if err != nil {
 		return nil, err
+	}
+	if p.costTrackerFactory != nil {
+		i = &costTrackingInterpretable{InterpretableV2: i, factory: p.costTrackerFactory}
 	}
 	if len(p.observers) == 0 {
 		return i, nil

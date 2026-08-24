@@ -111,7 +111,11 @@ func (fn *evalAsyncFunc) Exec(frame *ExecutionFrame) ref.Val {
 		return unk
 	}
 	result := frame.ComputeResult(fn.ID(), fn.Function(), fn.OverloadID(), fn.impl, argVals)
-	return types.LabelErrNode(fn.id, result)
+	val := types.LabelErrNode(fn.id, result)
+	if costs := frame.CostTracker(); costs != nil {
+		costs.EvalVarArgs(frame, fn.id, fn, argVals, val)
+	}
+	return val
 }
 
 // asyncCallStateTracker manages async call states across re-evaluations of a single program.

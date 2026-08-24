@@ -56,7 +56,7 @@ func CostObserver(opts ...costTrackPlanOption) PlannerOption {
 		if ct.factory == nil {
 			return nil, errors.New("cost tracker factory not configured")
 		}
-		p.observers = append(p.observers, ct)
+		p.costTrackerFactory = ct.factory
 		return p, nil
 	}
 }
@@ -91,86 +91,8 @@ func (ct *costTrackerFactory) GetState(frame *ExecutionFrame) any {
 	return frame.ctx.costs
 }
 
-// Observe computes the incremental cost of each step and records it into the CostTracker associated
-// with the evaluation.
+// Observe implements the StatefulObserver interface.
 func (ct *costTrackerFactory) Observe(vars Activation, id int64, programStep any, val ref.Val) {
-	frame := AsFrame(vars)
-	state := ct.GetState(frame)
-	if state == nil {
-		return
-	}
-	tracker, ok := state.(*CostTracker)
-	if !ok {
-		// The state is configured with CostTrackFactory so this shouldn't happen.
-		return
-	}
-	switch t := programStep.(type) {
-	case ConstantQualifier:
-		// TODO: Push identifiers on to the stack before observing constant qualifiers that apply to them
-		// and enable the below pop. Once enabled this can case can be collapsed into the Qualifier case.
-		tracker.cost++
-	case InterpretableConst:
-		// zero cost
-	case InterpretableAttribute:
-		switch a := t.Attr().(type) {
-		case *conditionalAttribute:
-			// Ternary has no direct cost. All cost is from the conditional and the true/false branch expressions.
-			tracker.stack.drop(a.falsy.ID(), a.truthy.ID(), a.expr.ID())
-		default:
-			tracker.stack.drop(t.Attr().ID())
-			tracker.cost += common.SelectAndIdentCost
-		}
-		if !tracker.presenceTestHasCost {
-			if _, isTestOnly := programStep.(*evalTestOnly); isTestOnly {
-				tracker.cost -= common.SelectAndIdentCost
-			}
-		}
-	case *evalExhaustiveConditional:
-		// Ternary has no direct cost. All cost is from the conditional and the true/false branch expressions.
-		tracker.stack.drop(t.attr.falsy.ID(), t.attr.truthy.ID(), t.attr.expr.ID())
-
-	// While the field names are identical, the boolean operation eval structs do not share an interface and so
-	// must be handled individually.
-	case *evalOr:
-		for _, term := range t.terms {
-			tracker.stack.drop(term.ID())
-		}
-	case *evalAnd:
-		for _, term := range t.terms {
-			tracker.stack.drop(term.ID())
-		}
-	case *evalExhaustiveOr:
-		for _, term := range t.terms {
-			tracker.stack.drop(term.ID())
-		}
-	case *evalExhaustiveAnd:
-		for _, term := range t.terms {
-			tracker.stack.drop(term.ID())
-		}
-	case *evalFold:
-		tracker.stack.drop(t.iterRange.ID())
-	case Qualifier:
-		tracker.cost++
-	case InterpretableCall:
-		if argVals, ok := tracker.stack.dropArgs(t.Args()); ok {
-			tracker.cost += tracker.costCall(t, argVals, val)
-		}
-	case InterpretableConstructor:
-		tracker.stack.dropArgs(t.InitVals())
-		switch t.Type() {
-		case types.ListType:
-			tracker.cost += common.ListCreateBaseCost
-		case types.MapType:
-			tracker.cost += common.MapCreateBaseCost
-		default:
-			tracker.cost += common.StructCreateBaseCost
-		}
-	}
-	tracker.stack.push(val, id)
-
-	if tracker.Limit != nil && tracker.cost > *tracker.Limit {
-		panic(EvalCancelledError{Cause: CostLimitExceeded, Message: "operation cancelled: actual cost limit exceeded"})
-	}
 }
 
 // CostTrackerOption configures the behavior of CostTracker objects.
@@ -231,8 +153,7 @@ type CostTracker struct {
 	Limit               *uint64
 	presenceTestHasCost bool
 
-	cost  uint64
-	stack refValStack
+	cost uint64
 }
 
 // Clone makes a shallow copy of the tracker.
@@ -251,6 +172,93 @@ func (c *CostTracker) Clone() (*CostTracker, error) {
 // ActualCost returns the runtime cost
 func (c *CostTracker) ActualCost() uint64 {
 	return c.cost
+}
+
+// CreateList records list literal construction cost.
+func (c *CostTracker) CreateList(id int64, res ref.Val) {
+	c.cost = cost.SafeAdd(c.cost, common.ListCreateBaseCost)
+	c.checkLimit()
+}
+
+// CreateMap records map literal construction cost.
+func (c *CostTracker) CreateMap(id int64, res ref.Val) {
+	c.cost = cost.SafeAdd(c.cost, common.MapCreateBaseCost)
+	c.checkLimit()
+}
+
+// CreateStruct records struct/object construction cost.
+func (c *CostTracker) CreateStruct(id int64, res ref.Val) {
+	c.cost = cost.SafeAdd(c.cost, common.StructCreateBaseCost)
+	c.checkLimit()
+}
+
+// EvalAttribute records attribute resolution cost (ident / select).
+func (c *CostTracker) EvalAttribute(id int64, isTestOnly bool, res ref.Val) {
+	if !isTestOnly || c.presenceTestHasCost {
+		c.cost = cost.SafeAdd(c.cost, common.SelectAndIdentCost)
+		c.checkLimit()
+	}
+}
+
+// Qualify records qualifier cost.
+func (c *CostTracker) Qualify(id int64) {
+	c.cost = cost.SafeAdd(c.cost, 1)
+	c.checkLimit()
+}
+
+type costTrackingInterpretable struct {
+	InterpretableV2
+	factory func() (*CostTracker, error)
+}
+
+func (c *costTrackingInterpretable) Exec(frame *ExecutionFrame) ref.Val {
+	if frame.CostTracker() == nil {
+		tracker, err := c.factory()
+		if err != nil {
+			return types.NewErr("cost tracker factory: %v", err)
+		}
+		frame.SetCostTracker(tracker)
+	}
+	return c.InterpretableV2.Exec(frame)
+}
+
+func (c *costTrackingInterpretable) Eval(ctx Activation) ref.Val {
+	return c.Exec(AsFrame(ctx))
+}
+
+// EvalZeroArity records the cost for a 0-arity call expression.
+func (c *CostTracker) EvalZeroArity(vars Activation, id int64, call InterpretableCall, result ref.Val) {
+	c.cost = cost.SafeAdd(c.cost, c.costCall(call, nil, result))
+	c.checkLimit()
+}
+
+// EvalUnary records the cost for a unary call expression.
+func (c *CostTracker) EvalUnary(vars Activation, id int64, call InterpretableCall, arg ref.Val, result ref.Val) {
+	var buf [1]ref.Val
+	buf[0] = arg
+	c.cost = cost.SafeAdd(c.cost, c.costCall(call, buf[:], result))
+	c.checkLimit()
+}
+
+// EvalBinary records the cost for a binary call expression.
+func (c *CostTracker) EvalBinary(vars Activation, id int64, call InterpretableCall, lhs, rhs ref.Val, result ref.Val) {
+	var buf [2]ref.Val
+	buf[0] = lhs
+	buf[1] = rhs
+	c.cost = cost.SafeAdd(c.cost, c.costCall(call, buf[:], result))
+	c.checkLimit()
+}
+
+// EvalVarArgs records the cost for a variadic call expression.
+func (c *CostTracker) EvalVarArgs(vars Activation, id int64, call InterpretableCall, args []ref.Val, result ref.Val) {
+	c.cost = cost.SafeAdd(c.cost, c.costCall(call, args, result))
+	c.checkLimit()
+}
+
+func (c *CostTracker) checkLimit() {
+	if c.Limit != nil && c.cost > *c.Limit {
+		panic(EvalCancelledError{Cause: CostLimitExceeded, Message: "operation cancelled: actual cost limit exceeded"})
+	}
 }
 
 func (c *CostTracker) costCall(call InterpretableCall, args []ref.Val, result ref.Val) uint64 {
@@ -341,58 +349,4 @@ func actualSize(value ref.Val) uint64 {
 		return actualSize(opt.GetValue())
 	}
 	return 1
-}
-
-type stackVal struct {
-	Val ref.Val
-	ID  int64
-}
-
-// refValStack keeps track of values of the stack for cost calculation purposes
-type refValStack []stackVal
-
-func (s *refValStack) push(val ref.Val, id int64) {
-	value := stackVal{Val: val, ID: id}
-	*s = append(*s, value)
-}
-
-// TODO: Allowing drop and dropArgs to remove stack items above the IDs they are provided is a workaround. drop and dropArgs
-// should find and remove only the stack items matching the provided IDs once all attributes are properly pushed and popped from stack.
-
-// drop searches the stack for each ID and removes the ID and all stack items above it.
-// If none of the IDs are found, the stack is not modified.
-// WARNING: It is possible for multiple expressions with the same ID to exist (due to how macros are implemented) so it's
-// possible that a dropped ID will remain on the stack.  They should be removed when IDs on the stack are popped.
-func (s *refValStack) drop(ids ...int64) {
-	for _, id := range ids {
-		for idx := len(*s) - 1; idx >= 0; idx-- {
-			if (*s)[idx].ID == id {
-				*s = (*s)[:idx]
-				break
-			}
-		}
-	}
-}
-
-// dropArgs searches the stack for all the args by their IDs, accumulates their associated ref.Vals and drops any
-// stack items above any of the arg IDs. If any of the IDs are not found the stack, false is returned.
-// Args are assumed to be found in the stack in reverse order, i.e. the last arg is expected to be found highest in
-// the stack.
-// WARNING: It is possible for multiple expressions with the same ID to exist (due to how macros are implemented) so it's
-// possible that a dropped ID will remain on the stack.  They should be removed when IDs on the stack are popped.
-func (s *refValStack) dropArgs(args []InterpretableV2) ([]ref.Val, bool) {
-	result := make([]ref.Val, len(args))
-argloop:
-	for nIdx := len(args) - 1; nIdx >= 0; nIdx-- {
-		for idx := len(*s) - 1; idx >= 0; idx-- {
-			if (*s)[idx].ID == args[nIdx].ID() {
-				el := (*s)[idx]
-				*s = (*s)[:idx]
-				result[nIdx] = el.Val
-				continue argloop
-			}
-		}
-		return nil, false
-	}
-	return result, true
 }

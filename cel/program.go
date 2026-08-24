@@ -341,7 +341,7 @@ func newProgram(e *Env, a *ast.AST, opts []ProgramOption) (Program, error) {
 			observers = append(observers, interpreter.EvalStateObserver())
 		}
 		if p.evalOpts&OptTrackCost == OptTrackCost {
-			observers = append(observers, interpreter.CostObserver(interpreter.CostTrackerFactory(trackerFactory)))
+			plannerOptions = append(plannerOptions, interpreter.CostObserver(interpreter.CostTrackerFactory(trackerFactory)))
 		}
 		// Enable exhaustive eval over a basic observer since it offers a superset of features.
 		if p.evalOpts&OptExhaustiveEval == OptExhaustiveEval {
@@ -369,19 +369,6 @@ func (p *prog) initInterpretable(a *ast.AST, plannerOptions []interpreter.Planne
 
 // Eval implements the Program interface method.
 func (p *prog) Eval(input any) (out ref.Val, det *EvalDetails, err error) {
-	// Configure error recovery for unexpected panics during evaluation. Note, the use of named
-	// return values makes it possible to modify the error response during the recovery
-	// function.
-	defer func() {
-		if r := recover(); r != nil {
-			switch t := r.(type) {
-			case interpreter.EvalCancelledError:
-				err = t
-			default:
-				err = fmt.Errorf("internal error: %v", r)
-			}
-		}
-	}()
 	// Asynchronous calls cannot be resolved by a single-pass evaluation. Reject before doing any
 	// work (this also covers ContextEval, which delegates here); ConcurrentEval does not call Eval.
 	if p.hasAsync {
@@ -398,19 +385,36 @@ func (p *prog) Eval(input any) (out ref.Val, det *EvalDetails, err error) {
 		}
 		defer frame.Close()
 	}
+	// Configure error recovery and details capture for evaluation.
+	defer func() {
+		if tracker := frame.CostTracker(); tracker != nil {
+			if det == nil {
+				det = &EvalDetails{}
+			}
+			det.costTracker = tracker
+		}
+		if r := recover(); r != nil {
+			switch t := r.(type) {
+			case interpreter.EvalCancelledError:
+				err = t
+			default:
+				err = fmt.Errorf("internal error: %v", r)
+			}
+		}
+	}()
+
 	if p.observable != nil {
 		det = &EvalDetails{}
 		out = p.observable.ObserveExec(frame, func(observed any) {
 			switch o := observed.(type) {
 			case interpreter.EvalState:
 				det.state = o
-			case *interpreter.CostTracker:
-				det.costTracker = o
 			}
 		})
 	} else {
 		out = p.interpretable.Exec(frame)
 	}
+
 	// The output of an internal Eval may have a value (`v`) that is a types.Err. This step
 	// translates the CEL value to a Go error response. This interface does not quite match the
 	// RPC signature which allows for multiple errors to be returned, but should be sufficient.
@@ -511,24 +515,31 @@ func (p *prog) ConcurrentEval(ctx context.Context, input any) <-chan EvalResult 
 
 	go func() {
 		defer close(resCh)
-		// Ensure concurrent eval handles panic / recovery properly
-		defer func() {
-			if r := recover(); r != nil {
-				switch t := r.(type) {
-				case interpreter.EvalCancelledError:
-					resCh <- EvalResult{Err: t}
-				default:
-					resCh <- EvalResult{Err: fmt.Errorf("internal error: %v", r)}
-				}
-			}
-		}()
-
 		frame, err := p.newAsyncFrame(ctx, input)
 		if err != nil {
 			resCh <- EvalResult{Err: err}
 			return
 		}
 		defer frame.Close()
+
+		var det *EvalDetails
+		// Ensure concurrent eval handles panic / recovery properly
+		defer func() {
+			if tracker := frame.CostTracker(); tracker != nil {
+				if det == nil {
+					det = &EvalDetails{}
+				}
+				det.costTracker = tracker
+			}
+			if r := recover(); r != nil {
+				switch t := r.(type) {
+				case interpreter.EvalCancelledError:
+					resCh <- EvalResult{EvalDetails: det, Err: t}
+				default:
+					resCh <- EvalResult{EvalDetails: det, Err: fmt.Errorf("internal error: %v", r)}
+				}
+			}
+		}()
 
 		// Completions are signaled to this channel as async calls finish. The asyncCallState
 		// fan-in also selects on ctx.Done(), so the sender will not leak if this loop returns early.
@@ -537,7 +548,6 @@ func (p *prog) ConcurrentEval(ctx context.Context, input any) <-chan EvalResult 
 
 		for {
 			var out ref.Val
-			var det *EvalDetails
 
 			if p.observable != nil {
 				det = &EvalDetails{}
@@ -545,12 +555,19 @@ func (p *prog) ConcurrentEval(ctx context.Context, input any) <-chan EvalResult 
 					switch o := observed.(type) {
 					case interpreter.EvalState:
 						det.state = o
-					case *interpreter.CostTracker:
-						det.costTracker = o
 					}
 				})
 			} else {
 				out = p.interpretable.Exec(frame)
+			}
+			// This ensures that cost tracking is present on the result passed through the channel
+			// in the positive outcome case, as opposed to the defer which captures these details
+			// in the evaluation error scenarios.
+			if tracker := frame.CostTracker(); tracker != nil {
+				if det == nil {
+					det = &EvalDetails{}
+				}
+				det.costTracker = tracker
 			}
 
 			// Communicate errors quickly.

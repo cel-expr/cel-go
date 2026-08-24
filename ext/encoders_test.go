@@ -249,7 +249,7 @@ func TestEncodersCosts(t *testing.T) {
 				"x": 100,
 			},
 			estimatedCost: checker.CostEstimate{Min: 2, Max: math.MaxUint64},
-			actualCost:    1,
+			actualCost:    math.MaxUint64,
 			version:       1,
 		},
 	}

@@ -2661,7 +2661,7 @@ func newTestPartialActivation(t testing.TB, in any, unknowns ...*AttributePatter
 
 // newStandardInterpreter builds a Dispatcher and TypeProvider with support for all of the CEL
 // builtins defined in the language definition.
-func newStandardInterpreter(t *testing.T,
+func newStandardInterpreter(t testing.TB,
 	container *containers.Container,
 	provider types.Provider,
 	adapter types.Adapter,
