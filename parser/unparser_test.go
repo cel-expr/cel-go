@@ -113,6 +113,19 @@ func TestUnparse(t *testing.T) {
 		{name: "select_quoted", in: "a.`b-c`"},
 		{name: "opt_select_quoted", in: "a.?`b.c`"},
 		{name: "message_create_quoted", in: "MyType{`in`: false}"},
+		// A unary operator whose operand is another unary operator, or a negative numeric
+		// literal, must keep the operand parenthesized. The grammar parses a run of leading
+		// '!' or '-' tokens as a single unary expression and cancels out pairs of them, and
+		// it also treats a leading '-' as part of an int or double literal.
+		{name: "call_not_not", in: `!(!a)`},
+		{name: "call_neg_neg", in: `-(-a)`},
+		{name: "call_neg_not", in: `-(!a)`},
+		{name: "call_not_neg", in: `!(-a)`},
+		{name: "call_neg_neg_neg", in: `-(-(-a))`},
+		{name: "call_neg_lit_int", in: `-(-1)`},
+		{name: "call_neg_lit_int_min", in: `-(-9223372036854775808)`},
+		{name: "call_neg_lit_double", in: `-(-1.5)`},
+		{name: "call_neg_lit_int_nested", in: `1 + -(-1)`},
 
 		// Equivalent expressions form unparse which do not match the originals.
 		{name: "call_add_equiv", in: `a+b-c`, out: `a + b - c`},

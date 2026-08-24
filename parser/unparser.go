@@ -17,6 +17,7 @@ package parser
 import (
 	"errors"
 	"fmt"
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -270,7 +271,7 @@ func (un *unparser) visitCallUnary(expr ast.Expr) error {
 		return fmt.Errorf("cannot unmangle operator: %s", fun)
 	}
 	un.str.WriteString(unmangled)
-	nested := isComplexOperator(args[0])
+	nested := isComplexOperator(args[0]) || isAmbiguousUnaryOperand(args[0])
 	return un.visitMaybeNested(args[0], nested)
 }
 
@@ -503,6 +504,30 @@ func isLowerPrecedence(op string, expr ast.Expr) bool {
 func isComplexOperator(expr ast.Expr) bool {
 	if expr.Kind() == ast.CallKind && len(expr.AsCall().Args()) >= 2 {
 		return true
+	}
+	return false
+}
+
+// Indicates whether the operand of a unary operator must be wrapped in parentheses in order for
+// the unparsed expression to parse back to an equivalent AST.
+//
+// The CEL grammar parses a run of leading '!' or '-' tokens as a single unary expression and drops
+// the operators when their count is even, and it also treats a leading '-' as part of an int or
+// double literal. Emitting such an operand without parentheses either changes the expression, e.g.
+// `!(!a)` would unparse to `!!a` which parses back to `a`, or produces output which does not parse
+// at all, e.g. `-(!a)` would unparse to `-!a`.
+func isAmbiguousUnaryOperand(expr ast.Expr) bool {
+	switch expr.Kind() {
+	case ast.CallKind:
+		fun := expr.AsCall().FunctionName()
+		return fun == operators.LogicalNot || fun == operators.Negate
+	case ast.LiteralKind:
+		switch lit := expr.AsLiteral().(type) {
+		case types.Int:
+			return lit < 0
+		case types.Double:
+			return math.Signbit(float64(lit))
+		}
 	}
 	return false
 }
