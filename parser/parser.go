@@ -87,9 +87,9 @@ func mustNewParser(opts ...Option) *Parser {
 // Parse parses the expression represented by source and returns the result.
 func (p *Parser) Parse(source common.Source) (*ast.AST, *common.Errors) {
 	if p.enablePrattParser {
-		return (&PrattParser{options: p.options}).Parse(source)
+		return (&prattParser{options: p.options}).Parse(source)
 	}
-	return (&AntlrParser{options: p.options}).Parse(source)
+	return (&antlrParser{options: p.options}).Parse(source)
 }
 
 // reservedIds are not legal to use as variables.  We exclude them post-parse, as they *are* valid

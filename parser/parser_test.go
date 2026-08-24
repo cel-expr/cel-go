@@ -2597,6 +2597,245 @@ func TestParserOptionErrors(t *testing.T) {
 	}
 }
 
+func TestSourceInfoPositions(t *testing.T) {
+	for _, pratt := range []bool{false, true} {
+		t.Run(fmt.Sprintf("enablePrattParser=%t", pratt), func(t *testing.T) {
+			t.Run("ASCII", func(t *testing.T) {
+				src := common.NewTextSource("a + b")
+				p, err := NewParser(EnablePrattParser(pratt))
+				if err != nil {
+					t.Fatalf("NewParser() failed: %v", err)
+				}
+				parsed, errs := p.Parse(src)
+				if len(errs.GetErrors()) > 0 {
+					t.Fatalf("Parse() failed: %s", errs.ToDisplayString())
+				}
+				sourceInfo := parsed.SourceInfo()
+				root := parsed.Expr()
+				if sourceInfo.GetStartLocation(root.ID()).Column() != 2 {
+					t.Errorf("expected root column 2, got %d", sourceInfo.GetStartLocation(root.ID()).Column())
+				}
+				args := root.AsCall().Args()
+				if len(args) != 2 {
+					t.Fatalf("expected 2 args, got %d", len(args))
+				}
+				if sourceInfo.GetStartLocation(args[0].ID()).Column() != 0 {
+					t.Errorf("expected arg[0] column 0, got %d", sourceInfo.GetStartLocation(args[0].ID()).Column())
+				}
+				if sourceInfo.GetStartLocation(args[1].ID()).Column() != 4 {
+					t.Errorf("expected arg[1] column 4, got %d", sourceInfo.GetStartLocation(args[1].ID()).Column())
+				}
+			})
+
+			t.Run("MixedUnicodeMultiByteAndMultiLine", func(t *testing.T) {
+				// Mix of 1-byte ASCII (a, b, +), 2-byte Unicode ("ñ"), 3-byte Unicode ("❤"), and 4-byte Unicode ("🚀")
+				expr := "a + \"ñ\" +\n\"🚀\" + \"❤\" + b"
+				src := common.NewTextSource(expr)
+				p, err := NewParser(EnablePrattParser(pratt))
+				if err != nil {
+					t.Fatalf("NewParser() failed: %v", err)
+				}
+				parsed, errs := p.Parse(src)
+				if len(errs.GetErrors()) > 0 {
+					t.Fatalf("Parse() failed: %s", errs.ToDisplayString())
+				}
+				sinfo := parsed.SourceInfo()
+
+				// AST hierarchy:
+				// expr4: [expr3] + [b]               (line 2, col 10)
+				// expr3: [expr2] + ["❤"]             (line 2, col 4)
+				// expr2: [expr1] + ["🚀"]            (line 1, col 8)
+				// expr1: [a] + ["ñ"]                 (line 1, col 2)
+				expr4 := parsed.Expr()
+				call4 := expr4.AsCall()
+				bExpr := call4.Args()[1]
+
+				expr3 := call4.Args()[0]
+				call3 := expr3.AsCall()
+				heartExpr := call3.Args()[1]
+
+				expr2 := call3.Args()[0]
+				call2 := expr2.AsCall()
+				rocketExpr := call2.Args()[1]
+
+				expr1 := call2.Args()[0]
+				call1 := expr1.AsCall()
+				aExpr := call1.Args()[0]
+				enyeExpr := call1.Args()[1]
+
+				assertLoc := func(name string, id int64, wantLine, wantCol int32) {
+					t.Helper()
+					loc := sinfo.GetStartLocation(id)
+					if int32(loc.Line()) != wantLine || int32(loc.Column()) != wantCol {
+						t.Errorf("%s location mismatch: got (%d, %d), want (%d, %d)",
+							name, loc.Line(), loc.Column(), wantLine, wantCol)
+					}
+				}
+
+				assertLoc("call1 (+)", expr1.ID(), 1, 2)
+				assertLoc("a", aExpr.ID(), 1, 0)
+				assertLoc("\"ñ\" (2-byte)", enyeExpr.ID(), 1, 4)
+				assertLoc("call2 (+)", expr2.ID(), 1, 8)
+				assertLoc("\"🚀\" (4-byte)", rocketExpr.ID(), 2, 0)
+				assertLoc("call3 (+)", expr3.ID(), 2, 4)
+				assertLoc("\"❤\" (3-byte)", heartExpr.ID(), 2, 6)
+				assertLoc("call4 (+)", expr4.ID(), 2, 10)
+				assertLoc("b", bExpr.ID(), 2, 12)
+			})
+		})
+	}
+}
+
+func TestPopulateMacroCalls(t *testing.T) {
+	for _, pratt := range []bool{false, true} {
+		t.Run(fmt.Sprintf("enablePrattParser=%t", pratt), func(t *testing.T) {
+			t.Run("DisabledByDefault", func(t *testing.T) {
+				p, err := NewParser(Macros(AllMacros...), PopulateMacroCalls(false), EnablePrattParser(pratt))
+				if err != nil {
+					t.Fatalf("NewParser() failed: %v", err)
+				}
+				parsed, errs := p.Parse(common.NewTextSource("has(a.b)"))
+				if len(errs.GetErrors()) > 0 {
+					t.Fatalf("unexpected error: %s", errs.ToDisplayString())
+				}
+				if len(parsed.SourceInfo().MacroCalls()) != 0 {
+					t.Errorf("expected 0 macro calls, got %d", len(parsed.SourceInfo().MacroCalls()))
+				}
+			})
+
+			t.Run("GlobalMacroCallRecorded", func(t *testing.T) {
+				p, err := NewParser(Macros(AllMacros...), PopulateMacroCalls(true), EnablePrattParser(pratt))
+				if err != nil {
+					t.Fatalf("NewParser() failed: %v", err)
+				}
+				parsed, errs := p.Parse(common.NewTextSource("has(a.b)"))
+				if len(errs.GetErrors()) > 0 {
+					t.Fatalf("unexpected error: %s", errs.ToDisplayString())
+				}
+				macroCalls := parsed.SourceInfo().MacroCalls()
+				if len(macroCalls) != 1 {
+					t.Fatalf("expected 1 macro call, got %d", len(macroCalls))
+				}
+			})
+
+			t.Run("ReceiverMacroCallRecorded", func(t *testing.T) {
+				p, err := NewParser(Macros(AllMacros...), PopulateMacroCalls(true), EnablePrattParser(pratt))
+				if err != nil {
+					t.Fatalf("NewParser() failed: %v", err)
+				}
+				parsed, errs := p.Parse(common.NewTextSource("[1, 2].exists(x, x > 0)"))
+				if len(errs.GetErrors()) > 0 {
+					t.Fatalf("unexpected error: %s", errs.ToDisplayString())
+				}
+				macroCalls := parsed.SourceInfo().MacroCalls()
+				if len(macroCalls) != 1 {
+					t.Fatalf("expected 1 macro call, got %d", len(macroCalls))
+				}
+			})
+
+			t.Run("NestedMacroCallsRecorded", func(t *testing.T) {
+				p, err := NewParser(Macros(AllMacros...), PopulateMacroCalls(true), EnablePrattParser(pratt))
+				if err != nil {
+					t.Fatalf("NewParser() failed: %v", err)
+				}
+				parsed, errs := p.Parse(common.NewTextSource("[1, 2].all(x, has(x.b))"))
+				if len(errs.GetErrors()) > 0 {
+					t.Fatalf("unexpected error: %s", errs.ToDisplayString())
+				}
+				macroCalls := parsed.SourceInfo().MacroCalls()
+				if len(macroCalls) != 2 {
+					t.Fatalf("expected 2 macro calls, got %d", len(macroCalls))
+				}
+			})
+		})
+	}
+}
+
+func TestErrorRecoveryLimits(t *testing.T) {
+	for _, pratt := range []bool{false, true} {
+		t.Run(fmt.Sprintf("enablePrattParser=%t", pratt), func(t *testing.T) {
+			t.Run("LimitZero", func(t *testing.T) {
+				p, err := NewParser(ErrorRecoveryLimit(0), EnablePrattParser(pratt))
+				if err != nil {
+					t.Fatalf("NewParser() failed: %v", err)
+				}
+				_, errs := p.Parse(common.NewTextSource("......"))
+				if len(errs.GetErrors()) == 0 {
+					t.Errorf("expected error recovery limit error, got none")
+				}
+			})
+
+			t.Run("LimitOne", func(t *testing.T) {
+				p, err := NewParser(ErrorRecoveryLimit(1), EnablePrattParser(pratt))
+				if err != nil {
+					t.Fatalf("NewParser() failed: %v", err)
+				}
+				_, errs := p.Parse(common.NewTextSource("......"))
+				if len(errs.GetErrors()) == 0 {
+					t.Errorf("expected error recovery limit error, got none")
+				}
+			})
+		})
+	}
+}
+
+func TestRecursionLimit(t *testing.T) {
+	for _, pratt := range []bool{false, true} {
+		t.Run(fmt.Sprintf("enablePrattParser=%t", pratt), func(t *testing.T) {
+			t.Run("DeeplyNestedBracketsLimitExceeded", func(t *testing.T) {
+				p, err := NewParser(MaxRecursionDepth(5), EnablePrattParser(pratt))
+				if err != nil {
+					t.Fatalf("NewParser() failed: %v", err)
+				}
+				_, errs := p.Parse(common.NewTextSource("[[[[[[1]]]]]]"))
+				if len(errs.GetErrors()) == 0 {
+					t.Errorf("expected recursion limit error, got none")
+				}
+			})
+		})
+	}
+
+	t.Run("PrattSequentialScopesDoNotAccumulateDepth", func(t *testing.T) {
+		p, err := NewParser(MaxRecursionDepth(2), EnablePrattParser(true))
+		if err != nil {
+			t.Fatalf("NewParser() failed: %v", err)
+		}
+		_, errs := p.Parse(common.NewTextSource("[1] + [2] + [3]"))
+		if len(errs.GetErrors()) > 0 {
+			t.Errorf("unexpected error on sequential scopes: %s", errs.ToDisplayString())
+		}
+	})
+
+	t.Run("PrattIgnoreExtraParens", func(t *testing.T) {
+		p, err := NewParser(MaxRecursionDepth(1), EnablePrattParser(true))
+		if err != nil {
+			t.Fatalf("NewParser() failed: %v", err)
+		}
+		_, errs := p.Parse(common.NewTextSource("((((1))))"))
+		if len(errs.GetErrors()) > 0 {
+			t.Errorf("unexpected error: %s", errs.ToDisplayString())
+		}
+	})
+
+	t.Run("PrattDeeplyNestedParens1000", func(t *testing.T) {
+		p, err := NewParser(MaxRecursionDepth(1), EnablePrattParser(true))
+		if err != nil {
+			t.Fatalf("NewParser() failed: %v", err)
+		}
+		expr1 := strings.Repeat("(", 1000) + "42" + strings.Repeat(")", 1000)
+		_, errs := p.Parse(common.NewTextSource(expr1))
+		if len(errs.GetErrors()) > 0 {
+			t.Errorf("unexpected error on 1000 parens literal: %s", errs.ToDisplayString())
+		}
+
+		expr2 := strings.Repeat("(", 1000) + "1 + 2" + strings.Repeat(")", 1000)
+		_, errs = p.Parse(common.NewTextSource(expr2))
+		if len(errs.GetErrors()) > 0 {
+			t.Errorf("unexpected error on 1000 parens binary: %s", errs.ToDisplayString())
+		}
+	})
+}
+
 func BenchmarkParse(b *testing.B) {
 	p, err := NewParser(
 		Macros(AllMacros...),
