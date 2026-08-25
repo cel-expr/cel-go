@@ -33,7 +33,7 @@ func FakeRPC(timeout time.Duration) func(context.Context, ...ref.Val) ref.Val {
 			in := args[0].(types.String)
 			return in.Add(types.String(" success!"))
 		case <-rpcCtx.Done():
-			return types.NewErr(rpcCtx.Err().Error())
+			return types.WrapErr(rpcCtx.Err())
 		}
 	}
 }

@@ -88,7 +88,7 @@ func Example_cel_WellKnownTypes() {
 	}
 
 	opts := []cel.EnvOption{
-		cel.Types(wrapperspb.String(""), structVal),
+		cel.Types(structVal),
 		cel.Variable("wrapped_str", cel.ObjectType("google.protobuf.StringValue")),
 		cel.Variable("json_obj", cel.ObjectType("google.protobuf.Struct")),
 	}

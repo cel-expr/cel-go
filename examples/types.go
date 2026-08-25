@@ -12,9 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package jwt
+// Package examples provides example types and functions used in examples.
+package examples
 
-// NewJWTLib constructs an internal jwtLib instance for testing.
-func NewJWTLib() *jwtLib {
-	return &jwtLib{}
+// User is a sample user struct with fields tagged for JSON serialization.
+type User struct {
+	Name  string   `json:"name"`
+	Age   int      `json:"age"`
+	Roles []string `json:"roles"`
+}
+
+// Account is a sample account struct with fields tagged for CEL field access.
+type Account struct {
+	ID        int64  `cel:"id"`
+	OwnerName string `cel:"owner"`
 }

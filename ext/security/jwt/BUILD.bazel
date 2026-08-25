@@ -22,7 +22,6 @@ go_test(
     name = "go_default_test",
     size = "small",
     srcs = [
-        "export_test.go",
         "jwt_test.go",
     ],
     embed = [
