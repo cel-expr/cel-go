@@ -2681,6 +2681,17 @@ func TestRegexProgramSizeLimit(t *testing.T) {
 			vars: map[string]any{"pattern": "[0-9]+"},
 			want: types.True,
 		},
+		{
+			name:       "constant_counted_repetition_exceeds_limit_ast_validation",
+			expr:       `"123 abc 456".matches('[a-z]{8}')`,
+			compileErr: "regex program size 10 exceeds limit of 5",
+		},
+		{
+			name: "dynamic_counted_repetition_within_limit",
+			expr: `"aa bb".matches(pattern)`,
+			vars: map[string]any{"pattern": "a{2}"},
+			want: types.True,
+		},
 	}
 
 	for _, tc := range tests {
