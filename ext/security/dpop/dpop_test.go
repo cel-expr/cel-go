@@ -166,11 +166,23 @@ func TestDPoPCELIntegration(t *testing.T) {
 		},
 	}
 	jwtTokenStr := createTestJWT(t, jwtAccessHeader, jwtAccessPayload)
+	jwtATH := dpop.ComputeAccessTokenHash(jwtTokenStr)
+	jwtProofPayload := map[string]any{
+		"jti":    "e1j3V_bKic8-LAEB",
+		"htm":    "GET",
+		"htu":    "https://resource.example.org/protectedresource",
+		"iat":    1562262618,
+		"ath":    jwtATH,
+		"nonce":  "nonce-xyz-123",
+		"custom": "custom-value",
+	}
+	jwtProofStr := createTestDPoP(t, header, jwtProofPayload)
 
 	env, err := cel.NewEnv(
 		dpop.Library(),
 		jwt.Library(),
 		cel.Variable("proofStr", cel.StringType),
+		cel.Variable("jwtProofStr", cel.StringType),
 		cel.Variable("dpopHeader", cel.StringType),
 		cel.Variable("tokenStr", cel.StringType),
 		cel.Variable("authHeader", cel.StringType),
@@ -182,6 +194,7 @@ func TestDPoPCELIntegration(t *testing.T) {
 
 	vars := map[string]any{
 		"proofStr":    proofStr,
+		"jwtProofStr": jwtProofStr,
 		"dpopHeader":  "DPoP " + proofStr,
 		"tokenStr":    accessTokenStr,
 		"authHeader":  dpopAuthHeader,
@@ -234,8 +247,8 @@ func TestDPoPCELIntegration(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "proof_ath",
-			expr: `dpop.parse(proofStr).value().ath == 'fUHyO2r2Z3DZ53EsNrWBb0xWXoaNy59IiKCAqksmQEo'`,
+			name: "proof_accessTokenHash",
+			expr: `dpop.parse(proofStr).value().accessTokenHash == 'fUHyO2r2Z3DZ53EsNrWBb0xWXoaNy59IiKCAqksmQEo'`,
 			want: true,
 		},
 		{
@@ -246,21 +259,6 @@ func TestDPoPCELIntegration(t *testing.T) {
 		{
 			name: "proof_thumbprint",
 			expr: `dpop.parse(proofStr).value().thumbprint == '0ZcOCORZNYy-DWpqq30jZyJGHTN0d2HglBV3uiguA4I'`,
-			want: true,
-		},
-		{
-			name: "dpop_ath_func",
-			expr: `dpop.ath(tokenStr) == 'fUHyO2r2Z3DZ53EsNrWBb0xWXoaNy59IiKCAqksmQEo'`,
-			want: true,
-		},
-		{
-			name: "dpop_ath_from_auth_header",
-			expr: `dpop.ath(authHeader) == 'fUHyO2r2Z3DZ53EsNrWBb0xWXoaNy59IiKCAqksmQEo'`,
-			want: true,
-		},
-		{
-			name: "dpop_thumbprint_func",
-			expr: `dpop.thumbprint(dpop.parse(proofStr).value().jwk) == '0ZcOCORZNYy-DWpqq30jZyJGHTN0d2HglBV3uiguA4I'`,
 			want: true,
 		},
 		{
@@ -279,51 +277,6 @@ func TestDPoPCELIntegration(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "matchesMethod_exact",
-			expr: `dpop.parse(proofStr).matchesMethod('GET')`,
-			want: true,
-		},
-		{
-			name: "matchesMethod_case_insensitive",
-			expr: `dpop.parse(proofStr).matchesMethod('get')`,
-			want: true,
-		},
-		{
-			name: "matchesMethod_mismatch",
-			expr: `dpop.parse(proofStr).matchesMethod('POST')`,
-			want: false,
-		},
-		{
-			name: "matchesURI_exact",
-			expr: `dpop.parse(proofStr).matchesURI('https://resource.example.org/protectedresource')`,
-			want: true,
-		},
-		{
-			name: "matchesHtu_alias",
-			expr: `dpop.parse(proofStr).matchesHtu('https://resource.example.org/protectedresource')`,
-			want: true,
-		},
-		{
-			name: "matchesURI_with_default_port_and_case",
-			expr: `dpop.parse(proofStr).matchesURI('HTTPS://RESOURCE.EXAMPLE.ORG:443/protectedresource')`,
-			want: true,
-		},
-		{
-			name: "matchesURI_ignores_query_and_fragment",
-			expr: `dpop.parse(proofStr).matchesURI('https://resource.example.org/protectedresource?query=1#frag')`,
-			want: true,
-		},
-		{
-			name: "matchesURI_path_cleaning",
-			expr: `dpop.parse(proofStr).matchesURI('https://resource.example.org/foo/../protectedresource')`,
-			want: true,
-		},
-		{
-			name: "matchesURI_mismatch",
-			expr: `dpop.parse(proofStr).matchesURI('https://other.example.org/protectedresource')`,
-			want: false,
-		},
-		{
 			name: "matchesRequest_success",
 			expr: `dpop.parse(proofStr).matchesRequest('GET', 'https://resource.example.org/protectedresource')`,
 			want: true,
@@ -334,23 +287,23 @@ func TestDPoPCELIntegration(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "matchesRequest_with_default_port_and_case",
+			expr: `dpop.parse(proofStr).matchesRequest('get', 'HTTPS://RESOURCE.EXAMPLE.ORG:443/protectedresource?query=1#frag')`,
+			want: true,
+		},
+		{
+			name: "matchesRequest_path_cleaning",
+			expr: `dpop.parse(proofStr).matchesRequest('GET', 'https://resource.example.org/foo/../protectedresource')`,
+			want: true,
+		},
+		{
 			name: "matchesRequest_method_mismatch",
 			expr: `dpop.parse(proofStr).matchesRequest('POST', 'https://resource.example.org/protectedresource')`,
 			want: false,
 		},
 		{
-			name: "matchesAccessToken_raw",
-			expr: `dpop.parse(proofStr).matchesAccessToken(tokenStr)`,
-			want: true,
-		},
-		{
-			name: "matchesAccessToken_header",
-			expr: `dpop.parse(proofStr).matchesAccessToken(authHeader)`,
-			want: true,
-		},
-		{
-			name: "matchesAccessToken_mismatch",
-			expr: `dpop.parse(proofStr).matchesAccessToken('wrong-token')`,
+			name: "matchesRequest_uri_mismatch",
+			expr: `dpop.parse(proofStr).matchesRequest('GET', 'https://other.example.org/protectedresource')`,
 			want: false,
 		},
 		{
@@ -364,23 +317,18 @@ func TestDPoPCELIntegration(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "matchesConfirmation_string",
-			expr: `dpop.parse(proofStr).matchesConfirmation('0ZcOCORZNYy-DWpqq30jZyJGHTN0d2HglBV3uiguA4I')`,
-			want: true,
-		},
-		{
-			name: "matchesConfirmation_map",
-			expr: `dpop.parse(proofStr).matchesConfirmation({'jkt': '0ZcOCORZNYy-DWpqq30jZyJGHTN0d2HglBV3uiguA4I'})`,
+			name: "matchesToken_with_jwt_string",
+			expr: `dpop.parse(jwtProofStr).matchesToken(jwtTokenStr)`,
 			want: true,
 		},
 		{
 			name: "matchesToken_with_parsed_jwt",
-			expr: `dpop.parse(proofStr).matchesToken(jwt.parse(jwtTokenStr))`,
+			expr: `dpop.parse(jwtProofStr).matchesToken(jwt.parse(jwtTokenStr))`,
 			want: true,
 		},
 		{
 			name: "matchesToken_with_parsed_jwt_value",
-			expr: `dpop.parse(proofStr).matchesToken(jwt.parse(jwtTokenStr).value())`,
+			expr: `dpop.parse(jwtProofStr).matchesToken(jwt.parse(jwtTokenStr).value())`,
 			want: true,
 		},
 	}
@@ -406,9 +354,9 @@ func TestJWKThumbprintAlgorithms(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ComputeJWKThumbprint(RSA) failed: %v", err)
 	}
-	// RFC 7638 Section 3.1 RSA thumbprint test vector: NzbLsHIexยอด...
-	// NzbLsHIexUVQuOfNReIsTyXOvjX676Yu5_BpYZShqKE
-	expectedRSA := "NzbLsHIexUVQuOfNReIsTyXOvjX676Yu5_BpYZShqKE"
+	// RFC 7638 Section 3.1 RSA thumbprint test vector:
+	// NzbLsXh8uDCcd-6MNwXF4W_7noWXFZAfHkxZsRGC9Xs
+	expectedRSA := "NzbLsXh8uDCcd-6MNwXF4W_7noWXFZAfHkxZsRGC9Xs"
 	if rsaThumbprint != expectedRSA {
 		t.Errorf("RSA Thumbprint = %q, want %q", rsaThumbprint, expectedRSA)
 	}
@@ -697,3 +645,330 @@ func TestAllowedAlgorithmsOption(t *testing.T) {
 		t.Errorf("expected tokRS to be rejected by allowed algorithms, got %v", got)
 	}
 }
+
+func TestMatchesTokenBothChecks(t *testing.T) {
+	// 1. Create a DPoP-bound JWT access token
+	jwtHeader := map[string]any{"alg": "ES256", "typ": "JWT"}
+	jwtPayload := map[string]any{
+		"iss": "https://auth.example.com",
+		"sub": "user-42",
+		"aud": "https://api.example.com",
+		"exp": time.Now().Add(1 * time.Hour).Unix(),
+		"iat": time.Now().Unix(),
+		"cnf": map[string]any{
+			"jkt": "0ZcOCORZNYy-DWpqq30jZyJGHTN0d2HglBV3uiguA4I",
+		},
+	}
+	boundJWT := createTestJWT(t, jwtHeader, jwtPayload)
+
+	// Calculate ATH for this exact JWT
+	jwtATH := dpop.ComputeAccessTokenHash(boundJWT)
+
+	// 2. Create DPoP Proof matching this JWT's thumbprint and ATH
+	ecJWK := map[string]any{
+		"kty": "EC",
+		"x":   "l8tFrhx-34tV3hRICRDY9zCkDlpBhF42UQUfWVAWBFs",
+		"y":   "9VE4jf_Ok_o64zbTTlcuNJajHmt6v9TDVrU0CdvGRDA",
+		"crv": "P-256",
+	}
+	proofHeader := map[string]any{
+		"typ": "dpop+jwt",
+		"alg": "ES256",
+		"jwk": ecJWK,
+	}
+	proofPayload := map[string]any{
+		"jti": "jti-unique-999",
+		"htm": "GET",
+		"htu": "https://api.example.com/data",
+		"iat": time.Now().Unix(),
+		"ath": jwtATH,
+	}
+	proofStr := createTestDPoP(t, proofHeader, proofPayload)
+
+	// Another JWT with SAME cnf.jkt but different payload (different ATH)
+	otherJWTPayload := map[string]any{
+		"iss": "https://auth.example.com",
+		"sub": "user-different-id",
+		"aud": "https://api.example.com",
+		"exp": time.Now().Add(1 * time.Hour).Unix(),
+		"iat": time.Now().Unix(),
+		"cnf": map[string]any{
+			"jkt": "0ZcOCORZNYy-DWpqq30jZyJGHTN0d2HglBV3uiguA4I",
+		},
+	}
+	otherJWT := createTestJWT(t, jwtHeader, otherJWTPayload)
+
+	// Another JWT with WRONG cnf.jkt
+	wrongCnfJWTPayload := map[string]any{
+		"iss": "https://auth.example.com",
+		"sub": "user-42",
+		"aud": "https://api.example.com",
+		"exp": time.Now().Add(1 * time.Hour).Unix(),
+		"iat": time.Now().Unix(),
+		"cnf": map[string]any{
+			"jkt": "WRONG_JKT_THUMBPRINT_VALUE",
+		},
+	}
+	wrongCnfJWT := createTestJWT(t, jwtHeader, wrongCnfJWTPayload)
+
+	env, err := cel.NewEnv(
+		dpop.Library(),
+		jwt.Library(),
+		cel.Variable("proofStr", cel.StringType),
+		cel.Variable("boundJWT", cel.StringType),
+		cel.Variable("dpopBoundJWT", cel.StringType),
+		cel.Variable("otherJWT", cel.StringType),
+		cel.Variable("wrongCnfJWT", cel.StringType),
+		cel.Variable("opaqueToken", cel.StringType),
+	)
+	if err != nil {
+		t.Fatalf("cel.NewEnv failed: %v", err)
+	}
+
+	vars := map[string]any{
+		"proofStr":     proofStr,
+		"boundJWT":     boundJWT,
+		"dpopBoundJWT": "DPoP " + boundJWT,
+		"otherJWT":     otherJWT,
+		"wrongCnfJWT":  wrongCnfJWT,
+		"opaqueToken":  "opaque-non-jwt-token-string",
+	}
+
+	tests := []struct {
+		name string
+		expr string
+		want bool
+	}{
+		{
+			name: "matchesToken_with_matching_jwt_string",
+			expr: `dpop.parse(proofStr).matchesToken(boundJWT)`,
+			want: true,
+		},
+		{
+			name: "matchesToken_with_matching_dpop_header_string",
+			expr: `dpop.parse(proofStr).matchesToken(dpopBoundJWT)`,
+			want: true,
+		},
+		{
+			name: "matchesToken_with_parsed_jwt_token",
+			expr: `dpop.parse(proofStr).matchesToken(jwt.parse(boundJWT))`,
+			want: true,
+		},
+		{
+			name: "matchesToken_with_parsed_jwt_token_value",
+			expr: `dpop.parse(proofStr).matchesToken(jwt.parse(boundJWT).value())`,
+			want: true,
+		},
+		{
+			name: "matchesToken_rejects_ath_mismatch_even_if_jkt_matches",
+			expr: `dpop.parse(proofStr).matchesToken(otherJWT)`,
+			want: false,
+		},
+		{
+			name: "matchesToken_rejects_parsed_jwt_ath_mismatch",
+			expr: `dpop.parse(proofStr).matchesToken(jwt.parse(otherJWT))`,
+			want: false,
+		},
+		{
+			name: "matchesToken_rejects_wrong_jkt_confirmation",
+			expr: `dpop.parse(proofStr).matchesToken(wrongCnfJWT)`,
+			want: false,
+		},
+		{
+			name: "matchesToken_rejects_opaque_non_jwt_string",
+			expr: `dpop.parse(proofStr).matchesToken(opaqueToken)`,
+			want: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := evalExpr(t, env, tc.expr, vars)
+			if got != tc.want {
+				t.Errorf("Eval(%q) = %v, want %v", tc.expr, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestMatchesChained(t *testing.T) {
+	jwtHeader := map[string]any{"alg": "ES256", "typ": "JWT"}
+	jwtPayload := map[string]any{
+		"iss": "https://auth.example.com",
+		"sub": "user-42",
+		"aud": "https://api.example.com",
+		"exp": time.Now().Add(1 * time.Hour).Unix(),
+		"iat": time.Now().Unix(),
+		"cnf": map[string]any{
+			"jkt": "0ZcOCORZNYy-DWpqq30jZyJGHTN0d2HglBV3uiguA4I",
+		},
+	}
+	boundJWT := createTestJWT(t, jwtHeader, jwtPayload)
+	jwtATH := dpop.ComputeAccessTokenHash(boundJWT)
+
+	ecJWK := map[string]any{
+		"kty": "EC",
+		"x":   "l8tFrhx-34tV3hRICRDY9zCkDlpBhF42UQUfWVAWBFs",
+		"y":   "9VE4jf_Ok_o64zbTTlcuNJajHmt6v9TDVrU0CdvGRDA",
+		"crv": "P-256",
+	}
+	proofHeader := map[string]any{
+		"typ": "dpop+jwt",
+		"alg": "ES256",
+		"jwk": ecJWK,
+	}
+	proofPayload := map[string]any{
+		"jti":   "jti-unique-matches-123",
+		"htm":   "POST",
+		"htu":   "https://api.example.com/orders",
+		"iat":   time.Now().Unix(),
+		"ath":   jwtATH,
+		"nonce": "server-nonce-valid-789",
+	}
+	proofStr := createTestDPoP(t, proofHeader, proofPayload)
+
+	env, err := cel.NewEnv(
+		dpop.Library(),
+		jwt.Library(),
+		cel.Variable("proofStr", cel.StringType),
+		cel.Variable("boundJWT", cel.StringType),
+		cel.Variable("method", cel.StringType),
+		cel.Variable("url", cel.StringType),
+		cel.Variable("nonce", cel.StringType),
+	)
+	if err != nil {
+		t.Fatalf("cel.NewEnv failed: %v", err)
+	}
+
+	vars := map[string]any{
+		"proofStr": proofStr,
+		"boundJWT": boundJWT,
+		"method":   "POST",
+		"url":      "https://api.example.com/orders",
+		"nonce":    "server-nonce-valid-789",
+	}
+
+	tests := []struct {
+		name string
+		expr string
+		want bool
+	}{
+		{
+			name: "matchesRequest_method_and_uri",
+			expr: `dpop.parse(proofStr).matchesRequest(method, url)`,
+			want: true,
+		},
+		{
+			name: "matchesRequest_method_mismatch",
+			expr: `dpop.parse(proofStr).matchesRequest('GET', url)`,
+			want: false,
+		},
+		{
+			name: "matchesRequest_uri_mismatch",
+			expr: `dpop.parse(proofStr).matchesRequest(method, 'https://other.example.com/orders')`,
+			want: false,
+		},
+		{
+			name: "matchesToken_string",
+			expr: `dpop.parse(proofStr).matchesToken(boundJWT)`,
+			want: true,
+		},
+		{
+			name: "matchesToken_header_prefix",
+			expr: `dpop.parse(proofStr).matchesToken('DPoP ' + boundJWT)`,
+			want: true,
+		},
+		{
+			name: "matchesToken_jwt_token_object",
+			expr: `dpop.parse(proofStr).matchesToken(jwt.parse(boundJWT))`,
+			want: true,
+		},
+		{
+			name: "matchesNonce_valid",
+			expr: `dpop.parse(proofStr).matchesNonce(nonce)`,
+			want: true,
+		},
+		{
+			name: "matchesNonce_mismatch",
+			expr: `dpop.parse(proofStr).matchesNonce('wrong-nonce')`,
+			want: false,
+		},
+		{
+			name: "chained_matchesRequest_matchesToken_matchesNonce",
+			expr: `dpop.parse(proofStr).matchesRequest(method, url) && dpop.parse(proofStr).matchesToken(boundJWT) && dpop.parse(proofStr).matchesNonce(nonce)`,
+			want: true,
+		},
+		{
+			name: "chained_with_parsed_jwt_token",
+			expr: `dpop.parse(proofStr).matchesRequest(method, url) && dpop.parse(proofStr).matchesToken(jwt.parse(boundJWT)) && dpop.parse(proofStr).matchesNonce(nonce)`,
+			want: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := evalExpr(t, env, tc.expr, vars)
+			if got != tc.want {
+				t.Errorf("Eval(%q) = %v, want %v", tc.expr, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestNonceUtilities(t *testing.T) {
+	t.Run("GenerateNonce_random", func(t *testing.T) {
+		n1, err := dpop.GenerateNonce()
+		if err != nil {
+			t.Fatalf("GenerateNonce failed: %v", err)
+		}
+		n2, err := dpop.GenerateNonce()
+		if err != nil {
+			t.Fatalf("GenerateNonce failed: %v", err)
+		}
+		if n1 == "" || n2 == "" {
+			t.Fatalf("expected non-empty nonces")
+		}
+		if n1 == n2 {
+			t.Fatalf("expected distinct random nonces, got identical: %q", n1)
+		}
+	})
+
+	t.Run("StatelessNonce_valid", func(t *testing.T) {
+		key := []byte("super-secret-hmac-key-for-nonce")
+		nonce, err := dpop.GenerateStatelessNonce(key, "client-ip-127.0.0.1", "client-id-abc")
+		if err != nil {
+			t.Fatalf("GenerateStatelessNonce failed: %v", err)
+		}
+
+		// Validate with correct key, maxAge, and context
+		if !dpop.ValidateStatelessNonce(nonce, key, 1*time.Minute, "client-ip-127.0.0.1", "client-id-abc") {
+			t.Fatalf("ValidateStatelessNonce failed on valid nonce %q", nonce)
+		}
+
+		// Validate with wrong key
+		wrongKey := []byte("wrong-key-value-123456789012345")
+		if dpop.ValidateStatelessNonce(nonce, wrongKey, 1*time.Minute, "client-ip-127.0.0.1", "client-id-abc") {
+			t.Fatalf("ValidateStatelessNonce should reject wrong key")
+		}
+
+		// Validate with wrong context
+		if dpop.ValidateStatelessNonce(nonce, key, 1*time.Minute, "client-ip-10.0.0.1", "client-id-abc") {
+			t.Fatalf("ValidateStatelessNonce should reject mismatched context")
+		}
+
+		// Validate with 0 maxAge (expired)
+		if dpop.ValidateStatelessNonce(nonce, key, -1*time.Second, "client-ip-127.0.0.1", "client-id-abc") {
+			t.Fatalf("ValidateStatelessNonce should reject expired nonce")
+		}
+
+		// Validate malformed nonces
+		if dpop.ValidateStatelessNonce("invalid.malformed.parts", key, 1*time.Minute) {
+			t.Fatalf("ValidateStatelessNonce should reject invalid parts")
+		}
+		if dpop.ValidateStatelessNonce("invalid", key, 1*time.Minute) {
+			t.Fatalf("ValidateStatelessNonce should reject single segment")
+		}
+	})
+}
+
+

@@ -252,6 +252,9 @@ type Token struct {
 	// Raw JSON payload associated with the token including custom claims.
 	// Must be treated as read-only once initialized.
 	Payload map[string]any `json:"-" cel:"-"`
+
+	// Raw holds the original token string (without scheme prefix) if parsed via ParseToken.
+	Raw string `json:"-" cel:"-"`
 }
 
 // IsValidAt checks whether the token time claims (iat, nbf, exp) are valid at the given reference time with clock leeway tolerance.
@@ -415,7 +418,12 @@ func ParseToken(tokenStr string) (*Token, error) {
 	if err := json.Unmarshal(payloadBytes, &payload); err != nil {
 		return nil, fmt.Errorf("failed to parse payload JSON: %w", err)
 	}
-	return NewToken(header, payload)
+	tok, err := NewToken(header, payload)
+	if err != nil {
+		return nil, err
+	}
+	tok.Raw = tokenStr
+	return tok, nil
 }
 
 func optString(m map[string]any, key string) string {
@@ -427,8 +435,12 @@ func optString(m map[string]any, key string) string {
 
 func trimBearerPrefix(tokenStr string) string {
 	tokenStr = strings.TrimSpace(tokenStr)
-	if strings.HasPrefix(strings.ToLower(tokenStr), "bearer ") {
+	lower := strings.ToLower(tokenStr)
+	if strings.HasPrefix(lower, "bearer ") {
 		return strings.TrimSpace(tokenStr[7:])
+	}
+	if strings.HasPrefix(lower, "dpop ") {
+		return strings.TrimSpace(tokenStr[5:])
 	}
 	return tokenStr
 }

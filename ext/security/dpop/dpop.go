@@ -12,11 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package dpop implements CEL extension functions for OAuth 2.0 Demonstrating Proof of Possession (DPoP)
-// proof parsing, JWK thumbprint confirmation, access token hash validation, and request matching per RFC 9449.
+// Package dpop implements CEL extension functions and Go helper utilities for OAuth 2.0
+// Demonstrating Proof of Possession (DPoP) per RFC 9449.
 package dpop
 
 import (
+	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
@@ -26,6 +28,7 @@ import (
 	"path"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -142,6 +145,10 @@ func (l *dpopLib) CompileOptions() []cel.EnvOption {
 	}
 	celJWTTokenType := cel.ObjectType("jwt.Token")
 
+	proofOverloads := func(baseID string, argTypes []*cel.Type, resType *cel.Type, fallback ref.Val, fn func(*Proof, []ref.Val) ref.Val) []cel.FunctionOpt {
+		return proofMemberOverloadPair(celProofType, baseID, argTypes, resType, fallback, fn)
+	}
+
 	return []cel.EnvOption{
 		cel.OptionalTypes(),
 		cel.Types(proofType),
@@ -177,431 +184,122 @@ func (l *dpopLib) CompileOptions() []cel.EnvOption {
 				}),
 			),
 		),
-		cel.Function("dpop.ath",
-			cel.FunctionDocs(
-				"Computes the RFC 9449 access token hash (ath): base64url(sha256(access_token)).",
-				"Automatically strips leading 'DPoP ' or 'Bearer ' prefixes if present.",
-			),
-			cel.Overload("dpop_ath_string",
-				[]*cel.Type{cel.StringType},
-				cel.StringType,
-				cel.OverloadExamples(
-					"dpop.ath(accessTokenStr)",
-					"dpop.ath('DPoP Kz~8mXK1...')",
-				),
-				cel.UnaryBinding(func(arg ref.Val) ref.Val {
-					tokenStr := string(arg.(types.String))
-					return types.String(ComputeAccessTokenHash(tokenStr))
-				}),
-			),
+		makeFunction("claim",
+			"Queries a custom claim value by key name from the DPoP proof payload, returning an optional dynamic value.",
+			proofOverloads("dpop_proof_claim_string", []*cel.Type{cel.StringType}, cel.OptionalType(cel.DynType), types.OptionalNone, func(p *Proof, args []ref.Val) ref.Val {
+				return p.Claim(adapt(), string(args[0].(types.String)))
+			})...,
 		),
-		cel.Function("dpop.thumbprint",
-			cel.FunctionDocs(
-				"Computes the RFC 7638 SHA-256 JWK Thumbprint (base64url encoded) from a JWK map.",
-			),
-			cel.Overload("dpop_thumbprint_map",
-				[]*cel.Type{cel.MapType(cel.StringType, cel.DynType)},
-				cel.StringType,
-				cel.OverloadExamples(
-					"dpop.thumbprint(proof.jwk)",
-				),
-				cel.UnaryBinding(func(arg ref.Val) ref.Val {
-					jwkVal := arg.Value()
-					jwkMap, ok := jwkVal.(map[string]any)
-					if !ok {
-						if genericMap, ok := jwkVal.(map[ref.Val]ref.Val); ok {
-							jwkMap = make(map[string]any, len(genericMap))
-							for k, v := range genericMap {
-								jwkMap[fmt.Sprint(k.Value())] = v.Value()
-							}
-						} else {
-							return types.NewErr("expected map[string]dyn for JWK, got %T", jwkVal)
-						}
-					}
-					tp, err := ComputeJWKThumbprint(jwkMap)
-					if err != nil {
-						return types.NewErr("failed to compute JWK thumbprint: %w", err)
-					}
-					return types.String(tp)
-				}),
-			),
+		makeFunction("matchesRequest",
+			"Validates that the DPoP proof's htm and htu claims match the HTTP request method and target URI.\nPerforms RFC 3986 syntax and scheme normalization on the target URI, ignoring query and fragment parts.",
+			proofOverloads("dpop_proof_matches_request_string_string", []*cel.Type{cel.StringType, cel.StringType}, cel.BoolType, types.False, func(p *Proof, args []ref.Val) ref.Val {
+				return types.Bool(p.MatchesRequest(string(args[0].(types.String)), string(args[1].(types.String))))
+			})...,
 		),
-		cel.Function("claim",
-			cel.FunctionDocs(
-				"Queries a custom claim value by key name from the DPoP proof payload, returning an optional dynamic value.",
-			),
-			cel.MemberOverload("dpop_proof_claim_string",
-				[]*cel.Type{celProofType, cel.StringType},
-				cel.OptionalType(cel.DynType),
-				cel.OverloadExamples(
-					"proof.claim('nonce')",
-				),
-				cel.BinaryBinding(func(targetVal, claimNameVal ref.Val) ref.Val {
-					target := targetVal.Value().(*Proof)
-					claimName := claimNameVal.(types.String)
-					return target.Claim(adapt(), string(claimName))
-				}),
-			),
-			cel.MemberOverload("dpop_proof_opt_claim_string",
-				[]*cel.Type{cel.OptionalType(celProofType), cel.StringType},
-				cel.OptionalType(cel.DynType),
-				cel.OverloadExamples(
-					"dpop.parse(proofStr).claim('nonce')",
-				),
-				cel.BinaryBinding(func(targetVal, claimNameVal ref.Val) ref.Val {
-					optTarget := targetVal.(*types.Optional)
-					if !optTarget.HasValue() {
-						return types.OptionalNone
-					}
-					target, ok := optTarget.GetValue().Value().(*Proof)
-					if !ok {
-						return types.ValOrErr(optTarget.GetValue(), "expected dpop.Proof")
-					}
-					claimName := claimNameVal.(types.String)
-					return target.Claim(adapt(), string(claimName))
-				}),
-			),
+		makeFunction("matchesNonce",
+			"Validates that the DPoP proof's nonce claim matches the expected server-provided nonce.",
+			proofOverloads("dpop_proof_matches_nonce_string", []*cel.Type{cel.StringType}, cel.BoolType, types.False, func(p *Proof, args []ref.Val) ref.Val {
+				return types.Bool(p.MatchesNonce(string(args[0].(types.String))))
+			})...,
 		),
-		cel.Function("matchesRequest",
-			cel.FunctionDocs(
-				"Validates that the DPoP proof's htm and htu claims match the HTTP request method and target URI.",
-				"Performs RFC 3986 syntax and scheme normalization on the target URI, ignoring query and fragment parts.",
-			),
-			cel.MemberOverload("dpop_proof_matches_request_string_string",
-				[]*cel.Type{celProofType, cel.StringType, cel.StringType},
-				cel.BoolType,
-				cel.OverloadExamples(
-					"proof.matchesRequest('POST', 'https://server.example.com/token')",
-				),
-				cel.FunctionBinding(func(args ...ref.Val) ref.Val {
-					target := args[0].Value().(*Proof)
-					method := string(args[1].(types.String))
-					targetURI := string(args[2].(types.String))
-					return types.Bool(target.MatchesRequest(method, targetURI))
+		makeFunction("matchesToken",
+			"Validates that the DPoP proof matches the access token, simultaneously checking both the accessTokenHash (ath) and cnf.jkt key confirmation.\nAccepts either a token string (e.g. from the Authorization header) or a parsed jwt.Token.",
+			concatFunctionOpts(
+				proofOverloads("dpop_proof_matches_token_string", []*cel.Type{cel.StringType}, cel.BoolType, types.False, func(p *Proof, args []ref.Val) ref.Val {
+					return evalMatchesToken(p, args[0])
 				}),
-			),
-			cel.MemberOverload("dpop_proof_opt_matches_request_string_string",
-				[]*cel.Type{cel.OptionalType(celProofType), cel.StringType, cel.StringType},
-				cel.BoolType,
-				cel.OverloadExamples(
-					"dpop.parse(proofStr).matchesRequest('POST', 'https://server.example.com/token')",
-				),
-				cel.FunctionBinding(func(args ...ref.Val) ref.Val {
-					optTarget := args[0].(*types.Optional)
-					if !optTarget.HasValue() {
-						return types.False
-					}
-					target, ok := optTarget.GetValue().Value().(*Proof)
-					if !ok {
-						return types.ValOrErr(optTarget.GetValue(), "expected dpop.Proof")
-					}
-					method := string(args[1].(types.String))
-					targetURI := string(args[2].(types.String))
-					return types.Bool(target.MatchesRequest(method, targetURI))
+				proofOverloads("dpop_proof_matches_token_jwt_token", []*cel.Type{celJWTTokenType}, cel.BoolType, types.False, func(p *Proof, args []ref.Val) ref.Val {
+					return evalMatchesToken(p, args[0])
 				}),
-			),
-		),
-		cel.Function("matchesMethod",
-			cel.FunctionDocs(
-				"Validates that the DPoP proof's htm claim matches the given HTTP method.",
-			),
-			cel.MemberOverload("dpop_proof_matches_method_string",
-				[]*cel.Type{celProofType, cel.StringType},
-				cel.BoolType,
-				cel.BinaryBinding(func(targetVal, methodVal ref.Val) ref.Val {
-					target := targetVal.Value().(*Proof)
-					method := string(methodVal.(types.String))
-					return types.Bool(target.MatchesMethod(method))
+				proofOverloads("dpop_proof_matches_token_opt_jwt_token", []*cel.Type{cel.OptionalType(celJWTTokenType)}, cel.BoolType, types.False, func(p *Proof, args []ref.Val) ref.Val {
+					return evalMatchesToken(p, args[0])
 				}),
-			),
-			cel.MemberOverload("dpop_proof_opt_matches_method_string",
-				[]*cel.Type{cel.OptionalType(celProofType), cel.StringType},
-				cel.BoolType,
-				cel.BinaryBinding(func(targetVal, methodVal ref.Val) ref.Val {
-					optTarget := targetVal.(*types.Optional)
-					if !optTarget.HasValue() {
-						return types.False
-					}
-					target, ok := optTarget.GetValue().Value().(*Proof)
-					if !ok {
-						return types.ValOrErr(optTarget.GetValue(), "expected dpop.Proof")
-					}
-					method := string(methodVal.(types.String))
-					return types.Bool(target.MatchesMethod(method))
-				}),
-			),
-		),
-		cel.Function("matchesURI",
-			cel.FunctionDocs(
-				"Validates that the DPoP proof's htu claim matches the given HTTP target URI (ignoring query/fragment, with normalization).",
-			),
-			cel.MemberOverload("dpop_proof_matches_uri_string",
-				[]*cel.Type{celProofType, cel.StringType},
-				cel.BoolType,
-				cel.BinaryBinding(func(targetVal, uriVal ref.Val) ref.Val {
-					target := targetVal.Value().(*Proof)
-					targetURI := string(uriVal.(types.String))
-					return types.Bool(target.MatchesURI(targetURI))
-				}),
-			),
-			cel.MemberOverload("dpop_proof_opt_matches_uri_string",
-				[]*cel.Type{cel.OptionalType(celProofType), cel.StringType},
-				cel.BoolType,
-				cel.BinaryBinding(func(targetVal, uriVal ref.Val) ref.Val {
-					optTarget := targetVal.(*types.Optional)
-					if !optTarget.HasValue() {
-						return types.False
-					}
-					target, ok := optTarget.GetValue().Value().(*Proof)
-					if !ok {
-						return types.ValOrErr(optTarget.GetValue(), "expected dpop.Proof")
-					}
-					targetURI := string(uriVal.(types.String))
-					return types.Bool(target.MatchesURI(targetURI))
-				}),
-			),
-		),
-		cel.Function("matchesHtu",
-			cel.FunctionDocs(
-				"Alias for matchesURI: validates that the DPoP proof's htu claim matches the given HTTP target URI.",
-			),
-			cel.MemberOverload("dpop_proof_matches_htu_string",
-				[]*cel.Type{celProofType, cel.StringType},
-				cel.BoolType,
-				cel.BinaryBinding(func(targetVal, uriVal ref.Val) ref.Val {
-					target := targetVal.Value().(*Proof)
-					targetURI := string(uriVal.(types.String))
-					return types.Bool(target.MatchesURI(targetURI))
-				}),
-			),
-			cel.MemberOverload("dpop_proof_opt_matches_htu_string",
-				[]*cel.Type{cel.OptionalType(celProofType), cel.StringType},
-				cel.BoolType,
-				cel.BinaryBinding(func(targetVal, uriVal ref.Val) ref.Val {
-					optTarget := targetVal.(*types.Optional)
-					if !optTarget.HasValue() {
-						return types.False
-					}
-					target, ok := optTarget.GetValue().Value().(*Proof)
-					if !ok {
-						return types.ValOrErr(optTarget.GetValue(), "expected dpop.Proof")
-					}
-					targetURI := string(uriVal.(types.String))
-					return types.Bool(target.MatchesURI(targetURI))
-				}),
-			),
-		),
-		cel.Function("matchesAccessToken",
-			cel.FunctionDocs(
-				"Validates that the DPoP proof's ath claim matches the base64url SHA-256 hash of the presented access token.",
-			),
-			cel.MemberOverload("dpop_proof_matches_access_token_string",
-				[]*cel.Type{celProofType, cel.StringType},
-				cel.BoolType,
-				cel.BinaryBinding(func(targetVal, tokenVal ref.Val) ref.Val {
-					target := targetVal.Value().(*Proof)
-					tokenStr := string(tokenVal.(types.String))
-					return types.Bool(target.MatchesAccessToken(tokenStr))
-				}),
-			),
-			cel.MemberOverload("dpop_proof_opt_matches_access_token_string",
-				[]*cel.Type{cel.OptionalType(celProofType), cel.StringType},
-				cel.BoolType,
-				cel.BinaryBinding(func(targetVal, tokenVal ref.Val) ref.Val {
-					optTarget := targetVal.(*types.Optional)
-					if !optTarget.HasValue() {
-						return types.False
-					}
-					target, ok := optTarget.GetValue().Value().(*Proof)
-					if !ok {
-						return types.ValOrErr(optTarget.GetValue(), "expected dpop.Proof")
-					}
-					tokenStr := string(tokenVal.(types.String))
-					return types.Bool(target.MatchesAccessToken(tokenStr))
-				}),
-			),
-		),
-		cel.Function("matchesNonce",
-			cel.FunctionDocs(
-				"Validates that the DPoP proof's nonce claim matches the expected server-provided nonce.",
-			),
-			cel.MemberOverload("dpop_proof_matches_nonce_string",
-				[]*cel.Type{celProofType, cel.StringType},
-				cel.BoolType,
-				cel.BinaryBinding(func(targetVal, nonceVal ref.Val) ref.Val {
-					target := targetVal.Value().(*Proof)
-					nonceStr := string(nonceVal.(types.String))
-					return types.Bool(target.MatchesNonce(nonceStr))
-				}),
-			),
-			cel.MemberOverload("dpop_proof_opt_matches_nonce_string",
-				[]*cel.Type{cel.OptionalType(celProofType), cel.StringType},
-				cel.BoolType,
-				cel.BinaryBinding(func(targetVal, nonceVal ref.Val) ref.Val {
-					optTarget := targetVal.(*types.Optional)
-					if !optTarget.HasValue() {
-						return types.False
-					}
-					target, ok := optTarget.GetValue().Value().(*Proof)
-					if !ok {
-						return types.ValOrErr(optTarget.GetValue(), "expected dpop.Proof")
-					}
-					nonceStr := string(nonceVal.(types.String))
-					return types.Bool(target.MatchesNonce(nonceStr))
-				}),
-			),
-		),
-		cel.Function("matchesConfirmation",
-			cel.FunctionDocs(
-				"Validates that the DPoP proof's public key thumbprint matches the jkt confirmation method from an access token or introspection map.",
-			),
-			cel.MemberOverload("dpop_proof_matches_confirmation_string",
-				[]*cel.Type{celProofType, cel.StringType},
-				cel.BoolType,
-				cel.BinaryBinding(func(targetVal, jktVal ref.Val) ref.Val {
-					target := targetVal.Value().(*Proof)
-					jktStr := string(jktVal.(types.String))
-					return types.Bool(target.MatchesConfirmationString(jktStr))
-				}),
-			),
-			cel.MemberOverload("dpop_proof_opt_matches_confirmation_string",
-				[]*cel.Type{cel.OptionalType(celProofType), cel.StringType},
-				cel.BoolType,
-				cel.BinaryBinding(func(targetVal, jktVal ref.Val) ref.Val {
-					optTarget := targetVal.(*types.Optional)
-					if !optTarget.HasValue() {
-						return types.False
-					}
-					target, ok := optTarget.GetValue().Value().(*Proof)
-					if !ok {
-						return types.ValOrErr(optTarget.GetValue(), "expected dpop.Proof")
-					}
-					jktStr := string(jktVal.(types.String))
-					return types.Bool(target.MatchesConfirmationString(jktStr))
-				}),
-			),
-			cel.MemberOverload("dpop_proof_matches_confirmation_map",
-				[]*cel.Type{celProofType, cel.MapType(cel.StringType, cel.DynType)},
-				cel.BoolType,
-				cel.BinaryBinding(func(targetVal, cnfVal ref.Val) ref.Val {
-					target := targetVal.Value().(*Proof)
-					cnfMap, ok := cnfVal.Value().(map[string]any)
-					if !ok {
-						if genericMap, ok := cnfVal.Value().(map[ref.Val]ref.Val); ok {
-							cnfMap = make(map[string]any, len(genericMap))
-							for k, v := range genericMap {
-								cnfMap[fmt.Sprint(k.Value())] = v.Value()
-							}
-						} else {
-							return types.False
-						}
-					}
-					return types.Bool(target.MatchesConfirmationMap(cnfMap))
-				}),
-			),
-			cel.MemberOverload("dpop_proof_opt_matches_confirmation_map",
-				[]*cel.Type{cel.OptionalType(celProofType), cel.MapType(cel.StringType, cel.DynType)},
-				cel.BoolType,
-				cel.BinaryBinding(func(targetVal, cnfVal ref.Val) ref.Val {
-					optTarget := targetVal.(*types.Optional)
-					if !optTarget.HasValue() {
-						return types.False
-					}
-					target, ok := optTarget.GetValue().Value().(*Proof)
-					if !ok {
-						return types.ValOrErr(optTarget.GetValue(), "expected dpop.Proof")
-					}
-					cnfMap, ok := cnfVal.Value().(map[string]any)
-					if !ok {
-						if genericMap, ok := cnfVal.Value().(map[ref.Val]ref.Val); ok {
-							cnfMap = make(map[string]any, len(genericMap))
-							for k, v := range genericMap {
-								cnfMap[fmt.Sprint(k.Value())] = v.Value()
-							}
-						} else {
-							return types.False
-						}
-					}
-					return types.Bool(target.MatchesConfirmationMap(cnfMap))
-				}),
-			),
-		),
-		cel.Function("matchesToken",
-			cel.FunctionDocs(
-				"Validates that the DPoP proof's public key matches the cnf.jkt confirmation claim inside a parsed jwt.Token.",
-			),
-			cel.MemberOverload("dpop_proof_matches_token_jwt_token",
-				[]*cel.Type{celProofType, celJWTTokenType},
-				cel.BoolType,
-				cel.BinaryBinding(func(targetVal, tokenVal ref.Val) ref.Val {
-					target := targetVal.Value().(*Proof)
-					tok, ok := tokenVal.Value().(*jwt.Token)
-					if !ok {
-						return types.ValOrErr(tokenVal, "expected jwt.Token")
-					}
-					return types.Bool(target.MatchesToken(tok))
-				}),
-			),
-			cel.MemberOverload("dpop_proof_opt_matches_token_jwt_token",
-				[]*cel.Type{cel.OptionalType(celProofType), celJWTTokenType},
-				cel.BoolType,
-				cel.BinaryBinding(func(targetVal, tokenVal ref.Val) ref.Val {
-					optTarget := targetVal.(*types.Optional)
-					if !optTarget.HasValue() {
-						return types.False
-					}
-					target, ok := optTarget.GetValue().Value().(*Proof)
-					if !ok {
-						return types.ValOrErr(optTarget.GetValue(), "expected dpop.Proof")
-					}
-					tok, ok := tokenVal.Value().(*jwt.Token)
-					if !ok {
-						return types.ValOrErr(tokenVal, "expected jwt.Token")
-					}
-					return types.Bool(target.MatchesToken(tok))
-				}),
-			),
-			cel.MemberOverload("dpop_proof_opt_matches_token_opt_jwt_token",
-				[]*cel.Type{cel.OptionalType(celProofType), cel.OptionalType(celJWTTokenType)},
-				cel.BoolType,
-				cel.BinaryBinding(func(targetVal, tokenVal ref.Val) ref.Val {
-					optTarget := targetVal.(*types.Optional)
-					if !optTarget.HasValue() {
-						return types.False
-					}
-					target, ok := optTarget.GetValue().Value().(*Proof)
-					if !ok {
-						return types.ValOrErr(optTarget.GetValue(), "expected dpop.Proof")
-					}
-					optTok := tokenVal.(*types.Optional)
-					if !optTok.HasValue() {
-						return types.False
-					}
-					tok, ok := optTok.GetValue().Value().(*jwt.Token)
-					if !ok {
-						return types.ValOrErr(optTok.GetValue(), "expected jwt.Token")
-					}
-					return types.Bool(target.MatchesToken(tok))
-				}),
-			),
-			cel.MemberOverload("dpop_proof_matches_token_opt_jwt_token",
-				[]*cel.Type{celProofType, cel.OptionalType(celJWTTokenType)},
-				cel.BoolType,
-				cel.BinaryBinding(func(targetVal, tokenVal ref.Val) ref.Val {
-					target := targetVal.Value().(*Proof)
-					optTok := tokenVal.(*types.Optional)
-					if !optTok.HasValue() {
-						return types.False
-					}
-					tok, ok := optTok.GetValue().Value().(*jwt.Token)
-					if !ok {
-						return types.ValOrErr(optTok.GetValue(), "expected jwt.Token")
-					}
-					return types.Bool(target.MatchesToken(tok))
-				}),
-			),
+			)...,
 		),
 	}
+}
+
+func makeFunction(name string, doc string, opts ...cel.FunctionOpt) cel.EnvOption {
+	allOpts := make([]cel.FunctionOpt, 0, len(opts)+1)
+	allOpts = append(allOpts, cel.FunctionDocs(doc))
+	allOpts = append(allOpts, opts...)
+	return cel.Function(name, allOpts...)
+}
+
+func withProofReceiver(fallback ref.Val, fn func(*Proof, []ref.Val) ref.Val) func(...ref.Val) ref.Val {
+	return func(args ...ref.Val) ref.Val {
+		switch target := args[0].(type) {
+		case *types.Optional:
+			if !target.HasValue() {
+				return fallback
+			}
+			p, ok := target.GetValue().Value().(*Proof)
+			if !ok {
+				return types.ValOrErr(target.GetValue(), "expected dpop.Proof")
+			}
+			return fn(p, args[1:])
+		default:
+			p, ok := target.Value().(*Proof)
+			if !ok {
+				return types.ValOrErr(target, "expected dpop.Proof")
+			}
+			return fn(p, args[1:])
+		}
+	}
+}
+
+func proofMemberOverloadPair(
+	celProofType *cel.Type,
+	baseID string,
+	argTypes []*cel.Type,
+	resultType *cel.Type,
+	fallback ref.Val,
+	fn func(*Proof, []ref.Val) ref.Val,
+) []cel.FunctionOpt {
+	binding := withProofReceiver(fallback, fn)
+	return []cel.FunctionOpt{
+		cel.MemberOverload(
+			baseID,
+			append([]*cel.Type{celProofType}, argTypes...),
+			resultType,
+			cel.FunctionBinding(binding),
+		),
+		cel.MemberOverload(
+			baseID+"_opt",
+			append([]*cel.Type{cel.OptionalType(celProofType)}, argTypes...),
+			resultType,
+			cel.FunctionBinding(binding),
+		),
+	}
+}
+
+func evalMatchesToken(p *Proof, tokenVal ref.Val) ref.Val {
+	if opt, ok := tokenVal.(*types.Optional); ok {
+		if !opt.HasValue() {
+			return types.False
+		}
+		tokenVal = opt.GetValue()
+	}
+	switch tok := tokenVal.Value().(type) {
+	case string:
+		return types.Bool(p.MatchesTokenString(tok))
+	case *jwt.Token:
+		return types.Bool(p.MatchesToken(tok))
+	default:
+		return types.ValOrErr(tokenVal, "expected string or jwt.Token")
+	}
+}
+
+func concatFunctionOpts(lists ...[]cel.FunctionOpt) []cel.FunctionOpt {
+	var total int
+	for _, l := range lists {
+		total += len(l)
+	}
+	res := make([]cel.FunctionOpt, 0, total)
+	for _, l := range lists {
+		res = append(res, l...)
+	}
+	return res
 }
 
 // ProgramOptions returns program options for DPoP extensions.
@@ -620,7 +318,7 @@ type Proof struct {
 	Algorithm string         `json:"alg" cel:"alg"`
 	KeyID     string         `json:"kid,omitempty" cel:"keyId"`
 	Type      string         `json:"typ" cel:"type"`
-	JWK       map[string]any `json:"jwk" cel:"jwk"`
+	JWK       map[string]any `json:"jwk" cel:"-"`
 
 	// Derived public key thumbprint (RFC 7638 SHA-256 JWK Thumbprint)
 	Thumbprint string `json:"jkt" cel:"thumbprint"`
@@ -630,7 +328,7 @@ type Proof struct {
 	Method          string    `json:"htm" cel:"method"`
 	URI             string    `json:"htu" cel:"uri"`
 	IssuedAt        time.Time `json:"iat" cel:"iat"`
-	AccessTokenHash string    `json:"ath,omitempty" cel:"ath"`
+	AccessTokenHash string    `json:"ath,omitempty" cel:"accessTokenHash"`
 	Nonce           string    `json:"nonce,omitempty" cel:"nonce"`
 
 	// Raw JSON payload and header associated with the proof including custom claims.
@@ -664,9 +362,9 @@ func (p *Proof) MatchesMethod(method string) bool {
 	return strings.EqualFold(strings.TrimSpace(p.Method), strings.TrimSpace(method))
 }
 
-// MatchesURI checks whether the DPoP proof's htu claim matches the given target URI per RFC 9449 / RFC 3986.
+// MatchesTargetURI checks whether the DPoP proof's htu claim matches the given target URI per RFC 9449 / RFC 3986.
 // Normalizes scheme/host to lowercase, removes default ports (:80, :443), cleans path segments, and ignores query/fragment.
-func (p *Proof) MatchesURI(targetURI string) bool {
+func (p *Proof) MatchesTargetURI(targetURI string) bool {
 	normProofURI, err := normalizeTargetURI(p.URI)
 	if err != nil {
 		return false
@@ -680,7 +378,7 @@ func (p *Proof) MatchesURI(targetURI string) bool {
 
 // MatchesRequest checks whether both the method (htm) and target URI (htu) match the incoming HTTP request.
 func (p *Proof) MatchesRequest(method, targetURI string) bool {
-	return p.MatchesMethod(method) && p.MatchesURI(targetURI)
+	return p.MatchesMethod(method) && p.MatchesTargetURI(targetURI)
 }
 
 // MatchesAccessToken validates that the DPoP proof's ath claim equals the SHA-256 base64url hash of the presented access token.
@@ -720,10 +418,31 @@ func (p *Proof) MatchesConfirmationMap(cnf map[string]any) bool {
 	return p.MatchesConfirmationString(jkt)
 }
 
-// MatchesToken validates that the DPoP proof's JWK thumbprint matches the cnf.jkt confirmation claim inside a jwt.Token.
+// MatchesTokenString validates that the DPoP proof matches the given access token string:
+// 1. Validates that the DPoP proof's accessTokenHash matches the base64url SHA-256 hash of the presented token string.
+// 2. Parses the token string as a JWT and validates that the cnf.jkt confirmation claim matches the DPoP proof's thumbprint.
+func (p *Proof) MatchesTokenString(tokenStr string) bool {
+	if !p.MatchesAccessToken(tokenStr) {
+		return false
+	}
+	tok, err := jwt.ParseToken(tokenStr)
+	if err != nil {
+		return false
+	}
+	return p.MatchesToken(tok)
+}
+
+// MatchesToken validates that the DPoP proof matches the given jwt.Token:
+// 1. Validates that the token's cnf.jkt confirmation claim matches the DPoP proof's thumbprint.
+// 2. If token.Raw is populated, also validates that the DPoP proof's accessTokenHash matches the hash of token.Raw.
 func (p *Proof) MatchesToken(token *jwt.Token) bool {
 	if token == nil || token.Payload == nil {
 		return false
+	}
+	if token.Raw != "" && p.AccessTokenHash != "" {
+		if !p.MatchesAccessToken(token.Raw) {
+			return false
+		}
 	}
 	cnf, ok := token.Payload["cnf"].(map[string]any)
 	if !ok || cnf == nil {
@@ -748,14 +467,14 @@ func (p *Proof) Claim(adapter types.Adapter, claimName string) ref.Val {
 // NewProof constructs a validated Proof from decoded JSON header and payload maps.
 // Signature verification of the proof must be performed prior to passing the proof to CEL.
 func NewProof(header, payload map[string]any) (*Proof, error) {
-	typ, ok := header["typ"].(string)
-	if !ok || !strings.EqualFold(strings.TrimSpace(typ), dpopHeaderType) {
+	typ, err := requireString(header, "typ", "header")
+	if err != nil || !strings.EqualFold(typ, dpopHeaderType) {
 		return nil, fmt.Errorf("invalid or missing 'typ' header: expected %q, got %q", dpopHeaderType, typ)
 	}
 
-	alg, ok := header["alg"].(string)
-	if !ok || alg == "" {
-		return nil, fmt.Errorf("missing required header: 'alg'")
+	alg, err := requireString(header, "alg", "header")
+	if err != nil {
+		return nil, err
 	}
 	if strings.EqualFold(alg, "none") {
 		return nil, fmt.Errorf("insecure algorithm 'none' is not allowed for DPoP proof")
@@ -764,16 +483,10 @@ func NewProof(header, payload map[string]any) (*Proof, error) {
 		return nil, fmt.Errorf("symmetric MAC algorithm %q is not allowed for DPoP proof", alg)
 	}
 
-	jwkRaw, ok := header["jwk"]
-	if !ok || jwkRaw == nil {
+	jwkMap, err := requireMap(header, "jwk", "header")
+	if err != nil {
 		return nil, fmt.Errorf("missing required header: 'jwk'")
 	}
-	jwkMap, ok := jwkRaw.(map[string]any)
-	if !ok || len(jwkMap) == 0 {
-		return nil, fmt.Errorf("invalid header 'jwk': expected non-empty JSON object")
-	}
-
-	// Validate JWK does not contain private key components (RFC 9449 Section 4.2)
 	if err := validateJWKPublicKeyOnly(jwkMap); err != nil {
 		return nil, err
 	}
@@ -783,19 +496,19 @@ func NewProof(header, payload map[string]any) (*Proof, error) {
 		return nil, fmt.Errorf("failed to compute JWK thumbprint: %w", err)
 	}
 
-	jti, ok := payload["jti"].(string)
-	if !ok || strings.TrimSpace(jti) == "" {
-		return nil, fmt.Errorf("missing required claim: 'jti'")
+	jti, err := requireString(payload, "jti", "claim")
+	if err != nil {
+		return nil, err
 	}
 
-	htm, ok := payload["htm"].(string)
-	if !ok || strings.TrimSpace(htm) == "" {
-		return nil, fmt.Errorf("missing required claim: 'htm'")
+	htm, err := requireString(payload, "htm", "claim")
+	if err != nil {
+		return nil, err
 	}
 
-	htu, ok := payload["htu"].(string)
-	if !ok || strings.TrimSpace(htu) == "" {
-		return nil, fmt.Errorf("missing required claim: 'htu'")
+	htu, err := requireString(payload, "htu", "claim")
+	if err != nil {
+		return nil, err
 	}
 
 	iat, err := types.ParseTimestamp(payload["iat"])
@@ -823,7 +536,7 @@ func NewProof(header, payload map[string]any) (*Proof, error) {
 // ParseProof parses a DPoP proof JWT string into a structured Proof.
 // Automatically strips leading 'DPoP ' prefixes if present.
 func ParseProof(proofStr string) (*Proof, error) {
-	proofStr = trimDPoPPrefix(proofStr)
+	proofStr = trimPrefixFold(proofStr, "dpop ")
 	if len(proofStr) > maxProofSize {
 		return nil, fmt.Errorf("dpop proof size exceeds maximum allowed limit of %d bytes", maxProofSize)
 	}
@@ -859,53 +572,53 @@ func ParseProof(proofStr string) (*Proof, error) {
 // ComputeAccessTokenHash computes the RFC 9449 access token hash (ath): base64url(sha256(access_token)).
 // Automatically strips leading 'DPoP ' or 'Bearer ' prefixes if present.
 func ComputeAccessTokenHash(token string) string {
-	token = trimTokenPrefix(token)
+	token = trimPrefixFold(token, "dpop ", "bearer ")
 	h := sha256.Sum256([]byte(token))
 	return base64.RawURLEncoding.EncodeToString(h[:])
 }
 
 // ComputeJWKThumbprint computes the RFC 7638 SHA-256 JWK Thumbprint (base64url encoded without padding).
 func ComputeJWKThumbprint(jwk map[string]any) (string, error) {
-	kty, ok := jwk["kty"].(string)
-	if !ok || kty == "" {
+	kty, err := requireString(jwk, "kty", "JWK parameter")
+	if err != nil {
 		return "", fmt.Errorf("missing or invalid 'kty' in JWK")
 	}
 
 	var canonicalJSON string
 	switch kty {
 	case "RSA":
-		e, ok := jwk["e"].(string)
-		if !ok || e == "" {
+		e, err := requireString(jwk, "e", "RSA JWK parameter")
+		if err != nil {
 			return "", fmt.Errorf("missing or invalid 'e' in RSA JWK")
 		}
-		n, ok := jwk["n"].(string)
-		if !ok || n == "" {
+		n, err := requireString(jwk, "n", "RSA JWK parameter")
+		if err != nil {
 			return "", fmt.Errorf("missing or invalid 'n' in RSA JWK")
 		}
 		canonicalJSON = fmt.Sprintf(`{"e":%q,"kty":"RSA","n":%q}`, e, n)
 
 	case "EC":
-		crv, ok := jwk["crv"].(string)
-		if !ok || crv == "" {
+		crv, err := requireString(jwk, "crv", "EC JWK parameter")
+		if err != nil {
 			return "", fmt.Errorf("missing or invalid 'crv' in EC JWK")
 		}
-		x, ok := jwk["x"].(string)
-		if !ok || x == "" {
+		x, err := requireString(jwk, "x", "EC JWK parameter")
+		if err != nil {
 			return "", fmt.Errorf("missing or invalid 'x' in EC JWK")
 		}
-		y, ok := jwk["y"].(string)
-		if !ok || y == "" {
+		y, err := requireString(jwk, "y", "EC JWK parameter")
+		if err != nil {
 			return "", fmt.Errorf("missing or invalid 'y' in EC JWK")
 		}
 		canonicalJSON = fmt.Sprintf(`{"crv":%q,"kty":"EC","x":%q,"y":%q}`, crv, x, y)
 
 	case "OKP":
-		crv, ok := jwk["crv"].(string)
-		if !ok || crv == "" {
+		crv, err := requireString(jwk, "crv", "OKP JWK parameter")
+		if err != nil {
 			return "", fmt.Errorf("missing or invalid 'crv' in OKP JWK")
 		}
-		x, ok := jwk["x"].(string)
-		if !ok || x == "" {
+		x, err := requireString(jwk, "x", "OKP JWK parameter")
+		if err != nil {
 			return "", fmt.Errorf("missing or invalid 'x' in OKP JWK")
 		}
 		canonicalJSON = fmt.Sprintf(`{"crv":%q,"kty":"OKP","x":%q}`, crv, x)
@@ -976,6 +689,22 @@ func normalizeTargetURI(rawURI string) (string, error) {
 	return scheme + "://" + effectiveHost + cleanPath, nil
 }
 
+func requireString(m map[string]any, key, context string) (string, error) {
+	v, ok := m[key].(string)
+	if !ok || strings.TrimSpace(v) == "" {
+		return "", fmt.Errorf("missing or invalid required %s: %q", context, key)
+	}
+	return strings.TrimSpace(v), nil
+}
+
+func requireMap(m map[string]any, key, context string) (map[string]any, error) {
+	v, ok := m[key].(map[string]any)
+	if !ok || len(v) == 0 {
+		return nil, fmt.Errorf("missing or empty required %s object: %q", context, key)
+	}
+	return v, nil
+}
+
 func optString(m map[string]any, key string) string {
 	if v, ok := m[key].(string); ok {
 		return v
@@ -983,24 +712,14 @@ func optString(m map[string]any, key string) string {
 	return ""
 }
 
-func trimDPoPPrefix(proofStr string) string {
-	proofStr = strings.TrimSpace(proofStr)
-	if strings.HasPrefix(strings.ToLower(proofStr), "dpop ") {
-		return strings.TrimSpace(proofStr[5:])
+func trimPrefixFold(s string, prefixes ...string) string {
+	s = strings.TrimSpace(s)
+	for _, prefix := range prefixes {
+		if len(s) >= len(prefix) && strings.EqualFold(s[:len(prefix)], prefix) {
+			return strings.TrimSpace(s[len(prefix):])
+		}
 	}
-	return proofStr
-}
-
-func trimTokenPrefix(tokenStr string) string {
-	tokenStr = strings.TrimSpace(tokenStr)
-	lower := strings.ToLower(tokenStr)
-	if strings.HasPrefix(lower, "dpop ") {
-		return strings.TrimSpace(tokenStr[5:])
-	}
-	if strings.HasPrefix(lower, "bearer ") {
-		return strings.TrimSpace(tokenStr[7:])
-	}
-	return tokenStr
+	return s
 }
 
 func decodeBase64Segment(seg string) ([]byte, error) {
@@ -1015,4 +734,77 @@ func decodeBase64Segment(seg string) ([]byte, error) {
 		return b, nil
 	}
 	return base64.StdEncoding.DecodeString(seg)
+}
+
+// GenerateNonce creates a cryptographically secure 256-bit base64url-encoded random nonce.
+func GenerateNonce() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("failed to generate random nonce: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+// GenerateStatelessNonce creates an HMAC-signed timestamped nonce valid across distributed servers.
+// The nonce is formatted as: base64url(payload).base64url(hmac_signature)
+// where payload contains the unix timestamp, random entropy, and optional context strings.
+func GenerateStatelessNonce(secretKey []byte, context ...string) (string, error) {
+	now := time.Now().UTC().Unix()
+	entropy := make([]byte, 16)
+	if _, err := rand.Read(entropy); err != nil {
+		return "", fmt.Errorf("failed to generate nonce entropy: %w", err)
+	}
+	payload := fmt.Sprintf("%d:%s:%s", now, base64.RawURLEncoding.EncodeToString(entropy), strings.Join(context, ":"))
+
+	mac := hmac.New(sha256.New, secretKey)
+	mac.Write([]byte(payload))
+	sig := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+
+	return base64.RawURLEncoding.EncodeToString([]byte(payload)) + "." + sig, nil
+}
+
+// ValidateStatelessNonce verifies that the stateless nonce has a valid HMAC signature, has not expired,
+// and matches any optional context strings.
+func ValidateStatelessNonce(nonce string, secretKey []byte, maxAge time.Duration, context ...string) bool {
+	parts := strings.Split(nonce, ".")
+	if len(parts) != 2 {
+		return false
+	}
+	payloadBytes, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		return false
+	}
+	expectedSigBytes, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return false
+	}
+
+	mac := hmac.New(sha256.New, secretKey)
+	mac.Write(payloadBytes)
+	if subtle.ConstantTimeCompare(mac.Sum(nil), expectedSigBytes) != 1 {
+		return false
+	}
+
+	payloadParts := strings.Split(string(payloadBytes), ":")
+	if len(payloadParts) < 2 {
+		return false
+	}
+	ts, err := strconv.ParseInt(payloadParts[0], 10, 64)
+	if err != nil {
+		return false
+	}
+	nonceTime := time.Unix(ts, 0).UTC()
+	now := time.Now().UTC()
+	if now.Sub(nonceTime) > maxAge || nonceTime.Sub(now) > 10*time.Second {
+		return false
+	}
+
+	if len(context) > 0 {
+		expectedContext := strings.Join(context, ":")
+		actualContext := strings.Join(payloadParts[2:], ":")
+		if subtle.ConstantTimeCompare([]byte(actualContext), []byte(expectedContext)) != 1 {
+			return false
+		}
+	}
+	return true
 }
