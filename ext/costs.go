@@ -15,92 +15,56 @@
 package ext
 
 import (
-	"math"
-
-	"cel.dev/cel-go/checker"
-	"cel.dev/cel-go/common"
-	"cel.dev/cel-go/common/ast"
-	"cel.dev/cel-go/common/types"
+	"cel.dev/cel-go/common/cost"
 	"cel.dev/cel-go/common/types/ref"
-	"cel.dev/cel-go/common/types/traits"
 )
 
 var (
-	callCostEstimate = checker.FixedCostEstimate(1)
-	callCost         = uint64(1)
-	listAllocCost    = checker.FixedCostEstimate(common.ListCreateBaseCost)
-	stringCostFactor = common.StringTraversalCostFactor
+	callCostEstimate = cost.CallCostEstimate
+	callCost         = cost.CallCost
+	listAllocCost    = cost.ListAllocCost
+	stringCostFactor = cost.StringCostFactor
 )
 
-func estimateStringScan(sz checker.SizeEstimate) (checker.CostEstimate, *checker.SizeEstimate) {
-	return estimateTraversal(sz, stringCostFactor, nil)
+func estimateStringScan(sz cost.SizeEstimate) (cost.CostEstimate, *cost.SizeEstimate) {
+	return cost.EstimateStringScan(sz)
 }
 
-func estimateListAlloc(sz checker.SizeEstimate, costFactor float64) (checker.CostEstimate, *checker.SizeEstimate) {
-	return estimateTraversal(sz, costFactor, &listAllocCost)
+func estimateListAlloc(sz cost.SizeEstimate, costFactor float64) (cost.CostEstimate, *cost.SizeEstimate) {
+	return cost.EstimateListAlloc(sz, costFactor)
 }
 
 // estimateTraversal computes cost as a function of the size of the target object and whether the call allocates memory.
-func estimateTraversal(nodeSize checker.SizeEstimate, costFactor float64, allocationCost *checker.CostEstimate) (checker.CostEstimate, *checker.SizeEstimate) {
-	cost := nodeSize.MultiplyByCostFactor(costFactor)
-	if allocationCost != nil {
-		cost = cost.Add(*allocationCost)
-	}
-	return cost, &nodeSize
+func estimateTraversal(nodeSize cost.SizeEstimate, costFactor float64, allocationCost *cost.CostEstimate) (cost.CostEstimate, *cost.SizeEstimate) {
+	return cost.EstimateTraversal(nodeSize, costFactor, allocationCost)
 }
 
-func estimateSize(estimator checker.CostEstimator, node checker.AstNode) checker.SizeEstimate {
-	if l := node.ComputedSize(); l != nil {
-		return *l
-	}
-	if l := estimator.EstimateSize(node); l != nil {
-		return *l
-	}
-	return checker.SizeEstimate{Min: 0, Max: math.MaxUint64}
+func estimateSize(estimator cost.Estimator, node cost.AstNode) cost.SizeEstimate {
+	return cost.EstimateSize(estimator, node)
 }
 
 func actualSize(value ref.Val) uint64 {
-	if sz, ok := value.(traits.Sizer); ok {
-		return uint64(sz.Size().(types.Int))
-	}
-	return 1
+	return cost.ActualSize(value)
 }
 
 // nodeAsUintValue returns the value of a literal int node as a uint64, or the default value if the
 // node is not a non-negative int literal.
-func nodeAsUintValue(node checker.AstNode, defaultVal uint64) uint64 {
-	if node.Expr().Kind() != ast.LiteralKind {
-		return defaultVal
-	}
-	lit := node.Expr().AsLiteral()
-	if lit.Type() != types.IntType {
-		return defaultVal
-	}
-	val := lit.(types.Int)
-	if val < types.IntZero {
-		return 0
-	}
-	return uint64(lit.(types.Int))
+func nodeAsUintValue(node cost.AstNode, defaultVal uint64) uint64 {
+	return cost.NodeAsUintValue(node, defaultVal)
 }
 
-func callEstimate(cost checker.CostEstimate, sz *checker.SizeEstimate) *checker.CallEstimate {
-	return &checker.CallEstimate{CostEstimate: cost, ResultSize: sz}
+func callEstimate(c cost.CostEstimate, sz *cost.SizeEstimate) *cost.CallEstimate {
+	return cost.NewCallEstimate(c, sz)
 }
 
-func rangedSizeEstimate(min, max uint64) checker.SizeEstimate {
-	return checker.SizeEstimate{Min: min, Max: max}
+func rangedSizeEstimate(min, max uint64) cost.SizeEstimate {
+	return cost.RangedSizeEstimate(min, max)
 }
 
-func fixedSizeEstimate(val uint64) checker.SizeEstimate {
-	return checker.FixedSizeEstimate(val)
+func fixedSizeEstimate(val uint64) cost.SizeEstimate {
+	return cost.FixedSizeEstimate(val)
 }
 
-func atLeastOne(size checker.SizeEstimate) checker.SizeEstimate {
-	if size.Min == 0 {
-		size.Min = 1
-	}
-	if size.Max == 0 {
-		size.Max = 1
-	}
-	return size
+func atLeastOne(size cost.SizeEstimate) cost.SizeEstimate {
+	return cost.AtLeastOne(size)
 }

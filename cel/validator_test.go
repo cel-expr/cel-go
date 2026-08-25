@@ -596,4 +596,3 @@ func TestOverrideValidatorPreservesOrder(t *testing.T) {
 		t.Fatalf("expected overridden nesting limit validator with limit 5, got %v", validators[1])
 	}
 }
-

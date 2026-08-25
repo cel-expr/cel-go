@@ -21,7 +21,6 @@ import (
 
 	"cel.dev/cel-go/cel"
 	"cel.dev/cel-go/checker"
-	"cel.dev/cel-go/common"
 	"cel.dev/cel-go/common/ast"
 	"cel.dev/cel-go/common/cost"
 	"cel.dev/cel-go/common/decls"
@@ -840,12 +839,12 @@ func estimateListCallWithResultSize(costFactor float64, costSize checker.SizeEst
 }
 
 // estimateListCallWithDirectCost computes cost using a pre-calculated CostEstimate and a separate result size estimate.
-func estimateListCallWithDirectCost(cost checker.CostEstimate, resultSize checker.SizeEstimate, allocates bool) *checker.CallEstimate {
+func estimateListCallWithDirectCost(costVal checker.CostEstimate, resultSize checker.SizeEstimate, allocates bool) *checker.CallEstimate {
 	if allocates {
-		cost = cost.Add(checker.FixedCostEstimate(common.ListCreateBaseCost))
+		costVal = costVal.Add(checker.FixedCostEstimate(cost.ListCreateBaseCost))
 	}
-	cost = cost.Add(callCostEstimate)
-	return &checker.CallEstimate{CostEstimate: cost, ResultSize: &resultSize}
+	costVal = costVal.Add(callCostEstimate)
+	return &checker.CallEstimate{CostEstimate: costVal, ResultSize: &resultSize}
 }
 
 // trackListOutputSize computes cost as a function of the size of the result list.
@@ -892,7 +891,7 @@ func trackListSelfCompare(l traits.Lister) *uint64 {
 	}
 	elem := l.Get(types.IntZero)
 	if elem.Type() == types.StringType || elem.Type() == types.BytesType {
-		costFactor += common.StringTraversalCostFactor
+		costFactor += cost.StringTraversalCostFactor
 	}
 	return trackAllocatingListCall(costFactor, cost.SafeMultiply(sz, sz))
 }
@@ -903,7 +902,7 @@ func trackAllocatingListCall(costFactor float64, size uint64) *uint64 {
 	if costFactor < 0.0 {
 		costFactor = 1.0
 	}
-	total := cost.SafeAdd(uint64(float64(size)*costFactor), callCost, common.ListCreateBaseCost)
+	total := cost.SafeAdd(uint64(float64(size)*costFactor), callCost, cost.ListCreateBaseCost)
 	return &total
 }
 
@@ -917,7 +916,7 @@ func estimateListDistinctLegacy(estimator checker.CostEstimator, target *checker
 	if tType.Kind() == types.ListKind && len(tType.Parameters()) > 0 {
 		elemType := tType.Parameters()[0]
 		if elemType.Kind() == types.StringKind || elemType.Kind() == types.BytesKind {
-			costFactor += common.StringTraversalCostFactor
+			costFactor += cost.StringTraversalCostFactor
 		}
 	}
 	return estimateAllocatingListCall(costFactor, sz.Multiply(sz))
@@ -946,7 +945,7 @@ func estimateListSortCostLegacy(estimator checker.CostEstimator, node checker.As
 	costFactor := 2.0
 	switch elemType {
 	case types.StringType, types.BytesType:
-		costFactor += common.StringTraversalCostFactor
+		costFactor += cost.StringTraversalCostFactor
 	}
 	return estimateAllocatingListCall(costFactor, sz.Multiply(sz))
 }
@@ -995,7 +994,7 @@ func estimateItemSize(estimator checker.CostEstimator, node checker.AstNode) che
 func estimateElementEqualityCost(estimator checker.CostEstimator, elemType *types.Type, itemSize checker.SizeEstimate) checker.CostEstimate {
 	switch elemType.Kind() {
 	case types.StringKind, types.BytesKind:
-		return itemSize.MultiplyByCostFactor(common.StringTraversalCostFactor)
+		return itemSize.MultiplyByCostFactor(cost.StringTraversalCostFactor)
 	case types.ListKind, types.MapKind, types.StructKind:
 		return checker.UnknownCostEstimate()
 	default:

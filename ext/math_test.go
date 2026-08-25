@@ -616,7 +616,7 @@ func TestMathVersions(t *testing.T) {
 		{
 			version: 2,
 			supportedFunctions: map[string]string{
-				"sqrt":          `math.sqrt(25) == 5.0`,
+				"sqrt": `math.sqrt(25) == 5.0`,
 			},
 		},
 	}

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package cost provides the saturating arithmetic shared by cost estimation and cost tracking.
+// Package cost provides cost estimation, cost tracking, and saturating arithmetic.
 //
 // Costs and sizes are unsigned 64-bit values where math.MaxUint64 doubles as the representation
 // of an unbounded, or unknown, quantity. Every operation in this package saturates at
@@ -20,7 +20,53 @@
 // sequence of operations.
 package cost
 
-import "math"
+import (
+	"math"
+
+	"cel.dev/cel-go/common/ast"
+	"cel.dev/cel-go/common/types"
+	"cel.dev/cel-go/common/types/ref"
+	"cel.dev/cel-go/common/types/traits"
+)
+
+const (
+	// SelectAndIdentCost is the cost of an operation that accesses an identifier or performs a select.
+	SelectAndIdentCost = 1
+
+	// ConstCost is the cost of an operation that accesses a constant.
+	ConstCost = 0
+
+	// ListCreateBaseCost is the base cost of any operation that creates a new list.
+	ListCreateBaseCost = 10
+
+	// MapCreateBaseCost is the base cost of any operation that creates a new map.
+	MapCreateBaseCost = 30
+
+	// StructCreateBaseCost is the base cost of any operation that creates a new struct.
+	StructCreateBaseCost = 40
+
+	// StringTraversalCostFactor is multiplied to a length of a string when computing the cost of traversing the entire
+	// string once.
+	StringTraversalCostFactor = 0.1
+
+	// RegexStringLengthCostFactor is multiplied to the length of a regex string pattern when computing the cost of
+	// applying the regex to a string of unit cost.
+	RegexStringLengthCostFactor = 0.25
+)
+
+var (
+	// CallCostEstimate is the base cost estimate for an O(1) function call.
+	CallCostEstimate = FixedCostEstimate(1)
+
+	// CallCost is the base cost for an O(1) function call.
+	CallCost = uint64(1)
+
+	// ListAllocCost is the base cost estimate for allocating a list.
+	ListAllocCost = FixedCostEstimate(ListCreateBaseCost)
+
+	// StringCostFactor is the cost factor for traversing a string once.
+	StringCostFactor = StringTraversalCostFactor
+)
 
 // maxUint64AsFloat is the smallest float64 value greater than math.MaxUint64.
 //
@@ -75,4 +121,212 @@ func SafeCeil(x float64) uint64 {
 		return math.MaxUint64
 	}
 	return uint64(ceil)
+}
+
+// SizeEstimate represents an estimated size of a variable length string, bytes, map or list.
+type SizeEstimate struct {
+	Min, Max uint64
+}
+
+// UnknownSizeEstimate returns a size between 0 and max uint.
+func UnknownSizeEstimate() SizeEstimate {
+	return unknownSizeEstimate
+}
+
+// FixedSizeEstimate returns a size estimate with a fixed min and max range.
+func FixedSizeEstimate(size uint64) SizeEstimate {
+	return SizeEstimate{Min: size, Max: size}
+}
+
+// RangedSizeEstimate returns a size estimate bounded by min and max.
+func RangedSizeEstimate(min, max uint64) SizeEstimate {
+	return SizeEstimate{Min: min, Max: max}
+}
+
+// AtLeastOne returns a size estimate with min and max guaranteed to be at least 1.
+func AtLeastOne(size SizeEstimate) SizeEstimate {
+	if size.Min == 0 {
+		size.Min = 1
+	}
+	if size.Max == 0 {
+		size.Max = 1
+	}
+	return size
+}
+
+// Add adds to another SizeEstimate and returns the sum.
+// If add would result in an uint64 overflow, the result is math.MaxUint64.
+func (se SizeEstimate) Add(sizeEstimate SizeEstimate) SizeEstimate {
+	return SizeEstimate{
+		SafeAdd(se.Min, sizeEstimate.Min),
+		SafeAdd(se.Max, sizeEstimate.Max),
+	}
+}
+
+// Multiply multiplies by another SizeEstimate and returns the product.
+// If multiply would result in an uint64 overflow, the result is math.MaxUint64.
+func (se SizeEstimate) Multiply(sizeEstimate SizeEstimate) SizeEstimate {
+	return SizeEstimate{
+		SafeMultiply(se.Min, sizeEstimate.Min),
+		SafeMultiply(se.Max, sizeEstimate.Max),
+	}
+}
+
+// MultiplyByCostFactor multiplies a SizeEstimate by a cost factor and returns the CostEstimate with the
+// nearest integer of the result, rounded up.
+func (se SizeEstimate) MultiplyByCostFactor(costPerUnit float64) CostEstimate {
+	return CostEstimate{
+		SafeMultiplyByFactor(se.Min, costPerUnit),
+		SafeMultiplyByFactor(se.Max, costPerUnit),
+	}
+}
+
+// MultiplyByCost multiplies by the cost and returns the product.
+// If multiply would result in an uint64 overflow, the result is math.MaxUint64.
+func (se SizeEstimate) MultiplyByCost(estimate CostEstimate) CostEstimate {
+	return CostEstimate{
+		SafeMultiply(se.Min, estimate.Min),
+		SafeMultiply(se.Max, estimate.Max),
+	}
+}
+
+// Union returns a SizeEstimate that encompasses both input SizeEstimate values.
+func (se SizeEstimate) Union(size SizeEstimate) SizeEstimate {
+	result := se
+	if size.Min < result.Min {
+		result.Min = size.Min
+	}
+	if size.Max > result.Max {
+		result.Max = size.Max
+	}
+	return result
+}
+
+// AsCost converts a size estimate to an equivalent cost estimate.
+func (se SizeEstimate) AsCost() CostEstimate {
+	return se.MultiplyByCostFactor(1)
+}
+
+// CostEstimate represents an estimated cost range and provides add and multiply operations
+// that do not overflow.
+type CostEstimate struct {
+	Min, Max uint64
+}
+
+// UnknownCostEstimate returns a cost with an unknown impact.
+func UnknownCostEstimate() CostEstimate {
+	return unknownCostEstimate
+}
+
+// FixedCostEstimate returns a cost with a fixed min and max range.
+func FixedCostEstimate(fixedCost uint64) CostEstimate {
+	return CostEstimate{Min: fixedCost, Max: fixedCost}
+}
+
+// Add adds the costs and returns the sum.
+// If add would result in an uint64 overflow for the min or max, the value is set to math.MaxUint64.
+func (ce CostEstimate) Add(estimate CostEstimate) CostEstimate {
+	return CostEstimate{
+		Min: SafeAdd(ce.Min, estimate.Min),
+		Max: SafeAdd(ce.Max, estimate.Max),
+	}
+}
+
+// Multiply multiplies by the cost and returns the product.
+// If multiply would result in an uint64 overflow, the result is math.MaxUint64.
+func (ce CostEstimate) Multiply(estimate CostEstimate) CostEstimate {
+	return CostEstimate{
+		Min: SafeMultiply(ce.Min, estimate.Min),
+		Max: SafeMultiply(ce.Max, estimate.Max),
+	}
+}
+
+// MultiplyByCostFactor multiplies a CostEstimate by a cost factor and returns the CostEstimate with the
+// nearest integer of the result, rounded up.
+func (ce CostEstimate) MultiplyByCostFactor(costPerUnit float64) CostEstimate {
+	return CostEstimate{
+		Min: SafeMultiplyByFactor(ce.Min, costPerUnit),
+		Max: SafeMultiplyByFactor(ce.Max, costPerUnit),
+	}
+}
+
+// Union returns a CostEstimate that encompasses both input CostEstimates.
+func (ce CostEstimate) Union(size CostEstimate) CostEstimate {
+	result := ce
+	if size.Min < result.Min {
+		result.Min = size.Min
+	}
+	if size.Max > result.Max {
+		result.Max = size.Max
+	}
+	return result
+}
+
+// CallEstimate includes a CostEstimate for the call, and an optional estimate of the result object size.
+// The ResultSize should only be provided if the call results in a map, list, string or bytes.
+type CallEstimate struct {
+	CostEstimate
+
+	ResultSize *SizeEstimate
+}
+
+// NewCallEstimate creates a new CallEstimate with the given cost and optional result size.
+func NewCallEstimate(cost CostEstimate, sz *SizeEstimate) *CallEstimate {
+	return &CallEstimate{CostEstimate: cost, ResultSize: sz}
+}
+
+// ActualSize returns the size of the value for all traits.Sizer values,
+// and returns a size of 1 for all other value types.
+func ActualSize(value ref.Val) uint64 {
+	if sz, ok := value.(traits.Sizer); ok {
+		return uint64(sz.Size().(types.Int))
+	}
+	return 1
+}
+
+// EstimateSize returns a SizeEstimate for the given node from its computed size, estimator, or unknown.
+func EstimateSize(estimator Estimator, node AstNode) SizeEstimate {
+	if l := node.ComputedSize(); l != nil {
+		return *l
+	}
+	if l := estimator.EstimateSize(node); l != nil {
+		return *l
+	}
+	return SizeEstimate{Min: 0, Max: math.MaxUint64}
+}
+
+// EstimateTraversal computes cost as a function of the size of the target object and whether the call allocates memory.
+func EstimateTraversal(nodeSize SizeEstimate, costFactor float64, allocationCost *CostEstimate) (CostEstimate, *SizeEstimate) {
+	cost := nodeSize.MultiplyByCostFactor(costFactor)
+	if allocationCost != nil {
+		cost = cost.Add(*allocationCost)
+	}
+	return cost, &nodeSize
+}
+
+// EstimateStringScan estimates cost for scanning a string.
+func EstimateStringScan(sz SizeEstimate) (CostEstimate, *SizeEstimate) {
+	return EstimateTraversal(sz, StringCostFactor, nil)
+}
+
+// EstimateListAlloc estimates cost for allocating a list.
+func EstimateListAlloc(sz SizeEstimate, costFactor float64) (CostEstimate, *SizeEstimate) {
+	return EstimateTraversal(sz, costFactor, &ListAllocCost)
+}
+
+// NodeAsUintValue returns the value of a literal int node as a uint64, or the default value if the
+// node is not a non-negative int literal.
+func NodeAsUintValue(node AstNode, defaultVal uint64) uint64 {
+	if node.Expr().Kind() != ast.LiteralKind {
+		return defaultVal
+	}
+	lit := node.Expr().AsLiteral()
+	if lit.Type() != types.IntType {
+		return defaultVal
+	}
+	val := lit.(types.Int)
+	if val < types.IntZero {
+		return 0
+	}
+	return uint64(lit.(types.Int))
 }

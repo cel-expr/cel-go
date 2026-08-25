@@ -29,7 +29,6 @@ import (
 
 	"cel.dev/cel-go/cel"
 	"cel.dev/cel-go/checker"
-	"cel.dev/cel-go/common"
 	"cel.dev/cel-go/common/cost"
 	"cel.dev/cel-go/common/types"
 	"cel.dev/cel-go/common/types/ref"
@@ -997,7 +996,7 @@ func estimateStringSplitCost(estimator checker.CostEstimator, target *checker.As
 	// Worst case: split("") produces N elements for a string of size N.
 	resultSize := rangedSizeEstimate(0, targetSize.Max)
 	// Include list creation base cost plus allocation for each element.
-	allocationCost := resultSize.MultiplyByCostFactor(1).Add(checker.FixedCostEstimate(common.ListCreateBaseCost))
+	allocationCost := resultSize.MultiplyByCostFactor(1).Add(checker.FixedCostEstimate(cost.ListCreateBaseCost))
 	cost := traversalCost.Add(allocationCost).Add(callCostEstimate)
 	return callEstimate(cost, &resultSize)
 }
@@ -1071,7 +1070,7 @@ func trackStringReplaceCost(args []ref.Val, result ref.Val) *uint64 {
 func trackStringSplitCost(args []ref.Val, result ref.Val) *uint64 {
 	traversalCost := cost.SafeMultiplyByFactor(cost.SafeAdd(actualSize(args[0]), 1), stringCostFactor)
 	resultSize := actualSize(result)
-	total := cost.SafeAdd(callCost, traversalCost, resultSize, common.ListCreateBaseCost)
+	total := cost.SafeAdd(callCost, traversalCost, resultSize, cost.ListCreateBaseCost)
 	return &total
 }
 

@@ -2807,9 +2807,13 @@ func TestCustomDecorator(t *testing.T) {
 }
 
 func TestCostTrackerActualCost(t *testing.T) {
-	ct := &CostTracker{cost: 42}
-	if ct.ActualCost() != 42 {
-		t.Errorf("ct.ActualCost() = %d, wanted 42", ct.ActualCost())
+	ct, err := NewCostTracker(nil)
+	if err != nil {
+		t.Fatalf("NewCostTracker(nil) failed: %v", err)
+	}
+	ct.Qualify(1)
+	if ct.ActualCost() != 1 {
+		t.Errorf("ct.ActualCost() = %d, wanted 1", ct.ActualCost())
 	}
 }
 

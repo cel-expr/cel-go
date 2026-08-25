@@ -336,4 +336,3 @@ func TestJSONEncodeCostUnbounded(t *testing.T) {
 		t.Errorf("det.ActualCost() got %d, wanted %d", *det.ActualCost(), uint64(math.MaxUint64))
 	}
 }
-

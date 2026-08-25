@@ -49,4 +49,3 @@ func JSONFieldNames(enabled bool) Option {
 		return nil
 	}
 }
-
