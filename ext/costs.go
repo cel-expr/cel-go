@@ -29,6 +29,7 @@ var (
 	callCostEstimate = checker.FixedCostEstimate(1)
 	callCost         = uint64(1)
 	listAllocCost    = checker.FixedCostEstimate(common.ListCreateBaseCost)
+	mapAllocCost     = checker.FixedCostEstimate(common.MapCreateBaseCost)
 	stringCostFactor = common.StringTraversalCostFactor
 )
 

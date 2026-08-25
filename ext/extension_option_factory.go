@@ -59,6 +59,9 @@ var extFactories = map[string]extensionFactory{
 	"cel.lib.ext.lists": func(version uint32) cel.EnvOption {
 		return Lists(ListsVersion(version))
 	},
+	"cel.lib.ext.maps": func(version uint32) cel.EnvOption {
+		return Maps(MapsVersion(version))
+	},
 	"cel.lib.ext.math": func(version uint32) cel.EnvOption {
 		return Math(MathVersion(version))
 	},
@@ -83,6 +86,7 @@ var extAliases = map[string]string{
 	"bindings":               "cel.lib.ext.cel.bindings",
 	"encoders":               "cel.lib.ext.encoders",
 	"lists":                  "cel.lib.ext.lists",
+	"maps":                   "cel.lib.ext.maps",
 	"math":                   "cel.lib.ext.math",
 	"protos":                 "cel.lib.ext.protos",
 	"sets":                   "cel.lib.ext.sets",
