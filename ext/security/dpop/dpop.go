@@ -51,17 +51,22 @@ func defaultNowFunc() time.Time {
 	return time.Now().UTC()
 }
 
-// Library returns a cel.EnvOption to configure extended functions for DPoP proof parsing,
-// request verification, and key confirmation inspection.
-func Library(options ...Option) cel.EnvOption {
+// NewDPoPLib creates a new DPoP library with the given options.
+func NewDPoPLib(opts ...Option) *dpopLib {
 	l := &dpopLib{
 		version: ^uint32(0),
 		now:     defaultNowFunc,
 	}
-	for _, o := range options {
+	for _, o := range opts {
 		l = o(l)
 	}
-	return cel.Lib(l)
+	return l
+}
+
+// Library returns a cel.EnvOption to configure extended functions for DPoP proof parsing,
+// request verification, and key confirmation inspection.
+func Library(options ...Option) cel.EnvOption {
+	return cel.Lib(NewDPoPLib(options...))
 }
 
 // Option declares a functional operator for configuring DPoP extension library behavior.

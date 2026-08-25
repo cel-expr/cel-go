@@ -24,7 +24,6 @@ go_test(
     size = "small",
     srcs = [
         "dpop_test.go",
-        "export_test.go",
     ],
     embed = [
         ":go_default_library",
