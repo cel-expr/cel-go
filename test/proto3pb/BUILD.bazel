@@ -8,6 +8,7 @@ package(
         "//cel:__subpackages__",
         "//checker:__subpackages__",
         "//common:__subpackages__",
+        "//examples:__subpackages__",
         "//ext:__subpackages__",
         "//interpreter:__subpackages__",
         "//parser:__subpackages__",

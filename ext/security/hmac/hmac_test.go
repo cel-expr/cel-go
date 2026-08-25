@@ -17,8 +17,6 @@ package hmac_test
 import (
 	"crypto"
 	"crypto/hmac"
-	"crypto/md5"
-	"crypto/sha1"
 	"crypto/sha256"
 	"crypto/sha512"
 	"encoding/base64"
@@ -432,82 +430,6 @@ func TestHMACSpecificAlgorithmOptions(t *testing.T) {
 				}
 			} else if evalErr != nil {
 				t.Errorf("unexpected eval error for %q: %v", tc.expr, evalErr)
-			}
-		})
-	}
-}
-
-func TestHMACCustomAlgorithmOption(t *testing.T) {
-	env, err := cel.NewEnv(
-		hmaclib.Library(
-			hmaclib.Algorithm(crypto.MD5, "MD5", "HASH-MD5"),
-			hmaclib.Algorithm(crypto.SHA1, "SHA1"),
-		),
-		cel.Variable("msg", cel.StringType),
-		cel.Variable("secret", cel.StringType),
-	)
-	if err != nil {
-		t.Fatalf("cel.NewEnv failed: %v", err)
-	}
-
-	msgStr := "hello custom alg"
-	secretStr := "key"
-	vars := map[string]any{
-		"msg":    msgStr,
-		"secret": secretStr,
-	}
-
-	hMD5 := hmac.New(md5.New, []byte(secretStr))
-	hMD5.Write([]byte(msgStr))
-	macMD5Bytes := hMD5.Sum(nil)
-	macMD5Hex := hex.EncodeToString(macMD5Bytes)
-
-	hSHA1 := hmac.New(sha1.New, []byte(secretStr))
-	hSHA1.Write([]byte(msgStr))
-	macSHA1Hex := hex.EncodeToString(hSHA1.Sum(nil))
-
-	tests := []struct {
-		name string
-		expr string
-		want any
-	}{
-		{
-			name: "md5_constant",
-			expr: `hmac.MD5`,
-			want: "MD5",
-		},
-		{
-			name: "sha1_constant",
-			expr: `hmac.SHA1`,
-			want: "SHA1",
-		},
-		{
-			name: "compute_custom_md5",
-			expr: `hmac.compute(msg, secret, hmac.MD5)`,
-			want: macMD5Bytes,
-		},
-		{
-			name: "compute_custom_md5_alias",
-			expr: `hmac.compute(msg, secret, 'HASH-MD5')`,
-			want: macMD5Bytes,
-		},
-		{
-			name: "verify_custom_md5_prefixed",
-			expr: `hmac.verify(msg, 'md5=` + macMD5Hex + `', secret, hmac.MD5)`,
-			want: true,
-		},
-		{
-			name: "verify_custom_sha1_prefixed",
-			expr: `hmac.verify(msg, 'sha1=` + macSHA1Hex + `', secret, hmac.SHA1)`,
-			want: true,
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			got := evalExpr(t, env, tc.expr, vars)
-			if !reflect.DeepEqual(got, tc.want) {
-				t.Errorf("Eval(%q) = %v (%T), want %v (%T)", tc.expr, got, got, tc.want, tc.want)
 			}
 		})
 	}

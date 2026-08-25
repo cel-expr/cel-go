@@ -1,0 +1,51 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+package(
+    default_visibility = ["//visibility:public"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+go_library(
+    name = "go_default_library",
+    srcs = ["types.go"],
+    importpath = "cel.dev/cel-go/examples",
+)
+
+go_test(
+    name = "examples_test",
+    size = "small",
+    srcs = [
+        "example_cel_advanced_test.go",
+        "example_cel_collections_test.go",
+        "example_cel_compile_test.go",
+        "example_cel_context_eval_test.go",
+        "example_cel_custom_functions_test.go",
+        "example_cel_custom_macros_test.go",
+        "example_cel_execution_cost_test.go",
+        "example_cel_logic_and_conditions_test.go",
+        "example_cel_native_structs_test.go",
+        "example_cel_operators_test.go",
+        "example_cel_protocol_buffers_test.go",
+        "example_cel_strings_and_numbers_test.go",
+        "example_cel_time_test.go",
+        "example_cel_transforming_data_test.go",
+        "example_cel_type_conversions_test.go",
+    ],
+    embed = [
+        ":go_default_library",
+    ],
+    deps = [
+        "//cel:go_default_library",
+        "//checker:go_default_library",
+        "//common:go_default_library",
+        "//common/ast:go_default_library",
+        "//common/operators:go_default_library",
+        "//common/types:go_default_library",
+        "//common/types/ref:go_default_library",
+        "//ext:go_default_library",
+        "//parser:go_default_library",
+        "//test/proto3pb:go_default_library",
+        "@org_golang_google_protobuf//types/known/structpb:go_default_library",
+        "@org_golang_google_protobuf//types/known/wrapperspb:go_default_library",
+    ],
+)

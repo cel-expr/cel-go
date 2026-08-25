@@ -39,12 +39,17 @@ func defaultNowFunc() time.Time {
 	return time.Now().UTC()
 }
 
-// Library returns a cel.EnvOption to configure extended functions for JWT data handling and claims inspection.
-func Library(options ...Option) cel.EnvOption {
-	l := &jwtLib{
+// NewJWTLib constructs an internal jwtLib instance for direct use.
+func NewJWTLib() *jwtLib {
+	return &jwtLib{
 		version: ^uint32(0),
 		now:     defaultNowFunc,
 	}
+}
+
+// Library returns a cel.EnvOption to configure extended functions for JWT data handling and claims inspection.
+func Library(options ...Option) cel.EnvOption {
+	l := NewJWTLib()
 	for _, o := range options {
 		l = o(l)
 	}
