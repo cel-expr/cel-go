@@ -13,6 +13,13 @@ go_library(
         "tracker.go",
     ],
     importpath = "cel.dev/cel-go/common/cost",
+    deps = [
+        "//common/ast:go_default_library",
+        "//common/overloads:go_default_library",
+        "//common/types:go_default_library",
+        "//common/types/ref:go_default_library",
+        "//common/types/traits:go_default_library",
+    ],
 )
 
 go_test(
@@ -25,5 +32,18 @@ go_test(
     ],
     embed = [
         ":go_default_library",
+    ],
+    deps = [
+        "//checker:go_default_library",
+        "//common:go_default_library",
+        "//common/containers:go_default_library",
+        "//common/decls:go_default_library",
+        "//common/overloads:go_default_library",
+        "//common/stdlib:go_default_library",
+        "//common/types:go_default_library",
+        "//common/types/ref:go_default_library",
+        "//interpreter:go_default_library",
+        "//parser:go_default_library",
+        "//test/proto3pb:go_default_library",
     ],
 )
