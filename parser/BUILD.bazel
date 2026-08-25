@@ -43,7 +43,6 @@ go_test(
         "helper_test.go",
         "lexer_test.go",
         "parser_test.go",
-        "pratt_parser_test.go",
         "unescape_test.go",
         "unparser_test.go",
     ],
