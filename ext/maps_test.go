@@ -23,7 +23,7 @@ import (
 	"github.com/google/cel-go/common/types"
 )
 
-func TestMapsMerge(t *testing.T) {
+func TestMapsPutAll(t *testing.T) {
 	tests := []struct {
 		name string
 		expr string
@@ -32,50 +32,50 @@ func TestMapsMerge(t *testing.T) {
 	}{
 		{
 			name: "both empty",
-			expr: `{}.merge({}) == {}`,
+			expr: `{}.putAll({}) == {}`,
 		},
 		{
 			name: "disjoint keys",
-			expr: `{'a': 1}.merge({'b': 2}) == {'a': 1, 'b': 2}`,
+			expr: `{'a': 1}.putAll({'b': 2}) == {'a': 1, 'b': 2}`,
 		},
 		{
 			name: "empty left",
-			expr: `{}.merge({'b': 2}) == {'b': 2}`,
+			expr: `{}.putAll({'b': 2}) == {'b': 2}`,
 		},
 		{
 			name: "empty right",
-			expr: `{'a': 1}.merge({}) == {'a': 1}`,
+			expr: `{'a': 1}.putAll({}) == {'a': 1}`,
 		},
 		{
 			name: "conflicting key takes the second value",
-			expr: `{'a': 1}.merge({'a': 2}) == {'a': 2}`,
+			expr: `{'a': 1}.putAll({'a': 2}) == {'a': 2}`,
 		},
 		{
 			name: "conflict among other keys",
-			expr: `{'a': 1, 'b': 2}.merge({'b': 3, 'c': 4}) == {'a': 1, 'b': 3, 'c': 4}`,
+			expr: `{'a': 1, 'b': 2}.putAll({'b': 3, 'c': 4}) == {'a': 1, 'b': 3, 'c': 4}`,
 		},
 		{
-			name: "map values are replaced, not merged",
-			expr: `{'a': {'x': 1}}.merge({'a': {'y': 2}}) == {'a': {'y': 2}}`,
+			name: "map values are replaced, not combined",
+			expr: `{'a': {'x': 1}}.putAll({'a': {'y': 2}}) == {'a': {'y': 2}}`,
 		},
 		{
 			name: "int keys",
-			expr: `{1: 'a'}.merge({2: 'b'}) == {1: 'a', 2: 'b'}`,
+			expr: `{1: 'a'}.putAll({2: 'b'}) == {1: 'a', 2: 'b'}`,
 		},
 		{
 			name: "inputs are unchanged",
-			expr: `{'a': 1}.merge({'a': 2}) == {'a': 2} && {'a': 1} == {'a': 1}`,
+			expr: `{'a': 1}.putAll({'a': 2}) == {'a': 2} && {'a': 1} == {'a': 1}`,
 		},
 		{
-			name: "merging a variable",
-			expr: `x.merge({'b': 2}) == {'a': 1, 'b': 2}`,
+			name: "putAll with a variable",
+			expr: `x.putAll({'b': 2}) == {'a': 1, 'b': 2}`,
 			vars: []cel.EnvOption{cel.Variable("x", cel.MapType(cel.StringType, cel.IntType))},
 			in:   map[string]any{"x": map[string]int64{"a": 1}},
 		},
 		{
-			name: "merge is associative when keys are disjoint",
-			expr: `{'a': 1}.merge({'b': 2}).merge({'c': 3}) ==
-			       {'a': 1}.merge({'b': 2}.merge({'c': 3}))`,
+			name: "putAll is associative when keys are disjoint",
+			expr: `{'a': 1}.putAll({'b': 2}).putAll({'c': 3}) ==
+			       {'a': 1}.putAll({'b': 2}.putAll({'c': 3}))`,
 		},
 	}
 
@@ -109,7 +109,7 @@ func TestMapsMerge(t *testing.T) {
 	}
 }
 
-func TestMapsMergeTypeChecking(t *testing.T) {
+func TestMapsPutAllTypeChecking(t *testing.T) {
 	env, err := cel.NewEnv(Maps())
 	if err != nil {
 		t.Fatalf("cel.NewEnv() failed: %v", err)
@@ -118,10 +118,10 @@ func TestMapsMergeTypeChecking(t *testing.T) {
 		name string
 		expr string
 	}{
-		{name: "list argument", expr: `[1].merge([2])`},
-		{name: "string argument", expr: `'a'.merge('b')`},
-		{name: "mixed arguments", expr: `{'a': 1}.merge([2])`},
-		{name: "single argument", expr: `{'a': 1}.merge()`},
+		{name: "list argument", expr: `[1].putAll([2])`},
+		{name: "string argument", expr: `'a'.putAll('b')`},
+		{name: "mixed arguments", expr: `{'a': 1}.putAll([2])`},
+		{name: "single argument", expr: `{'a': 1}.putAll()`},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -133,7 +133,7 @@ func TestMapsMergeTypeChecking(t *testing.T) {
 	}
 }
 
-func TestMapsMergeNonMapArgs(t *testing.T) {
+func TestMapsPutAllNonMapArgs(t *testing.T) {
 	env, err := cel.NewEnv(Maps(),
 		cel.Variable("x", cel.DynType),
 		cel.Variable("y", cel.DynType))
@@ -148,7 +148,7 @@ func TestMapsMergeNonMapArgs(t *testing.T) {
 		{name: "right is not a map", in: map[string]any{"x": map[string]int64{"a": 1}, "y": "b"}},
 		{name: "neither is a map", in: map[string]any{"x": 1, "y": 2}},
 	}
-	ast, iss := env.Compile(`x.merge(y)`)
+	ast, iss := env.Compile(`x.putAll(y)`)
 	if iss.Err() != nil {
 		t.Fatalf("env.Compile() failed: %v", iss.Err())
 	}
@@ -166,12 +166,12 @@ func TestMapsMergeNonMapArgs(t *testing.T) {
 	}
 }
 
-func TestMapsMergeCost(t *testing.T) {
+func TestMapsPutAllCost(t *testing.T) {
 	env, err := cel.NewEnv(Maps())
 	if err != nil {
 		t.Fatalf("cel.NewEnv() failed: %v", err)
 	}
-	ast, iss := env.Compile(`{'a': 1, 'b': 2}.merge({'c': 3})`)
+	ast, iss := env.Compile(`{'a': 1, 'b': 2}.putAll({'c': 3})`)
 	if iss.Err() != nil {
 		t.Fatalf("env.Compile() failed: %v", iss.Err())
 	}
@@ -201,18 +201,18 @@ func TestMapsMergeCost(t *testing.T) {
 	}
 }
 
-func TestMapsMergeResultSize(t *testing.T) {
-	// A merge of a 2-entry and a 1-entry map holds 2 entries when every key
+func TestMapsPutAllResultSize(t *testing.T) {
+	// putAll over a 2-entry and a 1-entry map holds 2 entries when every key
 	// collides and 3 when none do.
 	var target checker.AstNode = testSizedNode{size: 2}
-	est := estimateMapsMergeCost(testCostHintEstimator{}, &target, []checker.AstNode{
+	est := estimateMapsPutAllCost(testCostHintEstimator{}, &target, []checker.AstNode{
 		testSizedNode{size: 1},
 	})
 	if est == nil {
-		t.Fatal("estimateMapsMergeCost() returned nil")
+		t.Fatal("estimateMapsPutAllCost() returned nil")
 	}
 	if est.ResultSize == nil {
-		t.Fatal("estimateMapsMergeCost() ResultSize was nil")
+		t.Fatal("estimateMapsPutAllCost() ResultSize was nil")
 	}
 	if est.ResultSize.Min != 2 || est.ResultSize.Max != 3 {
 		t.Errorf("ResultSize got [%d, %d], wanted [2, 3]",
@@ -221,7 +221,7 @@ func TestMapsMergeResultSize(t *testing.T) {
 }
 
 // testSizedNode is a checker.AstNode whose size is known, used to pin the
-// result-size bounds of the merge estimator.
+// result-size bounds of the putAll estimator.
 type testSizedNode struct {
 	size uint64
 }

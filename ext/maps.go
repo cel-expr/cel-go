@@ -30,23 +30,23 @@ import (
 // strings, bytes, and lists, but is not defined for maps. This library provides
 // map combination as a named function.
 //
-// # Merge
+// # PutAll
 //
 // Returns a new map containing the entries of both maps. When a key is
 // present in both, the value from the argument wins. Neither input is
 // modified.
 //
-// The merge is shallow: a value that is itself a map is replaced rather than
-// merged recursively.
+// The copy is shallow: a value that is itself a map is replaced rather than
+// combined recursively.
 //
-//	<map(K, V)>.merge(<map(K, V)>) -> <map(K, V)>
+//	<map(K, V)>.putAll(<map(K, V)>) -> <map(K, V)>
 //
 // Examples:
 //
-//	{}.merge({}) // {}
-//	{'a': 1}.merge({'b': 2}) // {'a': 1, 'b': 2}
-//	{'a': 1}.merge({'a': 2}) // {'a': 2}
-//	{'a': {'x': 1}}.merge({'a': {'y': 2}}) // {'a': {'y': 2}}, values are replaced, not merged
+//	{}.putAll({}) // {}
+//	{'a': 1}.putAll({'b': 2}) // {'a': 1, 'b': 2}
+//	{'a': 1}.putAll({'a': 2}) // {'a': 2}
+//	{'a': {'x': 1}}.putAll({'a': {'y': 2}}) // {'a': {'y': 2}}, values are replaced, not combined
 func Maps(options ...MapsOption) cel.EnvOption {
 	l := &mapsLib{}
 	for _, o := range options {
@@ -79,11 +79,11 @@ func (mapsLib) LibraryName() string {
 func (mapsLib) CompileOptions() []cel.EnvOption {
 	mapType := cel.MapType(cel.TypeParamType("K"), cel.TypeParamType("V"))
 	return []cel.EnvOption{
-		cel.Function("merge",
-			cel.MemberOverload("map_merge_map", []*cel.Type{mapType, mapType}, mapType,
-				cel.BinaryBinding(mapsMerge))),
+		cel.Function("putAll",
+			cel.MemberOverload("map_put_all_map", []*cel.Type{mapType, mapType}, mapType,
+				cel.BinaryBinding(mapsPutAll))),
 		cel.CostEstimatorOptions(
-			checker.OverloadCostEstimate("map_merge_map", estimateMapsMergeCost),
+			checker.OverloadCostEstimate("map_put_all_map", estimateMapsPutAllCost),
 		),
 	}
 }
@@ -92,14 +92,14 @@ func (mapsLib) CompileOptions() []cel.EnvOption {
 func (mapsLib) ProgramOptions() []cel.ProgramOption {
 	return []cel.ProgramOption{
 		cel.CostTrackerOptions(
-			interpreter.OverloadCostTracker("map_merge_map", trackMapsMergeCost),
+			interpreter.OverloadCostTracker("map_put_all_map", trackMapsPutAllCost),
 		),
 	}
 }
 
-// estimateMapsMergeCost charges for visiting every entry of both inputs and for
+// estimateMapsPutAllCost charges for visiting every entry of both inputs and for
 // allocating the result map.
-func estimateMapsMergeCost(estimator checker.CostEstimator, target *checker.AstNode, args []checker.AstNode) *checker.CallEstimate {
+func estimateMapsPutAllCost(estimator checker.CostEstimator, target *checker.AstNode, args []checker.AstNode) *checker.CallEstimate {
 	if target == nil || len(args) != 1 {
 		return nil
 	}
@@ -113,16 +113,19 @@ func estimateMapsMergeCost(estimator checker.CostEstimator, target *checker.AstN
 	return callEstimate(cost, &resultSize)
 }
 
-// trackMapsMergeCost mirrors estimateMapsMergeCost against the actual inputs.
-func trackMapsMergeCost(args []ref.Val, _ ref.Val) *uint64 {
+// trackMapsPutAllCost mirrors estimateMapsPutAllCost against the actual inputs.
+//
+// TODO: revisit this method, and estimateMapsPutAllCost alongside it, once the
+// new cost model is available.
+func trackMapsPutAllCost(args []ref.Val, _ ref.Val) *uint64 {
 	entries := safeAdd(actualSize(args[0]), actualSize(args[1]))
 	cost := safeAdd(callCost, uint64(common.MapCreateBaseCost), entries)
 	return &cost
 }
 
-// mapsMerge returns a new map holding the entries of both inputs, with the
+// mapsPutAll returns a new map holding the entries of both inputs, with the
 // values of the second input taking precedence on conflicting keys.
-func mapsMerge(lhs, rhs ref.Val) ref.Val {
+func mapsPutAll(lhs, rhs ref.Val) ref.Val {
 	first, ok := lhs.(traits.Mapper)
 	if !ok {
 		return types.MaybeNoSuchOverloadErr(lhs)
@@ -131,14 +134,14 @@ func mapsMerge(lhs, rhs ref.Val) ref.Val {
 	if !ok {
 		return types.MaybeNoSuchOverloadErr(rhs)
 	}
-	merged := make(map[ref.Val]ref.Val, actualSize(first)+actualSize(second))
-	if err := copyEntries(first, merged); err != nil {
+	entries := make(map[ref.Val]ref.Val, actualSize(first)+actualSize(second))
+	if err := copyEntries(first, entries); err != nil {
 		return err
 	}
-	if err := copyEntries(second, merged); err != nil {
+	if err := copyEntries(second, entries); err != nil {
 		return err
 	}
-	return types.NewRefValMap(types.DefaultTypeAdapter, merged)
+	return types.NewRefValMap(types.DefaultTypeAdapter, entries)
 }
 
 // copyEntries writes every entry of m into dst, overwriting entries whose keys
