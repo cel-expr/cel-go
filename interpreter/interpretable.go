@@ -1742,11 +1742,7 @@ func (f *folder) IsLocalVariable(name string) bool {
 	if !f.computeResult && (name == f.iterVar || name == f.iterVar2) {
 		return true
 	}
-	parent := f.Parent()
-	if parent == nil {
-		return false
-	}
-	if varHolder, ok := parent.(localVariableHolder); ok {
+	if varHolder, ok := f.Parent().(localVariableHolder); ok {
 		if varHolder.IsLocalVariable(name) {
 			return true
 		}
