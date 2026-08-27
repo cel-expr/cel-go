@@ -331,8 +331,8 @@ func estimateEncode(estimator cost.Estimator, target *cost.AstNode, args []cost.
 	if len(args) != 1 {
 		return nil
 	}
-	sz := estimateSize(estimator, args[0])
-	estimate := sz.MultiplyByCostFactor(stringCostFactor).Add(callCostEstimate)
+	sz := cost.EstimateSize(estimator, args[0])
+	estimate := sz.MultiplyByCostFactor(cost.StringCostFactor).Add(cost.CallCostEstimate)
 	resSize := estimateEncodeSize(sz)
 	return &cost.CallEstimate{CostEstimate: estimate, ResultSize: &resSize}
 }
@@ -357,15 +357,15 @@ func estimateDecode(estimator cost.Estimator, target *cost.AstNode, args []cost.
 	if len(args) != 1 {
 		return nil
 	}
-	sz := estimateSize(estimator, args[0])
-	estimate := sz.MultiplyByCostFactor(stringCostFactor).Add(callCostEstimate)
+	sz := cost.EstimateSize(estimator, args[0])
+	estimate := sz.MultiplyByCostFactor(cost.StringCostFactor).Add(cost.CallCostEstimate)
 	resSize := estimateDecodeSize(sz)
 	return &cost.CallEstimate{CostEstimate: estimate, ResultSize: &resSize}
 }
 
 func trackEncode(args []ref.Val, _ ref.Val) *uint64 {
-	sz := actualSize(args[0])
-	total := cost.SafeAdd(cost.SafeMultiplyByFactor(sz, stringCostFactor), callCost)
+	sz := cost.ActualSize(args[0])
+	total := cost.SafeAdd(cost.SafeMultiplyByFactor(sz, cost.StringCostFactor), cost.CallCost)
 	return &total
 }
 
@@ -380,8 +380,8 @@ func trackJSONParse(args []ref.Val, _ ref.Val) *uint64 {
 }
 
 func trackDecode(args []ref.Val, _ ref.Val) *uint64 {
-	sz := actualSize(args[0])
-	total := cost.SafeAdd(cost.SafeMultiplyByFactor(sz, stringCostFactor), callCost)
+	sz := cost.ActualSize(args[0])
+	total := cost.SafeAdd(cost.SafeMultiplyByFactor(sz, cost.StringCostFactor), cost.CallCost)
 	return &total
 }
 

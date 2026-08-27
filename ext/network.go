@@ -687,123 +687,123 @@ func estimateNetworkParseCost(estimator cost.Estimator, target *cost.AstNode, ar
 	if len(args) < 1 {
 		return nil
 	}
-	sz := estimateSize(estimator, args[0])
-	resultSize := rangedSizeEstimate(4, 16)
-	return callEstimate(sz.MultiplyByCostFactor(stringCostFactor), &resultSize)
+	sz := cost.EstimateSize(estimator, args[0])
+	resultSize := cost.RangedSizeEstimate(4, 16)
+	return cost.NewCallEstimate(sz.MultiplyByCostFactor(cost.StringCostFactor), &resultSize)
 }
 
 func estimateNetworkParseBoolCost(estimator cost.Estimator, target *cost.AstNode, args []cost.AstNode) *cost.CallEstimate {
 	if len(args) < 1 {
 		return nil
 	}
-	sz := estimateSize(estimator, args[0])
-	return callEstimate(sz.MultiplyByCostFactor(stringCostFactor), nil)
+	sz := cost.EstimateSize(estimator, args[0])
+	return cost.NewCallEstimate(sz.MultiplyByCostFactor(cost.StringCostFactor), nil)
 }
 
 func estimateIPIsCanonicalCost(estimator cost.Estimator, target *cost.AstNode, args []cost.AstNode) *cost.CallEstimate {
 	if len(args) < 1 {
 		return nil
 	}
-	sz := estimateSize(estimator, args[0])
-	return callEstimate(sz.MultiplyByCostFactor(2*stringCostFactor), nil)
+	sz := cost.EstimateSize(estimator, args[0])
+	return cost.NewCallEstimate(sz.MultiplyByCostFactor(2*cost.StringCostFactor), nil)
 }
 
 func estimateNetworkNominalCost(estimator cost.Estimator, target *cost.AstNode, args []cost.AstNode) *cost.CallEstimate {
-	return callEstimate(callCostEstimate, nil)
+	return cost.NewCallEstimate(cost.CallCostEstimate, nil)
 }
 
 func estimateNetworkNominalOpaqueCost(estimator cost.Estimator, target *cost.AstNode, args []cost.AstNode) *cost.CallEstimate {
-	resultSize := rangedSizeEstimate(4, 16)
-	return callEstimate(callCostEstimate, &resultSize)
+	resultSize := cost.RangedSizeEstimate(4, 16)
+	return cost.NewCallEstimate(cost.CallCostEstimate, &resultSize)
 }
 
 func estimateNetworkNominalStringCost(estimator cost.Estimator, target *cost.AstNode, args []cost.AstNode) *cost.CallEstimate {
-	resultSize := rangedSizeEstimate(3, 45)
-	return callEstimate(callCostEstimate, &resultSize)
+	resultSize := cost.RangedSizeEstimate(3, 45)
+	return cost.NewCallEstimate(cost.CallCostEstimate, &resultSize)
 }
 
 func estimateNetworkContainsIPIPCost(estimator cost.Estimator, target *cost.AstNode, args []cost.AstNode) *cost.CallEstimate {
-	sz := rangedSizeEstimate(4, 16)
-	ipCompCost := sz.Add(sz).MultiplyByCostFactor(stringCostFactor)
-	return callEstimate(ipCompCost, nil)
+	sz := cost.RangedSizeEstimate(4, 16)
+	ipCompCost := sz.Add(sz).MultiplyByCostFactor(cost.StringCostFactor)
+	return cost.NewCallEstimate(ipCompCost, nil)
 }
 
 func estimateNetworkContainsIPStringCost(estimator cost.Estimator, target *cost.AstNode, args []cost.AstNode) *cost.CallEstimate {
 	if len(args) < 1 {
 		return nil
 	}
-	sz := rangedSizeEstimate(4, 16)
-	ipCompCost := sz.Add(sz).MultiplyByCostFactor(stringCostFactor)
-	argSz := estimateSize(estimator, args[0])
-	ipCompCost = ipCompCost.Add(argSz.MultiplyByCostFactor(stringCostFactor))
-	return callEstimate(ipCompCost, nil)
+	sz := cost.RangedSizeEstimate(4, 16)
+	ipCompCost := sz.Add(sz).MultiplyByCostFactor(cost.StringCostFactor)
+	argSz := cost.EstimateSize(estimator, args[0])
+	ipCompCost = ipCompCost.Add(argSz.MultiplyByCostFactor(cost.StringCostFactor))
+	return cost.NewCallEstimate(ipCompCost, nil)
 }
 
 func estimateNetworkContainsCIDRCIDRCost(estimator cost.Estimator, target *cost.AstNode, args []cost.AstNode) *cost.CallEstimate {
-	sz := rangedSizeEstimate(4, 16)
-	ipCompCost := sz.Add(sz).MultiplyByCostFactor(stringCostFactor)
-	ipCompCost = ipCompCost.Add(sz.MultiplyByCostFactor(stringCostFactor))
+	sz := cost.RangedSizeEstimate(4, 16)
+	ipCompCost := sz.Add(sz).MultiplyByCostFactor(cost.StringCostFactor)
+	ipCompCost = ipCompCost.Add(sz.MultiplyByCostFactor(cost.StringCostFactor))
 	// K8s adds one for the extra IP traversal
-	ipCompCost = ipCompCost.Add(callCostEstimate)
-	return callEstimate(ipCompCost, nil)
+	ipCompCost = ipCompCost.Add(cost.CallCostEstimate)
+	return cost.NewCallEstimate(ipCompCost, nil)
 }
 
 func estimateNetworkContainsCIDRStringCost(estimator cost.Estimator, target *cost.AstNode, args []cost.AstNode) *cost.CallEstimate {
 	if len(args) < 1 {
 		return nil
 	}
-	sz := rangedSizeEstimate(4, 16)
-	ipCompCost := sz.Add(sz).MultiplyByCostFactor(stringCostFactor)
-	ipCompCost = ipCompCost.Add(sz.MultiplyByCostFactor(stringCostFactor))
-	argSz := estimateSize(estimator, args[0])
-	ipCompCost = ipCompCost.Add(argSz.MultiplyByCostFactor(stringCostFactor))
+	sz := cost.RangedSizeEstimate(4, 16)
+	ipCompCost := sz.Add(sz).MultiplyByCostFactor(cost.StringCostFactor)
+	ipCompCost = ipCompCost.Add(sz.MultiplyByCostFactor(cost.StringCostFactor))
+	argSz := cost.EstimateSize(estimator, args[0])
+	ipCompCost = ipCompCost.Add(argSz.MultiplyByCostFactor(cost.StringCostFactor))
 	// K8s adds one for the extra IP traversal
-	ipCompCost = ipCompCost.Add(callCostEstimate)
-	return callEstimate(ipCompCost, nil)
+	ipCompCost = ipCompCost.Add(cost.CallCostEstimate)
+	return cost.NewCallEstimate(ipCompCost, nil)
 }
 
 // Runtime cost tracking functions for network extensions.
 
 func trackNetworkParseCost(args []ref.Val, result ref.Val) *uint64 {
-	total := cost.SafeMultiplyByFactor(actualSize(args[0]), stringCostFactor)
+	total := cost.SafeMultiplyByFactor(cost.ActualSize(args[0]), cost.StringCostFactor)
 	return &total
 }
 
 func trackIPIsCanonicalCost(args []ref.Val, result ref.Val) *uint64 {
-	total := cost.SafeMultiplyByFactor(actualSize(args[0]), 2*stringCostFactor)
+	total := cost.SafeMultiplyByFactor(cost.ActualSize(args[0]), 2*cost.StringCostFactor)
 	return &total
 }
 
 func trackNetworkNominalCost(args []ref.Val, result ref.Val) *uint64 {
-	return &callCost
+	return &cost.CallCost
 }
 
 func trackNetworkContainsIPIPCost(args []ref.Val, result ref.Val) *uint64 {
-	cidrSize := actualSize(args[0])
-	total := cost.SafeMultiplyByFactor(cost.SafeAdd(cidrSize, cidrSize), stringCostFactor)
+	cidrSize := cost.ActualSize(args[0])
+	total := cost.SafeMultiplyByFactor(cost.SafeAdd(cidrSize, cidrSize), cost.StringCostFactor)
 	return &total
 }
 
 func trackNetworkContainsIPStringCost(args []ref.Val, result ref.Val) *uint64 {
-	cidrSize := actualSize(args[0])
-	otherSize := actualSize(args[1])
-	total := cost.SafeMultiplyByFactor(cost.SafeAdd(cidrSize, cidrSize), stringCostFactor)
-	total = cost.SafeAdd(total, cost.SafeMultiplyByFactor(otherSize, stringCostFactor))
+	cidrSize := cost.ActualSize(args[0])
+	otherSize := cost.ActualSize(args[1])
+	total := cost.SafeMultiplyByFactor(cost.SafeAdd(cidrSize, cidrSize), cost.StringCostFactor)
+	total = cost.SafeAdd(total, cost.SafeMultiplyByFactor(otherSize, cost.StringCostFactor))
 	return &total
 }
 
 func trackNetworkContainsCIDRCIDRCost(args []ref.Val, result ref.Val) *uint64 {
-	cidrSize := actualSize(args[0])
-	total := cost.SafeMultiplyByFactor(cost.SafeAdd(cidrSize, cidrSize), stringCostFactor)
-	total = cost.SafeAdd(total, cost.SafeMultiplyByFactor(cidrSize, stringCostFactor), 1)
+	cidrSize := cost.ActualSize(args[0])
+	total := cost.SafeMultiplyByFactor(cost.SafeAdd(cidrSize, cidrSize), cost.StringCostFactor)
+	total = cost.SafeAdd(total, cost.SafeMultiplyByFactor(cidrSize, cost.StringCostFactor), 1)
 	return &total
 }
 
 func trackNetworkContainsCIDRStringCost(args []ref.Val, result ref.Val) *uint64 {
-	cidrSize := actualSize(args[0])
-	otherSize := actualSize(args[1])
-	total := cost.SafeMultiplyByFactor(cost.SafeAdd(cidrSize, cidrSize), stringCostFactor)
-	total = cost.SafeAdd(total, cost.SafeMultiplyByFactor(cidrSize, stringCostFactor), 1)
-	total = cost.SafeAdd(total, cost.SafeMultiplyByFactor(otherSize, stringCostFactor))
+	cidrSize := cost.ActualSize(args[0])
+	otherSize := cost.ActualSize(args[1])
+	total := cost.SafeMultiplyByFactor(cost.SafeAdd(cidrSize, cidrSize), cost.StringCostFactor)
+	total = cost.SafeAdd(total, cost.SafeMultiplyByFactor(cidrSize, cost.StringCostFactor), 1)
+	total = cost.SafeAdd(total, cost.SafeMultiplyByFactor(otherSize, cost.StringCostFactor))
 	return &total
 }

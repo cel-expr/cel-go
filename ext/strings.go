@@ -902,8 +902,8 @@ func estimateStringFixedTransformCost(estimator cost.Estimator, target *cost.Ast
 	if target == nil {
 		return nil
 	}
-	cost, size := estimateStringScan(estimateSize(estimator, *target))
-	return callEstimate(cost.Add(callCostEstimate).Add(size.AsCost()), size)
+	evalCost, size := cost.EstimateStringScan(cost.EstimateSize(estimator, *target))
+	return cost.NewCallEstimate(evalCost.Add(cost.CallCostEstimate).Add(size.AsCost()), size)
 }
 
 // estimateStringVariableTransformCost estimates cost for O(n) string operations that result
@@ -912,9 +912,9 @@ func estimateStringVariableTransformCost(estimator cost.Estimator, target *cost.
 	if target == nil {
 		return nil
 	}
-	cost, size := estimateStringScan(estimateSize(estimator, *target))
-	transformSize := rangedSizeEstimate(0, size.Max)
-	return callEstimate(cost.Add(callCostEstimate).Add(transformSize.AsCost()), &transformSize)
+	evalCost, size := cost.EstimateStringScan(cost.EstimateSize(estimator, *target))
+	transformSize := cost.RangedSizeEstimate(0, size.Max)
+	return cost.NewCallEstimate(evalCost.Add(cost.CallCostEstimate).Add(transformSize.AsCost()), &transformSize)
 }
 
 // estimateStringCharAtCost includes a cost of 1 for the allocation, plus the string traversal cost.
@@ -922,9 +922,9 @@ func estimateStringCharAtCost(estimator cost.Estimator, target *cost.AstNode, ar
 	if target == nil || len(args) != 1 {
 		return nil
 	}
-	cost, _ := estimateStringScan(estimateSize(estimator, *target))
-	resultSize := rangedSizeEstimate(0, 1)
-	return callEstimate(cost.Add(callCostEstimate).Add(callCostEstimate), &resultSize)
+	evalCost, _ := cost.EstimateStringScan(cost.EstimateSize(estimator, *target))
+	resultSize := cost.RangedSizeEstimate(0, 1)
+	return cost.NewCallEstimate(evalCost.Add(cost.CallCostEstimate).Add(cost.CallCostEstimate), &resultSize)
 }
 
 // estimateSubstringCost estimates the cost for an O(n) traversal and allocation.
@@ -932,16 +932,16 @@ func estimateSubstringCost(estimator cost.Estimator, target *cost.AstNode, args 
 	if target == nil || len(args) < 1 || len(args) > 2 {
 		return nil
 	}
-	targetSize := estimateSize(estimator, *target)
-	cost, _ := estimateStringScan(targetSize)
+	targetSize := cost.EstimateSize(estimator, *target)
+	evalCost, _ := cost.EstimateStringScan(targetSize)
 
-	start := nodeAsUintValue(args[0], 0)
+	start := cost.NodeAsUintValue(args[0], 0)
 	end := targetSize.Max
 	if len(args) == 2 {
-		end = nodeAsUintValue(args[1], end)
+		end = cost.NodeAsUintValue(args[1], end)
 	}
-	resultSize := fixedSizeEstimate(end - start)
-	return callEstimate(cost.Add(callCostEstimate).Add(resultSize.AsCost()), &resultSize)
+	resultSize := cost.FixedSizeEstimate(end - start)
+	return cost.NewCallEstimate(evalCost.Add(cost.CallCostEstimate).Add(resultSize.AsCost()), &resultSize)
 }
 
 // estimateStringSearchCost estimates cost for O(n*m) string search operations
@@ -950,12 +950,12 @@ func estimateStringSearchCost(estimator cost.Estimator, target *cost.AstNode, ar
 	if target == nil || len(args) < 1 {
 		return nil
 	}
-	targetSize := estimateSize(estimator, *target)
-	needleSize := estimateSize(estimator, args[0])
+	targetSize := cost.EstimateSize(estimator, *target)
+	needleSize := cost.EstimateSize(estimator, args[0])
 	searchSize := targetSize.Multiply(needleSize)
-	searchCost, _ := estimateStringScan(searchSize)
+	searchCost, _ := cost.EstimateStringScan(searchSize)
 	// Search cost is proportional to target size * substring size.
-	return callEstimate(searchCost.Add(callCostEstimate), nil)
+	return cost.NewCallEstimate(searchCost.Add(cost.CallCostEstimate), nil)
 }
 
 // estimateStringReplaceCost estimates cost for string replace operations.
@@ -965,19 +965,19 @@ func estimateStringReplaceCost(estimator cost.Estimator, target *cost.AstNode, a
 		return nil
 	}
 	// Compute the search for the replacement string, by 'm' times
-	targetSize := estimateSize(estimator, *target)
-	needleSize := atLeastOne(estimateSize(estimator, args[0]))
-	searchCost := atLeastOne(targetSize).Multiply(needleSize).MultiplyByCostFactor(stringCostFactor)
+	targetSize := cost.EstimateSize(estimator, *target)
+	needleSize := cost.AtLeastOneSize(cost.EstimateSize(estimator, args[0]))
+	searchCost := cost.AtLeastOneSize(targetSize).Multiply(needleSize).MultiplyByCostFactor(cost.StringCostFactor)
 
-	replacementSize := estimateSize(estimator, args[1]).Add(fixedSizeEstimate(1))
+	replacementSize := cost.EstimateSize(estimator, args[1]).Add(cost.FixedSizeEstimate(1))
 	allReplacedSize := cost.SafeMultiply(cost.SafeAdd(targetSize.Max, 1), replacementSize.Max)
 	resultMinSize := targetSize.Min
 	if resultMinSize > replacementSize.Min {
 		resultMinSize = replacementSize.Min
 	}
-	resultSize := rangedSizeEstimate(resultMinSize, allReplacedSize)
-	return callEstimate(
-		searchCost.Add(resultSize.AsCost()).Add(callCostEstimate), &resultSize,
+	resultSize := cost.RangedSizeEstimate(resultMinSize, allReplacedSize)
+	return cost.NewCallEstimate(
+		searchCost.Add(resultSize.AsCost()).Add(cost.CallCostEstimate), &resultSize,
 	)
 }
 
@@ -988,15 +988,15 @@ func estimateStringSplitCost(estimator cost.Estimator, target *cost.AstNode, arg
 	if target == nil || len(args) < 1 {
 		return nil
 	}
-	targetSize := estimateSize(estimator, *target)
+	targetSize := cost.EstimateSize(estimator, *target)
 	// Traversal cost proportional to input size.
-	traversalCost := targetSize.Add(fixedSizeEstimate(1)).MultiplyByCostFactor(stringCostFactor)
+	traversalCost := targetSize.Add(cost.FixedSizeEstimate(1)).MultiplyByCostFactor(cost.StringCostFactor)
 	// Worst case: split("") produces N elements for a string of size N.
-	resultSize := rangedSizeEstimate(0, targetSize.Max)
+	resultSize := cost.RangedSizeEstimate(0, targetSize.Max)
 	// Include list creation base cost plus allocation for each element.
 	allocationCost := resultSize.MultiplyByCostFactor(1).Add(cost.FixedCostEstimate(cost.ListCreateBaseCost))
-	cost := traversalCost.Add(allocationCost).Add(callCostEstimate)
-	return callEstimate(cost, &resultSize)
+	evalCost := traversalCost.Add(allocationCost).Add(cost.CallCostEstimate)
+	return cost.NewCallEstimate(evalCost, &resultSize)
 }
 
 // estimateStringJoinCost estimates cost for string join operations.
@@ -1006,19 +1006,19 @@ func estimateStringJoinCost(estimator cost.Estimator, target *cost.AstNode, args
 	if target == nil {
 		return nil
 	}
-	targetSize := estimateSize(estimator, *target)
-	sepSize := fixedSizeEstimate(0)
+	targetSize := cost.EstimateSize(estimator, *target)
+	sepSize := cost.FixedSizeEstimate(0)
 	if len(args) >= 1 {
-		sepSize = estimateSize(estimator, args[0])
+		sepSize = cost.EstimateSize(estimator, args[0])
 	}
 	// Traversal cost proportional to the number of list elements.
-	traversalCost := targetSize.Add(fixedSizeEstimate(1)).MultiplyByCostFactor(stringCostFactor)
+	traversalCost := targetSize.Add(cost.FixedSizeEstimate(1)).MultiplyByCostFactor(cost.StringCostFactor)
 	// Result size: sum of element sizes + (n-1) * separator size.
 	// Worst case estimate: use list size * max element size + list size * separator size.
 	maxResultSize := cost.SafeAdd(cost.SafeMultiply(targetSize.Max, cost.SafeAdd(1, sepSize.Max)), sepSize.Max)
-	resultSize := rangedSizeEstimate(0, maxResultSize)
-	estimate := traversalCost.Add(resultSize.MultiplyByCostFactor(1)).Add(callCostEstimate)
-	return callEstimate(estimate, &resultSize)
+	resultSize := cost.RangedSizeEstimate(0, maxResultSize)
+	estimate := traversalCost.Add(resultSize.MultiplyByCostFactor(1)).Add(cost.CallCostEstimate)
+	return cost.NewCallEstimate(estimate, &resultSize)
 }
 
 // Runtime cost tracking functions for string extensions.
@@ -1028,54 +1028,54 @@ func estimateStringJoinCost(estimator cost.Estimator, target *cost.AstNode, args
 
 // trackStringCharAtCost tracks runtime cost for O(n) string operations.
 func trackStringCharAtCost(args []ref.Val, result ref.Val) *uint64 {
-	total := cost.SafeAdd(callCost, cost.SafeMultiplyByFactor(actualSize(args[0]), stringCostFactor), 1)
+	total := cost.SafeAdd(cost.CallCost, cost.SafeMultiplyByFactor(cost.ActualSize(args[0]), cost.StringCostFactor), 1)
 	return &total
 }
 
 // trackStringTransformCost tracks runtime cost for O(n) string operations.
 func trackStringTransformCost(args []ref.Val, result ref.Val) *uint64 {
-	transformCost := cost.SafeMultiplyByFactor(actualSize(args[0]), stringCostFactor)
-	resultSize := actualSize(result)
-	total := cost.SafeAdd(callCost, transformCost, resultSize)
+	transformCost := cost.SafeMultiplyByFactor(cost.ActualSize(args[0]), cost.StringCostFactor)
+	resultSize := cost.ActualSize(result)
+	total := cost.SafeAdd(cost.CallCost, transformCost, resultSize)
 	return &total
 }
 
 // trackStringSearchCost tracks runtime cost for O(n*m) string search operations.
 func trackStringSearchCost(args []ref.Val, _ ref.Val) *uint64 {
-	searchSize := cost.SafeMultiply(actualSize(args[0]), actualSize(args[1]))
-	total := cost.SafeAdd(cost.SafeMultiplyByFactor(searchSize, stringCostFactor), callCost)
+	searchSize := cost.SafeMultiply(cost.ActualSize(args[0]), cost.ActualSize(args[1]))
+	total := cost.SafeAdd(cost.SafeMultiplyByFactor(searchSize, cost.StringCostFactor), cost.CallCost)
 	return &total
 }
 
 // trackStringReplaceCost tracks runtime cost for string replace operations,
 // accounting for search cost and the size of the result.
 func trackStringReplaceCost(args []ref.Val, result ref.Val) *uint64 {
-	targetSize := actualSize(args[0])
+	targetSize := cost.ActualSize(args[0])
 	if targetSize == 0 {
 		targetSize = 1
 	}
-	needleSize := actualSize(args[1])
+	needleSize := cost.ActualSize(args[1])
 	if needleSize == 0 {
 		needleSize = 1
 	}
-	searchCost := cost.SafeMultiplyByFactor(cost.SafeMultiply(targetSize, needleSize), stringCostFactor)
-	total := cost.SafeAdd(callCost, searchCost, actualSize(result))
+	searchCost := cost.SafeMultiplyByFactor(cost.SafeMultiply(targetSize, needleSize), cost.StringCostFactor)
+	total := cost.SafeAdd(cost.CallCost, searchCost, cost.ActualSize(result))
 	return &total
 }
 
 // trackStringSplitCost tracks runtime cost for string split operations,
 // accounting for traversal and list allocation.
 func trackStringSplitCost(args []ref.Val, result ref.Val) *uint64 {
-	traversalCost := cost.SafeMultiplyByFactor(cost.SafeAdd(actualSize(args[0]), 1), stringCostFactor)
-	resultSize := actualSize(result)
-	total := cost.SafeAdd(callCost, traversalCost, resultSize, cost.ListCreateBaseCost)
+	traversalCost := cost.SafeMultiplyByFactor(cost.SafeAdd(cost.ActualSize(args[0]), 1), cost.StringCostFactor)
+	resultSize := cost.ActualSize(result)
+	total := cost.SafeAdd(cost.CallCost, traversalCost, resultSize, cost.ListCreateBaseCost)
 	return &total
 }
 
 // trackStringJoinCost tracks runtime cost for string join operations,
 // accounting for traversal and the size of the result.
 func trackStringJoinCost(args []ref.Val, result ref.Val) *uint64 {
-	traversalCost := cost.SafeMultiplyByFactor(cost.SafeAdd(actualSize(args[0]), 1), stringCostFactor)
-	total := cost.SafeAdd(callCost, traversalCost, actualSize(result))
+	traversalCost := cost.SafeMultiplyByFactor(cost.SafeAdd(cost.ActualSize(args[0]), 1), cost.StringCostFactor)
+	total := cost.SafeAdd(cost.CallCost, traversalCost, cost.ActualSize(result))
 	return &total
 }

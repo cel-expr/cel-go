@@ -88,6 +88,7 @@ go_test(
     ],
     deps = [
         "//cel/async:go_default_library",
+        "//common/cost:go_default_library",
         "//common/operators:go_default_library",
         "//common/overloads:go_default_library",
         "//common/types:go_default_library",

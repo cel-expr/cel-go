@@ -973,14 +973,14 @@ func estimateMathListCost(estimator cost.Estimator, target *cost.AstNode, args [
 	if len(args) != 1 {
 		return nil
 	}
-	sz := estimateSize(estimator, args[0])
-	c := sz.MultiplyByCostFactor(1.0).Add(callCostEstimate)
-	resultSize := fixedSizeEstimate(1)
-	return callEstimate(c, &resultSize)
+	sz := cost.EstimateSize(estimator, args[0])
+	c := sz.MultiplyByCostFactor(1.0).Add(cost.CallCostEstimate)
+	resultSize := cost.FixedSizeEstimate(1)
+	return cost.NewCallEstimate(c, &resultSize)
 }
 
 func trackMathListCost(args []ref.Val, _ ref.Val) *uint64 {
-	sz := actualSize(args[0])
-	total := cost.SafeAdd(sz, callCost)
+	sz := cost.ActualSize(args[0])
+	total := cost.SafeAdd(sz, cost.CallCost)
 	return &total
 }

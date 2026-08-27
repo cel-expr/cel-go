@@ -5195,3 +5195,75 @@ func TestOptionalListTypePermutations(t *testing.T) {
 		})
 	}
 }
+
+func TestCostSizingStrategy(t *testing.T) {
+	env, err := NewEnv(
+		CostSizingStrategy(cost.AggregateSizingStrategy()),
+		Variable("str", StringType),
+	)
+	if err != nil {
+		t.Fatalf("NewEnv failed: %v", err)
+	}
+	ast, iss := env.Compile(`str.startsWith("prefix")`)
+	if iss.Err() != nil {
+		t.Fatalf("Compile failed: %v", iss.Err())
+	}
+	prg, err := env.Program(ast, CostTracking(nil))
+	if err != nil {
+		t.Fatalf("Program failed: %v", err)
+	}
+	evalDetails := &EvalDetails{}
+	res, valDetails, err := prg.Eval(map[string]any{
+		"str": "prefix_hello_world",
+	})
+	if err != nil {
+		t.Fatalf("Eval failed: %v", err)
+	}
+	if res != types.True {
+		t.Errorf("got %v, want true", res)
+	}
+	evalDetails = valDetails
+	actualCost := *evalDetails.ActualCost()
+	if actualCost == 0 {
+		t.Errorf("expected non-zero actual cost, got %d", actualCost)
+	}
+}
+
+func TestCostModel(t *testing.T) {
+	model1 := cost.MemberOverload(overloads.StartsWithString,
+		cost.EvalCost(cost.Scale(cost.Arg(0), 0.1)),
+	)
+	model2 := cost.MemberOverload(overloads.EndsWithString,
+		cost.EvalCost(cost.Scale(cost.Arg(0), 0.1)),
+	)
+	env, err := NewEnv(
+		CostModel(model1),
+		CostModel(model2),
+		CostSizingStrategy(cost.AggregateSizingStrategy()),
+		Variable("str", StringType),
+	)
+	if err != nil {
+		t.Fatalf("NewEnv failed: %v", err)
+	}
+	ast, iss := env.Compile(`str.startsWith("prefix") && str.endsWith("suffix")`)
+	if iss.Err() != nil {
+		t.Fatalf("Compile failed: %v", iss.Err())
+	}
+	prg, err := env.Program(ast, CostTracking(nil))
+	if err != nil {
+		t.Fatalf("Program failed: %v", err)
+	}
+	res, valDetails, err := prg.Eval(map[string]any{
+		"str": "prefix_middle_suffix",
+	})
+	if err != nil {
+		t.Fatalf("Eval failed: %v", err)
+	}
+	if res != types.True {
+		t.Errorf("got %v, want true", res)
+	}
+	actualCost := *valDetails.ActualCost()
+	if actualCost == 0 {
+		t.Errorf("expected non-zero actual cost, got %d", actualCost)
+	}
+}

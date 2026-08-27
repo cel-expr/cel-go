@@ -800,9 +800,9 @@ func estimateListSetOp(costFactor float64) cost.FunctionEstimator {
 		if target == nil || len(args) != 1 {
 			return nil
 		}
-		targetSize := estimateSize(estimator, *target)
-		argSize := estimateSize(estimator, args[0])
-		return callEstimate(targetSize.Multiply(argSize).MultiplyByCostFactor(costFactor).Add(callCostEstimate), nil)
+		targetSize := cost.EstimateSize(estimator, *target)
+		argSize := cost.EstimateSize(estimator, args[0])
+		return cost.NewCallEstimate(targetSize.Multiply(argSize).MultiplyByCostFactor(costFactor).Add(cost.CallCostEstimate), nil)
 	}
 }
 
@@ -811,10 +811,10 @@ func estimateListSlice(estimator cost.Estimator, target *cost.AstNode, args []co
 	if target == nil || len(args) != 2 {
 		return nil
 	}
-	sz := estimateSize(estimator, *target)
-	start := nodeAsUintValue(args[0], 0)
-	end := nodeAsUintValue(args[1], sz.Max)
-	return estimateAllocatingListCall(1, fixedSizeEstimate(end-start))
+	sz := cost.EstimateSize(estimator, *target)
+	start := cost.NodeAsUintValue(args[0], 0)
+	end := cost.NodeAsUintValue(args[1], sz.Max)
+	return estimateAllocatingListCall(1, cost.FixedSizeEstimate(end-start))
 }
 
 // estimateListsRange computes an O(n) range operation with a cost factor of 1.
@@ -822,7 +822,7 @@ func estimateListsRange(estimator cost.Estimator, target *cost.AstNode, args []c
 	if target != nil || len(args) != 1 {
 		return nil
 	}
-	return estimateAllocatingListCall(1, fixedSizeEstimate(nodeAsUintValue(args[0], math.MaxUint)))
+	return estimateAllocatingListCall(1, cost.FixedSizeEstimate(cost.NodeAsUintValue(args[0], math.MaxUint)))
 }
 
 // estimateListReverse computes an O(n) reverse operation with a cost factor of 1.
@@ -830,7 +830,7 @@ func estimateListReverse(estimator cost.Estimator, target *cost.AstNode, args []
 	if target == nil || len(args) != 0 {
 		return nil
 	}
-	return estimateAllocatingListCall(1, estimateSize(estimator, *target))
+	return estimateAllocatingListCall(1, cost.EstimateSize(estimator, *target))
 }
 
 // estimateListFlatten computes an O(n) flatten operation with a cost factor proportional to the total number of flattened items.
@@ -840,12 +840,12 @@ func estimateListFlatten(estimator cost.Estimator, target *cost.AstNode, args []
 	}
 	depth := uint64(1)
 	if len(args) == 1 {
-		depth = nodeAsUintValue(args[0], math.MaxUint)
+		depth = cost.NodeAsUintValue(args[0], math.MaxUint)
 	}
 	var resSize cost.SizeEstimate
 	if (*target).Expr() != nil && (*target).Expr().Kind() == ast.ListKind {
 		szVal := estimateLiteralFlattenSize((*target).Expr(), depth)
-		resSize = fixedSizeEstimate(szVal)
+		resSize = cost.FixedSizeEstimate(szVal)
 	} else {
 		resSize = estimateFlattenSize(estimator, *target, depth)
 	}
@@ -859,13 +859,13 @@ func estimateListFlattenLegacy(estimator cost.Estimator, target *cost.AstNode, a
 	}
 	depth := uint64(1)
 	if len(args) == 1 {
-		depth = nodeAsUintValue(args[0], math.MaxUint)
+		depth = cost.NodeAsUintValue(args[0], math.MaxUint)
 	}
-	return estimateAllocatingListCall(float64(depth), estimateSize(estimator, *target))
+	return estimateAllocatingListCall(float64(depth), cost.EstimateSize(estimator, *target))
 }
 
 func estimateFlattenSize(estimator cost.Estimator, node cost.AstNode, depth uint64) cost.SizeEstimate {
-	sz := estimateSize(estimator, node)
+	sz := cost.EstimateSize(estimator, node)
 	if depth == 0 {
 		return sz
 	}
@@ -906,7 +906,7 @@ func estimateListDistinct(estimator cost.Estimator, target *cost.AstNode, args [
 	if target == nil || len(args) != 0 {
 		return nil
 	}
-	sz := estimateSize(estimator, *target)
+	sz := cost.EstimateSize(estimator, *target)
 	elemType := types.DynType
 	tType := (*target).Type()
 	if tType.Kind() == types.ListKind && len(tType.Parameters()) > 0 {
@@ -922,7 +922,7 @@ func estimateListDistinct(estimator cost.Estimator, target *cost.AstNode, args [
 	if sz.Min > 0 {
 		minSize = 1
 	}
-	resultSize := rangedSizeEstimate(minSize, sz.Max)
+	resultSize := cost.RangedSizeEstimate(minSize, sz.Max)
 	return estimateListCallWithDirectCost(c, resultSize, true)
 }
 
@@ -950,7 +950,7 @@ func estimateListSortBy(u *types.Type) cost.FunctionEstimator {
 }
 
 func estimateListSortByCost(estimator cost.Estimator, target cost.AstNode, keysNode cost.AstNode, elemType *types.Type) *cost.CallEstimate {
-	sz := estimateSize(estimator, keysNode)
+	sz := cost.EstimateSize(estimator, keysNode)
 	itemSize := estimateItemSize(estimator, target)
 	elemCost := estimateElementEqualityCost(estimator, elemType, itemSize)
 
@@ -962,7 +962,7 @@ func estimateListSortByCost(estimator cost.Estimator, target cost.AstNode, keysN
 // estimateListSortCost estimates an O(n^2) sort operation with a cost factor of 2 for the equality
 // operations which occur during the sort computation.
 func estimateListSortCost(estimator cost.Estimator, node cost.AstNode, elemType *types.Type) *cost.CallEstimate {
-	sz := estimateSize(estimator, node)
+	sz := cost.EstimateSize(estimator, node)
 	itemSize := estimateItemSize(estimator, node)
 	elemCost := estimateElementEqualityCost(estimator, elemType, itemSize)
 
@@ -989,18 +989,18 @@ func estimateListCallWithDirectCost(costVal cost.CostEstimate, resultSize cost.S
 	if allocates {
 		costVal = costVal.Add(cost.FixedCostEstimate(cost.ListCreateBaseCost))
 	}
-	costVal = costVal.Add(callCostEstimate)
-	return callEstimate(costVal, &resultSize)
+	costVal = costVal.Add(cost.CallCostEstimate)
+	return cost.NewCallEstimate(costVal, &resultSize)
 }
 
 // trackListOutputSize computes cost as a function of the size of the result list.
 func trackListOutputSize(_ []ref.Val, result ref.Val) *uint64 {
-	return trackAllocatingListCall(1, actualSize(result))
+	return trackAllocatingListCall(1, cost.ActualSize(result))
 }
 
 // trackListFlatten computes cost as a function of the size of the result list.
 func trackListFlatten(args []ref.Val, result ref.Val) *uint64 {
-	resSize := actualSize(result)
+	resSize := cost.ActualSize(result)
 	return trackAllocatingListCall(1.0, resSize)
 }
 
@@ -1009,7 +1009,7 @@ func trackListFlattenLegacy(args []ref.Val, _ ref.Val) *uint64 {
 	if len(args) == 2 {
 		depth = float64(args[1].(types.Int))
 	}
-	inputSize := actualSize(args[0])
+	inputSize := cost.ActualSize(args[0])
 	return trackAllocatingListCall(depth, inputSize)
 }
 
@@ -1030,7 +1030,7 @@ func trackListSortBy(args []ref.Val, result ref.Val) *uint64 {
 
 // trackListSelfCompare computes costs as a worst-case O(n^2) operation over the input list.
 func trackListSelfCompare(l traits.Lister) *uint64 {
-	sz := actualSize(l)
+	sz := cost.ActualSize(l)
 	costFactor := 2.0
 	if sz == 0 {
 		return trackAllocatingListCall(costFactor, 0)
@@ -1048,7 +1048,7 @@ func trackAllocatingListCall(costFactor float64, size uint64) *uint64 {
 	if costFactor < 0.0 {
 		costFactor = 1.0
 	}
-	total := cost.SafeAdd(uint64(float64(size)*costFactor), callCost, cost.ListCreateBaseCost)
+	total := cost.SafeAdd(uint64(float64(size)*costFactor), cost.CallCost, cost.ListCreateBaseCost)
 	return &total
 }
 
@@ -1056,7 +1056,7 @@ func estimateListDistinctLegacy(estimator cost.Estimator, target *cost.AstNode, 
 	if target == nil || len(args) != 0 {
 		return nil
 	}
-	sz := estimateSize(estimator, *target)
+	sz := cost.EstimateSize(estimator, *target)
 	costFactor := 2.0
 	tType := (*target).Type()
 	if tType.Kind() == types.ListKind && len(tType.Parameters()) > 0 {
@@ -1087,7 +1087,7 @@ func estimateListSortByLegacy(u *types.Type) cost.FunctionEstimator {
 }
 
 func estimateListSortCostLegacy(estimator cost.Estimator, node cost.AstNode, elemType *types.Type) *cost.CallEstimate {
-	sz := estimateSize(estimator, node)
+	sz := cost.EstimateSize(estimator, node)
 	costFactor := 2.0
 	switch elemType {
 	case types.StringType, types.BytesType:
@@ -1120,7 +1120,7 @@ func (p pathAstNode) ComputedSize() *cost.SizeEstimate {
 func estimateItemSize(estimator cost.Estimator, node cost.AstNode) cost.SizeEstimate {
 	path := node.Path()
 	if len(path) == 0 {
-		return rangedSizeEstimate(0, math.MaxUint64)
+		return cost.RangedSizeEstimate(0, math.MaxUint64)
 	}
 	elemType := types.DynType
 	tType := node.Type()
@@ -1134,7 +1134,7 @@ func estimateItemSize(estimator cost.Estimator, node cost.AstNode) cost.SizeEsti
 	if l := estimator.EstimateSize(itemNode); l != nil {
 		return *l
 	}
-	return rangedSizeEstimate(0, math.MaxUint64)
+	return cost.RangedSizeEstimate(0, math.MaxUint64)
 }
 
 func estimateElementEqualityCost(estimator cost.Estimator, elemType *types.Type, itemSize cost.SizeEstimate) cost.CostEstimate {

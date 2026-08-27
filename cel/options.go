@@ -843,6 +843,28 @@ func CostEstimatorOptions(costOpts ...cost.CostOption) EnvOption {
 	}
 }
 
+// CostModel configures overload cost estimators and cost trackers from a set of cost.OverloadModel definitions.
+func CostModel(models ...cost.OverloadModel) EnvOption {
+	return func(e *Env) (*Env, error) {
+		if e.costModel == nil {
+			e.costModel = &costModel{}
+		}
+		e.costModel.models = append(e.costModel.models, models...)
+		return e, nil
+	}
+}
+
+// CostSizingStrategy configures a SizingStrategy for both cost estimation and runtime cost tracking.
+func CostSizingStrategy(strategy cost.SizingStrategy) EnvOption {
+	return func(e *Env) (*Env, error) {
+		if e.costModel == nil {
+			e.costModel = &costModel{}
+		}
+		e.costModel.strategy = strategy
+		return e, nil
+	}
+}
+
 // CostTrackerOptions configures a set of options for cost-tracking.
 //
 // Note, CostTrackerOptions is a no-op unless CostTracking is also enabled.

@@ -150,7 +150,8 @@ type Env struct {
 	limits          map[limitID]int
 	libraries       map[string]SingletonLibrary
 	validators      []ASTValidator
-	costOptions     []cost.CostOption
+	costOptions     []cost.Option
+	costModel       *costModel
 
 	// Flags for copy-on-write behavior with env.Extend.
 	funcsShared           bool
@@ -184,6 +185,57 @@ type Env struct {
 
 	// Program options tied to the environment
 	progOpts []ProgramOption
+}
+
+type costModel struct {
+	strategy cost.SizingStrategy
+	models   []cost.OverloadModel
+}
+
+func (c *costModel) copy() *costModel {
+	if c == nil {
+		return &costModel{}
+	}
+	return &costModel{
+		strategy: c.strategy,
+		models:   slices.Clone(c.models),
+	}
+}
+
+func (c *costModel) estimateOptions() []cost.Option {
+	if c == nil || (c.strategy == nil && len(c.models) == 0) {
+		return nil
+	}
+	count := len(c.models)
+	if c.strategy != nil {
+		count++
+	}
+	opts := make([]cost.Option, 0, count)
+	for _, m := range c.models {
+		opts = append(opts, cost.OverloadCostEstimate(m.ID, m.FunctionEstimatorWithOptions(c.strategy)))
+	}
+	if c.strategy != nil {
+		opts = append(opts, cost.EstimateSizingStrategy(c.strategy))
+	}
+	return opts
+}
+
+func (c *costModel) trackerOptions() []cost.TrackerOption {
+	if c == nil || (c.strategy == nil && len(c.models) == 0) {
+		return nil
+	}
+	count := len(c.models)
+	if c.strategy != nil {
+		count++
+	}
+	opts := make([]cost.TrackerOption, 0, count)
+	for _, m := range c.models {
+		opts = append(opts, cost.OverloadTracker(m.ID, m.FunctionTrackerWithOptions(c.strategy)))
+	}
+	if c.strategy != nil {
+		opts = append(opts, cost.TrackerSizingStrategy(c.strategy))
+	}
+	return opts
 }
 
 // ToConfig produces a YAML-serializable env.Config object from the given environment.
@@ -400,7 +452,8 @@ func NewCustomEnv(opts ...EnvOption) (*Env, error) {
 		libraries:       map[string]SingletonLibrary{},
 		validators:      []ASTValidator{},
 		progOpts:        []ProgramOption{},
-		costOptions:     []cost.CostOption{},
+		costOptions:     []cost.Option{},
+		costModel:       &costModel{},
 	}).configure(opts)
 }
 
@@ -590,6 +643,7 @@ func (e *Env) Extend(opts ...EnvOption) (*Env, error) {
 		chkOpts:         chkOptsCopy,
 		prsrOpts:        prsrOptsCopy,
 		costOptions:     costOptsCopy,
+		costModel:       e.costModel.copy(),
 		// Copy-on-write flags.
 		funcsShared:           true,
 		featuresShared:        true,
@@ -889,9 +943,11 @@ func (e *Env) ResidualAst(a *Ast, details *EvalDetails) (*Ast, error) {
 // EstimateCost estimates the cost of a type checked CEL expression using the length estimates of input data and
 // extension functions provided by estimator.
 func (e *Env) EstimateCost(ast *Ast, estimator cost.Estimator, opts ...cost.CostOption) (cost.CostEstimate, error) {
-	extendedOpts := make([]cost.CostOption, 0, len(e.costOptions))
-	extendedOpts = append(extendedOpts, opts...)
+	modelOpts := e.costModel.estimateOptions()
+	extendedOpts := make([]cost.Option, 0, len(modelOpts)+len(e.costOptions)+len(opts))
 	extendedOpts = append(extendedOpts, e.costOptions...)
+	extendedOpts = append(extendedOpts, modelOpts...)
+	extendedOpts = append(extendedOpts, opts...)
 	return cost.Cost(ast.NativeRep(), estimator, extendedOpts...)
 }
 

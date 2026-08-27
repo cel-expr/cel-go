@@ -236,18 +236,18 @@ func estimateSetsCost(costFactor float64) cost.FunctionEstimator {
 		if len(args) != 2 {
 			return nil
 		}
-		arg0Size := estimateSize(estimator, args[0])
-		arg1Size := estimateSize(estimator, args[1])
-		costEstimate := arg0Size.Multiply(arg1Size).MultiplyByCostFactor(costFactor).Add(callCostEstimate)
-		return callEstimate(costEstimate, nil)
+		arg0Size := cost.EstimateSize(estimator, args[0])
+		arg1Size := cost.EstimateSize(estimator, args[1])
+		costEstimate := arg0Size.Multiply(arg1Size).MultiplyByCostFactor(costFactor).Add(cost.CallCostEstimate)
+		return cost.NewCallEstimate(costEstimate, nil)
 	}
 }
 
 func trackSetsCost(costFactor float64) cost.FunctionTracker {
 	return func(args []ref.Val, _ ref.Val) *uint64 {
-		lhsSize := actualSize(args[0])
-		rhsSize := actualSize(args[1])
-		total := cost.SafeAdd(callCost, uint64(float64(lhsSize*rhsSize)*costFactor))
+		lhsSize := cost.ActualSize(args[0])
+		rhsSize := cost.ActualSize(args[1])
+		total := cost.SafeAdd(cost.CallCost, uint64(float64(lhsSize*rhsSize)*costFactor))
 		return &total
 	}
 }
