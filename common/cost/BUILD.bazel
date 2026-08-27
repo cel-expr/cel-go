@@ -8,6 +8,7 @@ package(
 go_library(
     name = "go_default_library",
     srcs = [
+        "aggregate_strategy.go",
         "cost.go",
         "default_strategy.go",
         "estimator.go",
@@ -30,6 +31,7 @@ go_test(
     name = "go_default_test",
     size = "small",
     srcs = [
+        "aggregate_strategy_test.go",
         "cost_test.go",
         "default_strategy_test.go",
         "estimator_test.go",
