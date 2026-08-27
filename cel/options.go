@@ -729,6 +729,10 @@ const (
 	//
 	// Deprecated: use ext.StringsValidateFormatCalls() as this option is now a no-op.
 	OptCheckStringFormat EvalOption = 1 << iota
+
+	// OptTrackMemory enables the runtime peak memory tracking and returns the peak watermark within
+	// evalDetails via func PeakMemory()
+	OptTrackMemory EvalOption = 1 << iota
 )
 
 // EvalOptions sets one or more evaluation options which may affect the evaluation or Result.
@@ -814,6 +818,36 @@ func CostTracking(costEstimator interpreter.ActualCostEstimator) ProgramOption {
 	return func(p *prog) (*prog, error) {
 		p.callCostEstimator = costEstimator
 		p.evalOpts |= OptTrackCost
+		return p, nil
+	}
+}
+
+// MemoryTracking enables peak memory tracking during evaluation with an optional set of
+// types.MemoryTrackerOption values to configure the tracker's size calculator, sample
+// interval, and limit behaviors.
+//
+// Peak memory is measured in aggregate element counts as computed by a types.SizeCalculator
+// and is observed at the points where values materialize during evaluation: resolved
+// attributes, call results, constructed aggregates, and comprehension results. The peak
+// watermark is available via the EvalDetails.PeakMemory() method.
+func MemoryTracking(memOpts ...types.MemoryTrackerOption) ProgramOption {
+	return func(p *prog) (*prog, error) {
+		p.memoryOptions = append(p.memoryOptions, memOpts...)
+		p.evalOpts |= OptTrackMemory
+		return p, nil
+	}
+}
+
+// MemoryLimit enables memory tracking and configures program evaluation to exit early with a
+// "memory limit exceeded" error if the peak tracked memory exceeds the limit.
+//
+// The MemoryLimit is a metric that corresponds to the aggregate element counts of the values
+// observed during evaluation. It is indicative of memory usage, not CPU usage; see CostLimit
+// for bounding compute.
+func MemoryLimit(memLimit uint32) ProgramOption {
+	return func(p *prog) (*prog, error) {
+		p.memoryLimit = &memLimit
+		p.evalOpts |= OptTrackMemory
 		return p, nil
 	}
 }
