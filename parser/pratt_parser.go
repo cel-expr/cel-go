@@ -131,7 +131,7 @@ func (p *prattParser) Parse(source common.Source) (*ast.AST, *common.Errors) {
 		accu = HiddenAccumulatorName
 	}
 	fac := ast.NewExprFactoryWithAccumulator(accu)
-	pratt := &prattParserWorker{
+	worker := &prattParserWorker{
 		content:                    buf,
 		length:                     int32(buf.Len()),
 		helper:                     newParserHelper(source, fac),
@@ -148,17 +148,23 @@ func (p *prattParser) Parse(source common.Source) (*ast.AST, *common.Errors) {
 		enableVariadicOperatorASTs: p.enableVariadicOperatorASTs,
 		enableIdentEscapeSyntax:    p.enableIdentEscapeSyntax,
 	}
-	pratt.initTokenStream()
-	out := pratt.parse()
+	worker.currTok = token{kind: tokError, start: 0, end: 0}
+	worker.peekTok = worker.nextSignificantToken(true)
+	out := worker.parseExpr()
+	if !worker.recursionLimitExceeded && !worker.isRecoveryLimitExceeded() {
+		if worker.peekTok.kind != tokEnd {
+			if worker.peekTok.kind != tokError {
+				worker.reportError(worker.peekTok, "Syntax error: mismatched input '%s' expecting <EOF>", worker.tokenText(worker.peekTok))
+			}
+			for worker.peekTok.kind != tokEnd && !worker.isRecoveryLimitExceeded() {
+				worker.nextToken()
+			}
+		}
+	}
 	if len(errs.GetErrors()) > 0 {
 		return nil, errs
 	}
-	return ast.NewAST(out, pratt.helper.getSourceInfo()), errs
-}
-
-func (p *prattParserWorker) initTokenStream() {
-	p.currTok = token{kind: tokError, start: 0, end: 0}
-	p.peekTok = p.nextSignificantToken(true)
+	return ast.NewAST(out, worker.helper.getSourceInfo()), errs
 }
 
 func (p *prattParserWorker) isRecoveryLimitExceeded() bool {
@@ -270,27 +276,6 @@ func (p *prattParserWorker) reportError(ctx any, format string, args ...any) ast
 	return err
 }
 
-func (p *prattParserWorker) newLogicManager(function string, term ast.Expr) *logicManager {
-	if p.enableVariadicOperatorASTs {
-		return newVariadicLogicManager(p.exprFactory, function, term)
-	}
-	return newBalancingLogicManager(p.exprFactory, function, term)
-}
-
-func (p *prattParserWorker) globalCallOrMacro(exprID int64, function string, args ...ast.Expr) ast.Expr {
-	if expr, found := p.expandMacro(exprID, function, nil, args...); found {
-		return expr
-	}
-	return p.helper.newGlobalCall(exprID, function, args...)
-}
-
-func (p *prattParserWorker) receiverCallOrMacro(exprID int64, function string, target ast.Expr, args ...ast.Expr) ast.Expr {
-	if expr, found := p.expandMacro(exprID, function, target, args...); found {
-		return expr
-	}
-	return p.helper.newReceiverCall(exprID, function, target, args...)
-}
-
 func (p *prattParserWorker) expandMacro(exprID int64, function string, target ast.Expr, args ...ast.Expr) (ast.Expr, bool) {
 	if len(p.macros) == 0 {
 		return nil, false
@@ -370,22 +355,6 @@ func (p *prattParserWorker) normalizeIdent(tok token, allowQuoted bool) string {
 	return text
 }
 
-func (p *prattParserWorker) parse() ast.Expr {
-	expr := p.parseExpr()
-	if p.recursionLimitExceeded || p.isRecoveryLimitExceeded() {
-		return expr
-	}
-	if p.peekTok.kind != tokEnd {
-		if p.peekTok.kind != tokError {
-			p.reportError(p.peekTok, "Syntax error: mismatched input '%s' expecting <EOF>", p.tokenText(p.peekTok))
-		}
-		for p.peekTok.kind != tokEnd && !p.isRecoveryLimitExceeded() {
-			p.nextToken()
-		}
-	}
-	return expr
-}
-
 func (p *prattParserWorker) parseExpr() ast.Expr {
 	if p.recursionLimitExceeded || p.isRecoveryLimitExceeded() {
 		return p.helper.newExpr(common.NoLocation)
@@ -440,7 +409,12 @@ func (p *prattParserWorker) parseTernary(lhs ast.Expr) ast.Expr {
 }
 
 func (p *prattParserWorker) parseLogicalChain(lhs ast.Expr, opInfo binaryOpInfo) ast.Expr {
-	l := p.newLogicManager(opInfo.name, lhs)
+	var l *logicManager
+	if p.enableVariadicOperatorASTs {
+		l = newVariadicLogicManager(p.exprFactory, opInfo.name, lhs)
+	} else {
+		l = newBalancingLogicManager(p.exprFactory, opInfo.name, lhs)
+	}
 	for p.peekTok.kind == opInfo.kind {
 		opTok := p.nextToken()
 		rhs := p.parseBinaryAndTernary(opInfo.precedence + 1)
@@ -486,7 +460,11 @@ func (p *prattParserWorker) parseSelectorChainTail(lhs ast.Expr) ast.Expr {
 				lparen := p.nextToken()
 				callID := p.nextID(lparen)
 				args := p.parseArguments(tokRightParen)
-				lhs = p.receiverCallOrMacro(callID, field, lhs, args...)
+				if expr, found := p.expandMacro(callID, field, lhs, args...); found {
+					lhs = expr
+				} else {
+					lhs = p.helper.newReceiverCall(callID, field, lhs, args...)
+				}
 			} else {
 				dotID := p.nextID(dotTok)
 				lhs = p.helper.newSelect(dotID, lhs, field)
@@ -600,22 +578,20 @@ func (p *prattParserWorker) parseUnaryOps() ast.Expr {
 		return p.parseUnaryOpsChain(op)
 	}
 
+	opID := p.nextID(op)
 	if op.kind == tokMinus {
 		if p.peekTok.kind == tokInt {
-			return p.parseNegativeIntLiteral(p.nextID(op))
+			return p.parseNegativeIntLiteral(opID)
 		}
 		if p.peekTok.kind == tokFloat {
-			return p.parseNegativeDoubleLiteral(p.nextID(op))
+			return p.parseNegativeDoubleLiteral(opID)
 		}
+		operand := p.parseSelectorChain()
+		return p.helper.newGlobalCall(opID, operators.Negate, operand)
+	} else { // op.kind == tokExclamation
+		operand := p.parseSelectorChain()
+		return p.helper.newGlobalCall(opID, operators.LogicalNot, operand)
 	}
-
-	opID := p.nextID(op)
-	operand := p.parseSelectorChain()
-	opName := operators.LogicalNot
-	if op.kind == tokMinus {
-		opName = operators.Negate
-	}
-	return p.globalCallOrMacro(opID, opName, operand)
 }
 
 func (p *prattParserWorker) parseUnaryOpsChain(firstOp token) ast.Expr {
@@ -649,11 +625,11 @@ func (p *prattParserWorker) parseUnaryOpsChain(firstOp token) ast.Expr {
 	}
 
 	for i := len(ops) - 1; i >= 0; i-- {
-		opName := operators.LogicalNot
 		if ops[i].kind == tokMinus {
-			opName = operators.Negate
+			operand = p.helper.newGlobalCall(ops[i].id, operators.Negate, operand)
+		} else {
+			operand = p.helper.newGlobalCall(ops[i].id, operators.LogicalNot, operand)
 		}
-		operand = p.helper.newGlobalCall(ops[i].id, opName, operand)
 	}
 	return operand
 }
@@ -850,7 +826,10 @@ func (p *prattParserWorker) parseIdentOrCall() ast.Expr {
 	if p.peekTok.kind == tokLeftParen {
 		p.nextToken()
 		args := p.parseArguments(tokRightParen)
-		return p.globalCallOrMacro(id, name, args...)
+		if expr, found := p.expandMacro(id, name, nil, args...); found {
+			return expr
+		}
+		return p.helper.newGlobalCall(id, name, args...)
 	}
 	return p.helper.newIdent(id, name)
 }
