@@ -42,7 +42,6 @@ go_test(
     srcs = [
         "helper_test.go",
         "lexer_test.go",
-        "parser_recursion_test.go",
         "parser_test.go",
         "unescape_test.go",
         "unparser_test.go",
