@@ -2289,10 +2289,7 @@ ERROR: <input>:1:34: expected ']'
 		| ........^`,
 		PrattE: `ERROR: <input>:1:9: unexpected token
 		| foo(a,b,)
-		| ........^
-		ERROR: <input>:1:10: Syntax error: mismatched input <EOF> expecting ')'
-		| foo(a,b,)
-		| .........^`,
+		| ........^`,
 	},
 }
 
