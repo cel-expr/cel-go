@@ -3704,6 +3704,47 @@ func TestOptionalValuesEval(t *testing.T) {
 		{expr: `[optional.of(42), optional.of("a")].unwrapOpt()`, out: []any{types.Int(42), types.String("a")}},
 		{expr: `optional.of(optional.of(1)) != dyn(optional.of(1))`, out: types.True},
 		{expr: `(true ? optional.of(optional.of(1)) : dyn(optional.of(2))) != dyn(optional.of(1))`, out: types.True},
+		{expr: `optional.of(42).hasValue(42)`, out: types.True},
+		{expr: `optional.of(42).hasValue(21)`, out: types.False},
+		{expr: `optional.none().hasValue(42)`, out: types.False},
+		{expr: `optional.ofNonZeroValue('').hasValue('')`, out: types.False},
+		{expr: `optional.of([1, 2]).hasValue([1, 2])`, out: types.True},
+		{expr: `m[?'nested'].hasValue({'index': 'value'})`, in: map[string]any{
+			"m": map[string]any{"nested": map[string]string{"index": "value"}},
+		}, out: types.True},
+		{expr: `x.hasValue(z)`, in: map[string]any{
+			"x": types.OptionalOf(types.Int(42)),
+			"z": 42,
+		}, out: types.True},
+		{expr: `x.hasValue(z)`, in: map[string]any{
+			"x": types.OptionalNone,
+			"z": 42,
+		}, out: types.False},
+		{expr: `optional.of(dyn(42)).hasValue(dyn('42'))`, out: types.False},
+		// An optional_type(T) argument is compared against the optional's value like any other
+		// value, which requires the receiver to be an optional_type(optional_type(T)).
+		{expr: `optional.of(optional.of(42)).hasValue(optional.of(42))`, out: types.True},
+		{expr: `optional.of(optional.of(42)).hasValue(optional.of(21))`, out: types.False},
+		{expr: `optional.of(optional.of(42)).hasValue(optional.none())`, out: types.False},
+		{expr: `optional.of(optional.none()).hasValue(optional.none())`, out: types.True},
+		{expr: `optional.of(optional.none()).hasValue(optional.of(42))`, out: types.False},
+		// An empty receiver is false regardless of the argument, even when the argument is
+		// itself optional.none().
+		{expr: `optional.none().hasValue(optional.none())`, out: types.False},
+		{expr: `optional.of([optional.of(42)]).hasValue([optional.of(42)])`, out: types.True},
+		// A dyn-typed argument is compared against the optional's value without being
+		// unwrapped, so an optional argument is unequal to a non-optional value, just as it
+		// would be with '=='.
+		{expr: `optional.of(2).hasValue(dyn(optional.of(2)))`, out: types.False},
+		{expr: `optional.of(2).hasValue(dyn(2))`, out: types.True},
+		{expr: `optional.of(2).hasValue(dyn('2'))`, out: types.False},
+		{expr: `optional.of(optional.of(2)).hasValue(dyn(optional.of(2)))`, out: types.True},
+		{expr: `optional.none().hasValue(dyn(optional.of(2)))`, out: types.False},
+		{expr: `optional.of(dyn(42)).hasValue(dyn(optional.of(42)))`, out: types.False},
+		{expr: `optional.of(dyn(optional.of(42))).hasValue(dyn(42))`, out: types.False},
+		// A dyn-typed receiver which is not an optional is caught by the runtime type guard.
+		{expr: `dyn(2).hasValue(dyn(2))`, out: "no such overload: hasValue(int, int)"},
+		{expr: `dyn('str').hasValue(dyn(2))`, out: "no such overload: hasValue(string, int)"},
 	}
 
 	for i, tst := range tests {
@@ -3960,6 +4001,189 @@ func TestOptionalMacroError(t *testing.T) {
 	_, iss = env.Compile("x.optFlatMap(y, y.z + 1)")
 	if iss.Err() == nil || !strings.Contains(iss.Err().Error(), "undeclared reference to 'optFlatMap'") {
 		t.Errorf("optFlatMap() got an unexpected result: %v", iss.Err())
+	}
+}
+
+// TestOptionalHasValueCost verifies that the cost of comparing the optional's value against the
+// input argument is tracked rather than being charged as a flat function call cost.
+func TestOptionalHasValueCost(t *testing.T) {
+	env := testEnv(t,
+		OptionalTypes(),
+		Variable("optStr", OptionalType(StringType)),
+		Variable("optOptStr", OptionalType(OptionalType(StringType))),
+		Variable("str", StringType),
+	)
+	longStr := strings.Repeat("a", 10000)
+	tests := []struct {
+		name       string
+		expr       string
+		hints      map[string]uint64
+		in         map[string]any
+		wantEst    checker.CostEstimate
+		wantActual uint64
+	}{
+		{
+			name:  "small values",
+			hints: map[string]uint64{"optStr": 10, "str": 10},
+			in: map[string]any{
+				"optStr": types.OptionalOf(types.String("val1111111")),
+				"str":    "val2222222",
+			},
+			wantEst:    checker.CostEstimate{Min: 3, Max: 3},
+			wantActual: 3,
+		},
+		{
+			name:  "large values",
+			hints: map[string]uint64{"optStr": 10000, "str": 10000},
+			in: map[string]any{
+				"optStr": types.OptionalOf(types.String(longStr)),
+				"str":    longStr,
+			},
+			wantEst:    checker.CostEstimate{Min: 3, Max: 1002},
+			wantActual: 1002,
+		},
+		{
+			// The comparison is bounded by the smaller of the two values.
+			name:  "large optional, small value",
+			hints: map[string]uint64{"optStr": 10000, "str": 10},
+			in: map[string]any{
+				"optStr": types.OptionalOf(types.String(longStr)),
+				"str":    "val2222222",
+			},
+			wantEst:    checker.CostEstimate{Min: 3, Max: 3},
+			wantActual: 3,
+		},
+		{
+			// Nested optionals are unwrapped down to the value actually being compared.
+			name:  "nested optional values",
+			expr:  `optOptStr.hasValue(optStr)`,
+			hints: map[string]uint64{"optOptStr": 10000, "optStr": 10000},
+			in: map[string]any{
+				"optOptStr": types.OptionalOf(types.OptionalOf(types.String(longStr))),
+				"optStr":    types.OptionalOf(types.String(longStr)),
+			},
+			wantEst:    checker.CostEstimate{Min: 3, Max: 1002},
+			wantActual: 1002,
+		},
+		{
+			// An empty optional performs no comparison at all.
+			name:  "empty optional",
+			hints: map[string]uint64{"optStr": 10000, "str": 10000},
+			in: map[string]any{
+				"optStr": types.OptionalNone,
+				"str":    longStr,
+			},
+			wantEst:    checker.CostEstimate{Min: 3, Max: 1002},
+			wantActual: 3,
+		},
+	}
+	for _, tst := range tests {
+		tc := tst
+		t.Run(tc.name, func(t *testing.T) {
+			expr := tc.expr
+			if expr == "" {
+				expr = `optStr.hasValue(str)`
+			}
+			ast, iss := env.Compile(expr)
+			if iss.Err() != nil {
+				t.Fatalf("env.Compile() failed: %v", iss.Err())
+			}
+			est, err := env.EstimateCost(ast, testCostEstimator{hints: tc.hints})
+			if err != nil {
+				t.Fatalf("env.EstimateCost() failed: %v", err)
+			}
+			if est.Min != tc.wantEst.Min || est.Max != tc.wantEst.Max {
+				t.Errorf("env.EstimateCost() got [%d, %d], wanted [%d, %d]",
+					est.Min, est.Max, tc.wantEst.Min, tc.wantEst.Max)
+			}
+			prg, err := env.Program(ast, CostTracking(nil))
+			if err != nil {
+				t.Fatalf("env.Program() failed: %v", err)
+			}
+			_, det, err := prg.Eval(tc.in)
+			if err != nil {
+				t.Fatalf("prg.Eval() failed: %v", err)
+			}
+			if actual := *det.ActualCost(); actual != tc.wantActual {
+				t.Errorf("EvalDetails.ActualCost() got %d, wanted %d", actual, tc.wantActual)
+			}
+			if est.Min > *det.ActualCost() || est.Max < *det.ActualCost() {
+				t.Errorf("EvalDetails.ActualCost() got %d, outside of estimate range [%d, %d]",
+					*det.ActualCost(), est.Min, est.Max)
+			}
+		})
+	}
+}
+
+func TestOptionalHasValueVersion(t *testing.T) {
+	env := testEnv(t,
+		OptionalTypes(OptionalTypesVersion(2)),
+		// Test variables.
+		Variable("x", OptionalType(IntType)),
+	)
+	if _, iss := env.Compile("x.hasValue()"); iss.Err() != nil {
+		t.Errorf("hasValue() failed: %v", iss.Err())
+	}
+	_, iss := env.Compile("x.hasValue(1)")
+	if iss.Err() == nil || !strings.Contains(iss.Err().Error(), "no matching overload for 'hasValue'") {
+		t.Errorf("hasValue(1) got an unexpected result: %v", iss.Err())
+	}
+	env = testEnv(t,
+		OptionalTypes(OptionalTypesVersion(3)),
+		// Test variables.
+		Variable("x", OptionalType(IntType)),
+	)
+	if _, iss := env.Compile("x.hasValue(1)"); iss.Err() != nil {
+		t.Errorf("hasValue(1) failed: %v", iss.Err())
+	}
+}
+
+// TestOptionalHasValueArgType verifies that the argument type must agree with the type held by the
+// optional, including when the argument is itself an optional_type(T).
+func TestOptionalHasValueArgType(t *testing.T) {
+	env := testEnv(t,
+		OptionalTypes(),
+		Variable("optInt", OptionalType(IntType)),
+		Variable("optOptInt", OptionalType(OptionalType(IntType))),
+	)
+	tests := []struct {
+		expr string
+		err  string
+	}{
+		{expr: `optInt.hasValue(1)`},
+		{expr: `optOptInt.hasValue(optional.of(1))`},
+		{
+			expr: `optInt.hasValue('1')`,
+			err:  "found no matching overload for 'hasValue' applied to 'optional_type(int).(string)'",
+		},
+		{
+			// The argument is compared against the optional's value, so an optional_type(int)
+			// argument does not match an optional_type(int) receiver.
+			expr: `optInt.hasValue(optional.of(1))`,
+			err:  "found no matching overload for 'hasValue' applied to 'optional_type(int).(optional_type(int))'",
+		},
+		{
+			expr: `optOptInt.hasValue(1)`,
+			err:  "found no matching overload for 'hasValue' applied to 'optional_type(optional_type(int)).(int)'",
+		},
+	}
+	for _, tst := range tests {
+		tc := tst
+		t.Run(tc.expr, func(t *testing.T) {
+			_, iss := env.Compile(tc.expr)
+			if tc.err == "" {
+				if iss.Err() != nil {
+					t.Fatalf("env.Compile(%v) failed: %v", tc.expr, iss.Err())
+				}
+				return
+			}
+			if iss.Err() == nil {
+				t.Fatalf("env.Compile(%v) succeeded, wanted error %q", tc.expr, tc.err)
+			}
+			if !strings.Contains(iss.Err().Error(), tc.err) {
+				t.Errorf("env.Compile(%v) got error %v, wanted %q", tc.expr, iss.Err(), tc.err)
+			}
+		})
 	}
 }
 
