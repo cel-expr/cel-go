@@ -30,6 +30,7 @@ import (
 	"cel.dev/cel-go/common/types/ref"
 	"cel.dev/cel-go/interpreter"
 	"cel.dev/cel-go/test"
+	proto3pb "cel.dev/cel-go/test/proto3pb"
 )
 
 var bindingTests = []struct {
@@ -911,5 +912,38 @@ func TestValidateBindNestingLimit(t *testing.T) {
 				t.Fatalf("env.Compile(%v) failed: %v", tc.expr, iss.Err())
 			}
 		})
+	}
+}
+
+func TestSyncSelect_ProtoInBind(t *testing.T) {
+	e, err := cel.NewEnv(
+		Bindings(),
+		cel.Types(&proto3pb.TestAllTypes{}),
+		cel.Function("resp",
+			cel.Overload("resp_proto", nil, cel.ObjectType("google.expr.proto3.test.TestAllTypes"),
+				cel.FunctionBinding(func(args ...ref.Val) ref.Val {
+					return types.NewUnknown(1, types.NewAttributeTrail("resp"))
+				}),
+			),
+		),
+	)
+	if err != nil {
+		t.Fatalf("NewEnv() failed: %v", err)
+	}
+
+	astBind, iss := e.Compile(`cel.bind(r, resp(), r.single_int32 == 0)`)
+	if iss.Err() != nil {
+		t.Fatalf("Compile() failed: %v", iss.Err())
+	}
+	prgBind, err := e.Program(astBind)
+	if err != nil {
+		t.Fatalf("Program() failed: %v", err)
+	}
+	valBind, _, errBind := prgBind.Eval(cel.NoVars())
+	if errBind != nil {
+		t.Fatalf("Eval() failed: %v", errBind)
+	}
+	if !types.IsUnknown(valBind) {
+		t.Fatalf("Eval() got %v (%T), wanted unknown", valBind, valBind)
 	}
 }

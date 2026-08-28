@@ -299,6 +299,80 @@ func TestAttributesRelativeAttrRelativeQualifier(t *testing.T) {
 	}
 }
 
+func TestAttributesRelativeAttrUnknown(t *testing.T) {
+	reg := newTestRegistry(t)
+	attrs := NewAttributeFactory(containers.DefaultContainer, reg, reg)
+
+	unk := types.NewUnknown(1, types.NewAttributeTrail("a"))
+	op := NewConstValue(1, unk)
+	attr := attrs.RelativeAttribute(1, op)
+	qualB := makeQualifier(t, attrs, nil, 2, "b")
+	attr.AddQualifier(qualB)
+
+	out, err := attr.Resolve(EmptyActivation())
+	if err != nil {
+		t.Fatalf("attr.Resolve() failed: %v", err)
+	}
+	if !types.IsUnknown(out.(ref.Val)) {
+		t.Fatalf("attr.Resolve() got %v (%T), wanted unknown", out, out)
+	}
+	if !reflect.DeepEqual(out, unk) {
+		t.Errorf("attr.Resolve() got %v, wanted %v", out, unk)
+	}
+
+	partialAttrs := NewPartialAttributeFactory(containers.DefaultContainer, reg, reg)
+	absAttr := partialAttrs.AbsoluteAttribute(1, "a")
+	evalOp := &evalAttr{adapter: reg, attr: absAttr}
+	relAttr := partialAttrs.RelativeAttribute(2, evalOp)
+	qualC := makeQualifier(t, partialAttrs, nil, 3, "c")
+	relAttr.AddQualifier(qualC)
+
+	vars, err := NewPartialActivation(map[string]any{}, NewAttributePattern("a"))
+	if err != nil {
+		t.Fatalf("NewPartialActivation() failed: %v", err)
+	}
+	out, err = relAttr.Resolve(vars)
+	if err != nil {
+		t.Fatalf("relAttr.Resolve() failed: %v", err)
+	}
+	unkVal, isUnk := out.(*types.Unknown)
+	if !isUnk {
+		t.Fatalf("relAttr.Resolve() got %v (%T), wanted unknown", out, out)
+	}
+	wantedUnk := types.NewUnknown(1, types.NewAttributeTrail("a"))
+	if !reflect.DeepEqual(unkVal, wantedUnk) {
+		t.Errorf("relAttr.Resolve() got %v, wanted %v", unkVal, wantedUnk)
+	}
+}
+
+func TestAttributesAbsoluteAttrUnknown(t *testing.T) {
+	reg := newTestRegistry(t)
+	attrs := NewAttributeFactory(containers.DefaultContainer, reg, reg)
+
+	unk := types.NewUnknown(1, types.NewAttributeTrail("a"))
+	vars, err := NewActivation(map[string]any{
+		"a": unk,
+	})
+	if err != nil {
+		t.Fatalf("NewActivation() failed: %v", err)
+	}
+
+	attr := attrs.AbsoluteAttribute(1, "a")
+	qualB := makeQualifier(t, attrs, nil, 2, "b")
+	attr.AddQualifier(qualB)
+
+	out, err := attr.Resolve(vars)
+	if err != nil {
+		t.Fatalf("attr.Resolve() failed: %v", err)
+	}
+	if !types.IsUnknown(out.(ref.Val)) {
+		t.Fatalf("attr.Resolve() got %v (%T), wanted unknown", out, out)
+	}
+	if !reflect.DeepEqual(out, unk) {
+		t.Errorf("attr.Resolve() got %v, wanted %v", out, unk)
+	}
+}
+
 func TestAttributesOneofAttr(t *testing.T) {
 	reg := newTestRegistry(t)
 	cont, err := containers.NewContainer(containers.Name("acme.ns"))
