@@ -987,6 +987,11 @@ func ContextProtoVars(ctx proto.Message, opts ...types.RegistryOption) (Activati
 
 // EnableMacroCallTracking ensures that call expressions which are replaced by macros
 // are tracked in the `SourceInfo` of parsed and checked expressions.
+//
+// This is required for Env.ResidualAst to succeed when the residual Ast contains an
+// unresolved comprehension macro (all, exists, exists_one, filter, map): without it,
+// ResidualAst cannot re-serialize the macro's expanded internal representation back
+// into CEL source syntax and returns an error instead of the residual expression.
 func EnableMacroCallTracking() EnvOption {
 	return features(featureEnableMacroCallTracking, true)
 }

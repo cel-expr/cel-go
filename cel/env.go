@@ -855,6 +855,12 @@ func (e *Env) PartialVars(vars any) (PartialActivation, error) {
 //
 // See the PartialVars helper for how to construct a PartialActivation.
 //
+// Note: if the original Ast contains a comprehension macro (e.g. all, exists, exists_one,
+// filter, map) whose range or predicate cannot be fully resolved by partial evaluation, the
+// Env must have been created with the EnableMacroCallTracking() option. Without it, this method
+// returns an error when it cannot re-serialize the unresolved comprehension's expanded internal
+// representation back into CEL source syntax.
+//
 // TODO: Consider adding an option to generate a Program.Residual to avoid round-tripping to an
 // Ast format and then Program again.
 func (e *Env) ResidualAst(a *Ast, details *EvalDetails) (*Ast, error) {
