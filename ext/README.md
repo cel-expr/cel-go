@@ -45,7 +45,24 @@ base64-encoded.
 Examples:
 
     base64.decode('aGVsbG8=')  // return b'hello'
-    base64.decode('aGVsbG8')   // error
+    base64.decode('aGVsbG8')   // return b'hello'
+
+### Base64.DecodeUrl
+
+**Introduced in version 2**
+
+Decodes base64url-encoded string to bytes.
+
+This function will return an error if the string input is not
+base64url-encoded.
+
+    base64.decodeUrl(<string>) -> <bytes>
+
+Examples:
+
+    base64.decodeUrl('aGVsbG8=')  // return b'hello'
+    base64.decodeUrl('aGVsbG8')   // return b'hello'
+    base64.decodeUrl('____')      // return b'\xff\xff\xff'
 
 ### Base64.Encode
 
@@ -58,6 +75,20 @@ Encodes bytes to a base64-encoded string.
 Example:
 
     base64.encode(b'hello') // return 'aGVsbG8='
+
+### Base64.EncodeUrl
+
+**Introduced in version 2**
+
+Encodes bytes to a base64url-encoded string.
+
+    base64.encodeUrl(<bytes>)  -> <string>
+
+Examples:
+
+    base64.encodeUrl(b'hello')        // return 'aGVsbG8='
+    base64.encodeUrl(b'\xff\xff\xff') // return '____'
+
 
 ### JSON.Encode
 
