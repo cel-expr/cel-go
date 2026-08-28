@@ -2282,6 +2282,18 @@ ERROR: <input>:1:34: expected ']'
 				p^#4:*expr.Expr_IdentExpr#
 				  )^#13:filter#`,
 	},
+	{
+		I: `foo(a,b,)`,
+		E: `ERROR: <input>:1:9: Syntax error: mismatched input ')' expecting {'[', '{', '(', '.', '-', '!', 'true', 'false', 'null', NUM_FLOAT, NUM_INT, NUM_UINT, STRING, BYTES, IDENTIFIER}
+		| foo(a,b,)
+		| ........^`,
+		PrattE: `ERROR: <input>:1:9: unexpected token
+		| foo(a,b,)
+		| ........^
+		ERROR: <input>:1:10: Syntax error: mismatched input <EOF> expecting ')'
+		| foo(a,b,)
+		| .........^`,
+	},
 }
 
 type testInfo struct {

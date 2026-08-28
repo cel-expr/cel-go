@@ -862,9 +862,6 @@ func (p *prattParserWorker) parseArguments(closeTok tokenKind) []ast.Expr {
 			args = append(args, p.parseExpr())
 			if p.peekTok.kind == tokComma {
 				p.nextToken()
-				if p.peekTok.kind == closeTok {
-					break
-				}
 				continue
 			}
 			break
