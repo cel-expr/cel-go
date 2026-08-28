@@ -904,3 +904,52 @@ func TestRuntimeCost(t *testing.T) {
 		})
 	}
 }
+
+// TestRuntimeCostUnboundedOverloadSaturates verifies that an overload which reports an unbounded
+// actual cost saturates the running total rather than overflowing it back to a small value. A
+// wrapped total would silently defeat CostTrackerLimit.
+func TestRuntimeCostUnboundedOverloadSaturates(t *testing.T) {
+	unbounded := func(args []ref.Val, result ref.Val) *uint64 {
+		maxCost := uint64(math.MaxUint64)
+		return &maxCost
+	}
+	vars := []*decls.VariableDecl{
+		decls.NewVariable("str1", types.StringType),
+		decls.NewVariable("str2", types.StringType),
+	}
+	in := map[string]any{"str1": "val1", "str2": "val2222222"}
+
+	tests := []struct {
+		name string
+		expr string
+	}{
+		// Each expression accrues cost from the variable references before the unbounded
+		// call is observed, and continues to accrue cost after it in the last two cases.
+		{name: "unbounded call", expr: `"abcdefg".contains(str1 + str2)`},
+		{name: "unbounded call in conjunction", expr: `str1 != "" && "abcdefg".contains(str1 + str2)`},
+		{name: "unbounded call then comparison", expr: `"abcdefg".contains(str1 + str2) == true`},
+		{name: "unbounded call in list", expr: `["abcdefg".contains(str1 + str2), true]`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := []CostTrackerOption{OverloadCostTracker(overloads.ContainsString, unbounded)}
+			actualCost, _, err := computeCost(t, tc.expr, vars, constructActivation(t, in), opts)
+			if err != nil {
+				t.Fatalf("computeCost() failed: %v", err)
+			}
+			if actualCost != math.MaxUint64 {
+				t.Errorf("computeCost() got cost %d, wanted %d", actualCost, uint64(math.MaxUint64))
+			}
+
+			// The saturated cost must also trip a cost limit.
+			limitOpts := []CostTrackerOption{
+				OverloadCostTracker(overloads.ContainsString, unbounded),
+				CostTrackerLimit(1000),
+			}
+			_, _, err = computeCost(t, tc.expr, vars, constructActivation(t, in), limitOpts)
+			if err == nil {
+				t.Error("computeCost() with a cost limit got nil error, wanted cost limit exceeded")
+			}
+		})
+	}
+}

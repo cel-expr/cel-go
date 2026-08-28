@@ -108,7 +108,7 @@ func (ct *costTrackerFactory) Observe(vars Activation, id int64, programStep any
 	case ConstantQualifier:
 		// TODO: Push identifiers on to the stack before observing constant qualifiers that apply to them
 		// and enable the below pop. Once enabled this can case can be collapsed into the Qualifier case.
-		tracker.cost++
+		tracker.cost = cost.SafeAdd(tracker.cost, 1)
 	case InterpretableConst:
 		// zero cost
 	case InterpretableAttribute:
@@ -118,7 +118,7 @@ func (ct *costTrackerFactory) Observe(vars Activation, id int64, programStep any
 			tracker.stack.drop(a.falsy.ID(), a.truthy.ID(), a.expr.ID())
 		default:
 			tracker.stack.drop(t.Attr().ID())
-			tracker.cost += common.SelectAndIdentCost
+			tracker.cost = cost.SafeAdd(tracker.cost, common.SelectAndIdentCost)
 		}
 		if !tracker.presenceTestHasCost {
 			if _, isTestOnly := programStep.(*evalTestOnly); isTestOnly {
@@ -150,20 +150,20 @@ func (ct *costTrackerFactory) Observe(vars Activation, id int64, programStep any
 	case *evalFold:
 		tracker.stack.drop(t.iterRange.ID())
 	case Qualifier:
-		tracker.cost++
+		tracker.cost = cost.SafeAdd(tracker.cost, 1)
 	case InterpretableCall:
 		if argVals, ok := tracker.stack.dropArgs(t.Args()); ok {
-			tracker.cost += tracker.costCall(t, argVals, val)
+			tracker.cost = cost.SafeAdd(tracker.cost, tracker.costCall(t, argVals, val))
 		}
 	case InterpretableConstructor:
 		tracker.stack.dropArgs(t.InitVals())
 		switch t.Type() {
 		case types.ListType:
-			tracker.cost += common.ListCreateBaseCost
+			tracker.cost = cost.SafeAdd(tracker.cost, common.ListCreateBaseCost)
 		case types.MapType:
-			tracker.cost += common.MapCreateBaseCost
+			tracker.cost = cost.SafeAdd(tracker.cost, common.MapCreateBaseCost)
 		default:
-			tracker.cost += common.StructCreateBaseCost
+			tracker.cost = cost.SafeAdd(tracker.cost, common.StructCreateBaseCost)
 		}
 	}
 	tracker.stack.push(val, id)

@@ -249,8 +249,10 @@ func TestEncodersCosts(t *testing.T) {
 				"x": 100,
 			},
 			estimatedCost: checker.CostEstimate{Min: 2, Max: math.MaxUint64},
-			actualCost:    1,
-			version:       1,
+			// json.encode reports an unbounded actual cost, which saturates the
+			// running total rather than overflowing it back to a small value.
+			actualCost: math.MaxUint64,
+			version:    1,
 		},
 	}
 	for _, tc := range tests {
@@ -337,3 +339,55 @@ func TestJSONEncodeCostUnbounded(t *testing.T) {
 	}
 }
 
+// TestJSONEncodeCostUnboundedWithAccruedCost checks that the unbounded cost of json.encode
+// survives being combined with cost accrued elsewhere in the expression, and that it still
+// trips a cost limit. A total which overflowed back to a small value would not.
+func TestJSONEncodeCostUnboundedWithAccruedCost(t *testing.T) {
+	env, err := cel.NewEnv(Encoders(EncodersVersion(1)), cel.Variable("v", cel.StringType))
+	if err != nil {
+		t.Fatalf("cel.NewEnv() failed: %v", err)
+	}
+	exprs := []string{
+		"json.encode(v)",
+		"json.encode(v) == json.encode(v)",
+		"size(v) > 0 && json.encode(v) != ''",
+	}
+	for _, expr := range exprs {
+		t.Run(expr, func(t *testing.T) {
+			ast, iss := env.Compile(expr)
+			if iss.Err() != nil {
+				t.Fatalf("env.Compile(%q) failed: %v", expr, iss.Err())
+			}
+			est, err := env.EstimateCost(ast, testCostHintEstimator{})
+			if err != nil {
+				t.Fatalf("env.EstimateCost() failed: %v", err)
+			}
+			if est.Max != math.MaxUint64 {
+				t.Errorf("env.EstimateCost() got max %d, wanted %d", est.Max, uint64(math.MaxUint64))
+			}
+
+			prg, err := env.Program(ast, cel.CostTracking(nil))
+			if err != nil {
+				t.Fatalf("env.Program() failed: %v", err)
+			}
+			_, det, err := prg.Eval(map[string]any{"v": "hello"})
+			if err != nil {
+				t.Fatalf("prg.Eval() failed: %v", err)
+			}
+			if det.ActualCost() == nil {
+				t.Fatal("det.ActualCost() got nil, wanted a value")
+			}
+			if *det.ActualCost() != math.MaxUint64 {
+				t.Errorf("det.ActualCost() got %d, wanted %d", *det.ActualCost(), uint64(math.MaxUint64))
+			}
+
+			limited, err := env.Program(ast, cel.CostLimit(1000))
+			if err != nil {
+				t.Fatalf("env.Program() failed: %v", err)
+			}
+			if _, _, err := limited.Eval(map[string]any{"v": "hello"}); err == nil {
+				t.Error("prg.Eval() got nil error, wanted cost limit exceeded")
+			}
+		})
+	}
+}
