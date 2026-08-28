@@ -18,16 +18,16 @@ package hmac
 import (
 	"crypto"
 	"crypto/hmac"
-	_ "crypto/md5"
-	_ "crypto/sha1"
 	_ "crypto/sha256"
 	_ "crypto/sha512"
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"math"
 	"strings"
 
 	"cel.dev/cel-go/cel"
+	"cel.dev/cel-go/common/cost"
 	"cel.dev/cel-go/common/types"
 	"cel.dev/cel-go/common/types/ref"
 )
@@ -207,14 +207,88 @@ func (l *hmacLib) CompileOptions() []cel.EnvOption {
 				}),
 			),
 		),
+
+		cel.Function("hmac.digest",
+			cel.Overload("hmac_digest_bytes_string",
+				[]*cel.Type{cel.BytesType, cel.StringType},
+				cel.BytesType,
+				cel.BinaryBinding(func(msgVal, algVal ref.Val) ref.Val {
+					msg := msgVal.(types.Bytes)
+					alg := algVal.(types.String)
+					sum, err := l.digest(msg, string(alg))
+					if err != nil {
+						return types.ValOrErr(msgVal, "%v", err)
+					}
+					return types.Bytes(sum)
+				}),
+			),
+			cel.Overload("hmac_digest_string_string",
+				[]*cel.Type{cel.StringType, cel.StringType},
+				cel.BytesType,
+				cel.BinaryBinding(func(msgVal, algVal ref.Val) ref.Val {
+					msg := msgVal.(types.String)
+					alg := algVal.(types.String)
+					sum, err := l.digest([]byte(string(msg)), string(alg))
+					if err != nil {
+						return types.ValOrErr(msgVal, "%v", err)
+					}
+					return types.Bytes(sum)
+				}),
+			),
+		),
+
+		cel.Function("hmac.equal",
+			cel.Overload("hmac_equal_bytes_bytes",
+				[]*cel.Type{cel.BytesType, cel.BytesType},
+				cel.BoolType,
+				cel.BinaryBinding(func(lhs, rhs ref.Val) ref.Val {
+					x := lhs.(types.Bytes)
+					y := rhs.(types.Bytes)
+					return types.Bool(hmac.Equal(x, y))
+				}),
+			),
+		),
 	)
+
+	// The digest and equal functions are unbounded in cost: the work is driven by
+	// input sizes the checker cannot bound, so they are reported as unknown at
+	// check time and as the maximum cost at runtime.
+	estimators := make([]cost.CostOption, 0, len(unboundedCostOverloads))
+	for _, overloadID := range unboundedCostOverloads {
+		estimators = append(estimators, cost.OverloadCostEstimate(overloadID, estimateUnboundedCost))
+	}
+	opts = append(opts, cel.CostEstimatorOptions(estimators...))
 
 	return opts
 }
 
 // ProgramOptions returns program options for HMAC extensions.
 func (l *hmacLib) ProgramOptions() []cel.ProgramOption {
-	return nil
+	trackers := make([]cost.TrackerOption, 0, len(unboundedCostOverloads))
+	for _, overloadID := range unboundedCostOverloads {
+		trackers = append(trackers, cost.OverloadTracker(overloadID, trackUnboundedCost))
+	}
+	return []cel.ProgramOption{cel.CostTrackerOptions(trackers...)}
+}
+
+// unboundedCostOverloads are the overload identifiers reported as having an
+// unbounded estimated and actual cost.
+var unboundedCostOverloads = []string{
+	"hmac_digest_bytes_string",
+	"hmac_digest_string_string",
+	"hmac_equal_bytes_bytes",
+}
+
+// estimateUnboundedCost reports an unknown cost estimate, whose maximum is
+// math.MaxUint64, for the overload under estimation.
+func estimateUnboundedCost(estimator cost.Estimator, target *cost.AstNode, args []cost.AstNode) *cost.CallEstimate {
+	return &cost.CallEstimate{CostEstimate: cost.UnknownCostEstimate()}
+}
+
+// trackUnboundedCost reports the maximum actual cost for the overload invoked.
+func trackUnboundedCost(args []ref.Val, result ref.Val) *uint64 {
+	maxCost := uint64(math.MaxUint64)
+	return &maxCost
 }
 
 func (l *hmacLib) compute(msg, secret []byte, alg string) ([]byte, error) {
@@ -223,6 +297,14 @@ func (l *hmacLib) compute(msg, secret []byte, alg string) ([]byte, error) {
 		return nil, err
 	}
 	return computeHMAC(msg, secret, hType)
+}
+
+func (l *hmacLib) digest(msg []byte, alg string) ([]byte, error) {
+	hType, err := l.resolveHash(alg)
+	if err != nil {
+		return nil, err
+	}
+	return computeDigest(msg, hType)
 }
 
 func (l *hmacLib) verifyBytes(msg, sig, secret []byte, alg string) bool {
@@ -338,6 +420,15 @@ func computeHMAC(msg, secret []byte, hType crypto.Hash) ([]byte, error) {
 	mac := hmac.New(hType.New, secret)
 	mac.Write(msg)
 	return mac.Sum(nil), nil
+}
+
+func computeDigest(msg []byte, hType crypto.Hash) ([]byte, error) {
+	if !hType.Available() {
+		return nil, fmt.Errorf("hash algorithm %v is not available", hType)
+	}
+	h := hType.New()
+	h.Write(msg)
+	return h.Sum(nil), nil
 }
 
 // decodeBase64URLSegment decodes a URL-safe base64 string with or without padding.

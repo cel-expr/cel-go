@@ -13,6 +13,7 @@ go_library(
     importpath = "cel.dev/cel-go/ext/security/hmac",
     deps = [
         "//cel:go_default_library",
+        "//common/cost:go_default_library",
         "//common/types:go_default_library",
         "//common/types/ref:go_default_library",
     ],
@@ -29,6 +30,7 @@ go_test(
     ],
     deps = [
         "//cel:go_default_library",
+        "//common/cost:go_default_library",
         "//ext:go_default_library",
     ],
 )
