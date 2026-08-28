@@ -351,6 +351,10 @@ func (a *absoluteAttribute) Resolve(vars Activation) (any, error) {
 			if celErr, ok := obj.(*types.Err); ok {
 				return nil, celErr
 			}
+			_, isUnknown := obj.(*types.Unknown)
+			if isUnknown {
+				return obj, nil
+			}
 			obj, isOpt, err := applyQualifiers(v, obj, a.qualifiers)
 			if err != nil {
 				return nil, err
