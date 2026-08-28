@@ -863,6 +863,7 @@ func (p *prattParserWorker) parseArguments(closeTok tokenKind) []ast.Expr {
 			if p.peekTok.kind == tokComma {
 				p.nextToken()
 				if p.peekTok.kind == closeTok {
+					p.reportError(p.peekTok, "unexpected token")
 					break
 				}
 				continue
