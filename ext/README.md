@@ -465,6 +465,78 @@ Examples:
     [1,[2,[3,[4]]]].flatten(2) // return [1, 2, 3, [4]]
     [1,[2,[3,[4]]]].flatten(-1) // error
 
+### HasAll
+
+**Introduced in version 5**
+
+Returns whether every element of the argument list is contained within the
+target list, i.e. whether the target is a superset of the argument. Standard
+CEL equality is used to determine whether two elements are equal, and neither
+list is required to contain unique elements. An empty argument list always
+returns true.
+
+	<list(T)>.hasAll(<list(T)>) -> <bool>
+
+Examples:
+
+    [1, 2, 3].hasAll([]) // return true
+    [1, 2, 3, 4].hasAll([2, 3]) // return true
+    [1, 2.0, 3u].hasAll([1.0, 2u, 3]) // return true
+    [1, 2, 3].hasAll([2, 4]) // return false
+
+### HasAny
+
+**Introduced in version 5**
+
+Returns whether the target list has at least one element which is equal to an
+element of the argument list. If either list is empty, the result is false.
+
+	<list(T)>.hasAny(<list(T)>) -> <bool>
+
+Examples:
+
+    [1, 2, 3].hasAny([3, 4]) // return true
+    [[1], [2, 3]].hasAny([[1, 2], [2, 3.0]]) // return true
+    [1, 2].hasAny([3, 4]) // return false
+    [1].hasAny([]) // return false
+
+### HasExactly
+
+**Introduced in version 5**
+
+Returns whether the target and argument lists are set equivalent, i.e. every
+element of the target list is equal to an element of the argument list and vice
+versa. The lists may differ in size since neither is guaranteed to hold unique
+elements, so size does not factor into the computation.
+
+	<list(T)>.hasExactly(<list(T)>) -> <bool>
+
+Examples:
+
+    [].hasExactly([]) // return true
+    [1].hasExactly([1, 1]) // return true
+    [1].hasExactly([1u, 1.0]) // return true
+    [1, 2, 3].hasExactly([3u, 2.0, 1]) // return true
+    [1, 2].hasExactly([1, 2, 3]) // return false
+
+### HasOnly
+
+**Introduced in version 5**
+
+Returns whether every element of the target list is contained within the
+argument list, i.e. whether the target is a subset of the argument. An empty
+target list always returns true.
+
+	<list(T)>.hasOnly(<list(T)>) -> <bool>
+
+Examples:
+
+    [].hasOnly([1, 2]) // return true
+    [1, 1, 2].hasOnly([1, 2, 3]) // return true
+    [1, 2.0, 3u].hasOnly([1.0, 2u, 3]) // return true
+    [1, 4].hasOnly([1, 2, 3]) // return false
+    [1].hasOnly([]) // return false
+
 ### Range
 
 **Introduced in version 2 (cost support in version 3)**

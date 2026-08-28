@@ -74,6 +74,53 @@ func TestLists(t *testing.T) {
 		{expr: `[1, 1.0, 2].distinct() == [1, 2]`},
 		{expr: `[[1], [1], [2]].distinct() == [[1], [2]]`},
 		{expr: `[ExampleType{name: 'a'}, ExampleType{name: 'b'}, ExampleType{name: 'a'}].distinct() == [ExampleType{name: 'a'}, ExampleType{name: 'b'}]`},
+
+		{expr: `[].hasOnly([])`},
+		{expr: `[].hasOnly([1, 2])`},
+		{expr: `![1].hasOnly([])`},
+		{expr: `[1, 1, 2].hasOnly([1, 2, 3])`},
+		{expr: `[1, 2, 3].hasOnly([1, 2, 3])`},
+		{expr: `![1, 4].hasOnly([1, 2, 3])`},
+		{expr: `[1, 2.0, 3u].hasOnly([1.0, 2u, 3])`},
+		{expr: `[[1], [2, 3]].hasOnly([[2, 3], [1], [4]])`},
+		{expr: `['a', 'b'].hasOnly(['b', 'a', 'c'])`},
+		{expr: `[ExampleType{name: 'a'}].hasOnly([ExampleType{name: 'a'}, ExampleType{name: 'b'}])`},
+
+		{expr: `![].hasAny([])`},
+		{expr: `![].hasAny([1, 2])`},
+		{expr: `![1].hasAny([])`},
+		{expr: `[1, 2, 3].hasAny([3, 4])`},
+		{expr: `![1, 2].hasAny([3, 4])`},
+		{expr: `[1].hasAny([1u, 1.0])`},
+		{expr: `[[1], [2, 3]].hasAny([[1, 2], [2, 3.0]])`},
+		{expr: `['a', 'b'].hasAny(['c', 'b'])`},
+
+		{expr: `[].hasAll([])`},
+		{expr: `[1, 2, 3].hasAll([])`},
+		{expr: `![].hasAll([1])`},
+		{expr: `[1, 2, 3, 4].hasAll([2, 3])`},
+		{expr: `[1, 2, 3].hasAll([2, 2, 2])`},
+		{expr: `![1, 2, 3].hasAll([2, 4])`},
+		{expr: `[1, 2.0, 3u].hasAll([1.0, 2u, 3])`},
+		{expr: `[[1], [2, 3]].hasAll([[2, 3.0]])`},
+		{expr: `[ExampleType{name: 'a'}, ExampleType{name: 'b'}].hasAll([ExampleType{name: 'b'}])`},
+
+		{expr: `[].hasExactly([])`},
+		{expr: `![].hasExactly([1])`},
+		{expr: `![1].hasExactly([])`},
+		{expr: `[1].hasExactly([1, 1])`},
+		{expr: `[1, 1].hasExactly([1])`},
+		{expr: `[1].hasExactly([1u, 1.0])`},
+		{expr: `[1, 2, 3].hasExactly([3u, 2.0, 1])`},
+		{expr: `![1, 2].hasExactly([1, 2, 3])`},
+		{expr: `![1, 2, 3].hasExactly([1, 2])`},
+		{expr: `[[1], [2, 3]].hasExactly([[2, 3.0], [1]])`},
+		{expr: `['a', 'b', 'a'].hasExactly(['b', 'a'])`},
+
+		{expr: `dyn(1).hasOnly([1])`, err: "no such overload: hasOnly(int, list)"},
+		{expr: `[1].hasAny(dyn(1))`, err: "no such overload: hasAny(list, int)"},
+		{expr: `dyn([1]).hasAll(dyn('a'))`, err: "no such overload: hasAll(list, string)"},
+		{expr: `dyn({}).hasExactly([1])`, err: "no such overload: hasExactly(map, list)"},
 	}
 
 	env := testListsEnv(t, 0)
@@ -186,6 +233,25 @@ func TestListsVersion(t *testing.T) {
 				"reverse":  "[1, 2, 3].reverse() == [3, 2, 1]",
 				"sort":     "[2, 1, 3].sort() == [1, 2, 3]",
 				"sortBy":   "[{'field': 'lo'}, {'field': 'hi'}].sortBy(m, m.field) == [{'field': 'hi'}, {'field': 'lo'}]",
+			},
+		},
+		{
+			// Versions 3 and 4 only introduce cost support for existing functions, but they are
+			// declared here to assert that later function additions are not visible to them.
+			version:            3,
+			supportedFunctions: map[string]string{},
+		},
+		{
+			version:            4,
+			supportedFunctions: map[string]string{},
+		},
+		{
+			version: 5,
+			supportedFunctions: map[string]string{
+				"hasOnly":    "[1, 2].hasOnly([1, 2, 3])",
+				"hasAny":     "[1, 2].hasAny([2, 3])",
+				"hasAll":     "[1, 2, 3].hasAll([1, 2])",
+				"hasExactly": "[1, 2].hasExactly([2, 1, 1])",
 			},
 		},
 	}
@@ -677,6 +743,39 @@ func TestListsCosts(t *testing.T) {
 			hints:         map[string]uint64{"x": 3, "x.@items": 1},
 			estimatedCost: checker.CostEstimate{Min: 136, Max: 196},
 			actualCost:    196,
+		},
+		{
+			name:          "list_hasOnly",
+			expr:          `[1, 2].hasOnly([1, 2, 3])`,
+			estimatedCost: checker.FixedCostEstimate(27),
+			actualCost:    27,
+		},
+		{
+			name:          "list_hasAny",
+			expr:          `[1, 2].hasAny([2, 3])`,
+			estimatedCost: checker.FixedCostEstimate(25),
+			actualCost:    25,
+		},
+		{
+			name:          "list_hasAll",
+			expr:          `[1, 2, 3].hasAll([1, 2])`,
+			estimatedCost: checker.FixedCostEstimate(27),
+			actualCost:    27,
+		},
+		{
+			name:          "list_hasExactly",
+			expr:          `[1, 2].hasExactly([2, 1])`,
+			estimatedCost: checker.FixedCostEstimate(29),
+			actualCost:    29,
+		},
+		{
+			name:          "list_hasAll_var",
+			expr:          `x.hasAll(['a', 'b'])`,
+			vars:          []cel.EnvOption{cel.Variable("x", cel.ListType(cel.StringType))},
+			in:            map[string]any{"x": []string{"a", "b", "c"}},
+			hints:         map[string]uint64{"x": 10},
+			estimatedCost: checker.CostEstimate{Min: 12, Max: 32},
+			actualCost:    18,
 		},
 	}
 
