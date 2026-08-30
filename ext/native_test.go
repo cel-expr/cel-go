@@ -436,7 +436,6 @@ func TestNativeTypesJsonSerialization(t *testing.T) {
         CustomName: "name",
 			}`,
 			out: `{
-				"BoolVal":  true,
 				"CustomName":  "name",
 				"DoubleVal":  1.5,
 				"DurationVal":  "5s",
@@ -445,16 +444,17 @@ func TestNativeTypesJsonSerialization(t *testing.T) {
 				"Int64Val":  64,
 				"MapVal": {
 	              "map-key": {
-    	            "BoolVal": true
+    	            "boolVal": true
         	      }
             	},
-				"NestedVal": {
+				"StringVal":  "string",
+				"boolVal":  true,
+				"nestedVal": {
 					"NestedListVal": [
 					  "first",
 					  "second"
 					]
-				},
-				"StringVal":  "string"
+				}
 			  }`,
 		},
 		{
@@ -477,7 +477,6 @@ func TestNativeTypesJsonSerialization(t *testing.T) {
                 custom_name: "name",
 			}`,
 			out: `{
-				"BoolVal":  true,
 				"DoubleVal":  1.5,
 				"DurationVal":  "5s",
 				"FloatVal":  2,
@@ -485,17 +484,18 @@ func TestNativeTypesJsonSerialization(t *testing.T) {
 				"Int64Val":  64,
 				"MapVal": {
 	              "map-key": {
-    	            "BoolVal": true
+    	            "boolVal": true
         	      }
             	},
-				"NestedVal": {
+				"StringVal":  "string",
+				"boolVal":  true,
+				"custom_name": "name",
+				"nestedVal": {
 					"NestedListVal": [
 					  "first",
 					  "second"
 					]
-				},
-				"StringVal":  "string",
-                "custom_name": "name"
+				}
 			  }`,
 			additionalEnvOptions: []any{ParseStructTags(true)},
 		},
@@ -1328,12 +1328,12 @@ type TestStructWithMultipleSameNames struct {
 type TestNestedType struct {
 	NestedListVal    []string
 	NestedMapVal     map[int64]bool
-	NestedCustomName string `cel:"custom_name" json:"custom_name"`
+	NestedCustomName string `cel:"custom_name" json:"custom_name,omitempty"`
 }
 
 type TestAllTypes struct {
 	NestedVal       *TestNestedType `json:"nestedVal,omitempty"`
-	NestedStructVal TestNestedType  `json:"nestedStructVal"`
+	NestedStructVal TestNestedType  `json:"nestedStructVal,omitempty"`
 	BoolVal         bool            `json:"boolVal"`
 	BytesVal        []byte
 	DurationVal     time.Duration

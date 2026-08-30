@@ -1360,9 +1360,11 @@ func TestRegistryStructTypeDescriptor_FindStructFieldType(t *testing.T) {
 
 func TestRegistryStructTypeDescriptor_FindIdent(t *testing.T) {
 	reg := newTestStructTypeRegistry(t)
-	ident, found := reg.FindIdent("custom.MyStruct")
-	if !found || ident == nil {
-		t.Fatalf("FindIdent('custom.MyStruct') not found")
+	for _, identName := range []string{"custom.MyStruct", ".custom.MyStruct"} {
+		ident, found := reg.FindIdent(identName)
+		if !found || ident == nil {
+			t.Fatalf("FindIdent(%q) not found", identName)
+		}
 	}
 }
 

@@ -90,15 +90,11 @@ func ParseStructField(handler NativeTypesFieldNameHandler) NativeTypeOption {
 
 func fieldNameByTag(structTagToParse string) func(field reflect.StructField) string {
 	return func(field reflect.StructField) string {
-		tag, found := field.Tag.Lookup(structTagToParse)
-		if found {
-			splits := strings.Split(tag, ",")
-			if len(splits) > 0 {
-				name := splits[0]
-				return name
-			}
+		tagInfo := parseStructTag(field, structTagToParse, field.Name)
+		if tagInfo.Skip {
+			return "-"
 		}
-		return field.Name
+		return tagInfo.Name
 	}
 }
 
@@ -106,11 +102,19 @@ func isSkippedFieldName(name string) bool {
 	return name == "" || name == "-"
 }
 
+type nativeJSONField struct {
+	index     []int
+	jsonName  string
+	omitEmpty bool
+	hasTag    bool
+}
+
 // NativeType represents a CEL struct type descriptor generated from a native Go struct.
 type NativeType struct {
 	typeName     string
 	refType      reflect.Type
 	fieldsByName map[string]reflect.StructField
+	jsonFields   []nativeJSONField
 }
 
 // ReflectType implements StructTypeDescriptor.
@@ -279,22 +283,60 @@ func (o *nativeObj) ConvertToNative(typeDesc reflect.Type) (any, error) {
 		return structpb.NewStructValue(jsonStruct.(*structpb.Struct)), nil
 	case jsonStructType:
 		refVal := reflect.Indirect(o.refValue)
-		fields := make(map[string]*structpb.Value, refVal.NumField())
-		for fieldName, fieldType := range o.valType.fieldsByName {
-			fieldValue := safeGetFieldByIndex(refVal, fieldType.Index)
-			if !fieldValue.IsValid() || fieldValue.IsZero() {
+		fields := make(map[string]*structpb.Value, len(o.valType.jsonFields))
+		for _, jf := range o.valType.jsonFields {
+			fieldValue := safeGetFieldByIndex(refVal, jf.index)
+			if !fieldValue.IsValid() {
 				continue
+			}
+			if fieldValue.IsZero() {
+				if !jf.hasTag || jf.omitEmpty || fieldValue.Kind() == reflect.Pointer || fieldValue.Kind() == reflect.Slice || fieldValue.Kind() == reflect.Map || fieldValue.Kind() == reflect.Interface {
+					continue
+				}
 			}
 			fieldCELVal := o.NativeToValue(fieldValue.Interface())
 			fieldJSONVal, err := fieldCELVal.ConvertToNative(jsonValueType)
 			if err != nil {
 				return nil, err
 			}
-			fields[fieldName] = fieldJSONVal.(*structpb.Value)
+			fields[jf.jsonName] = fieldJSONVal.(*structpb.Value)
 		}
 		return &structpb.Struct{Fields: fields}, nil
 	}
 	return nil, fmt.Errorf("type conversion error from '%v' to '%v'", o.Type(), typeDesc)
+}
+
+type structTagInfo struct {
+	Name      string
+	OmitEmpty bool
+	Skip      bool
+	HasTag    bool
+}
+
+func parseStructTag(field reflect.StructField, tagName, defaultName string) structTagInfo {
+	tag, found := field.Tag.Lookup(tagName)
+	if !found {
+		return structTagInfo{Name: defaultName}
+	}
+	if tag == "-" {
+		return structTagInfo{Skip: true, HasTag: true}
+	}
+	parts := strings.Split(tag, ",")
+	name := parts[0]
+	if name == "" {
+		name = defaultName
+	}
+	omitEmpty := false
+	for _, opt := range parts[1:] {
+		if opt == "omitempty" {
+			omitEmpty = true
+		}
+	}
+	return structTagInfo{
+		Name:      name,
+		OmitEmpty: omitEmpty,
+		HasTag:    true,
+	}
 }
 
 func (o *nativeObj) ConvertToType(typeVal ref.Type) ref.Val {
@@ -462,10 +504,49 @@ func newNativeType(rawType reflect.Type, fieldNameHandler NativeTypesFieldNameHa
 		fieldsByName[fieldName] = field
 	}
 
+	var jsonFields []nativeJSONField
+	for _, field := range reflect.VisibleFields(refType) {
+		if !field.IsExported() || !isSupportedType(field.Type) {
+			continue
+		}
+		fieldName := toFieldName(field, fieldNameHandler)
+		if isSkippedFieldName(fieldName) {
+			continue
+		}
+		// If anonymous embedded field without explicit tag, skip
+		if field.Anonymous {
+			tagInfo := parseStructTag(field, "json", fieldName)
+			if !tagInfo.HasTag || tagInfo.Skip || tagInfo.Name == "" {
+				continue
+			}
+		}
+		// If promoted subfield from embedded struct (len(Index) > 1), check if parent has tag
+		if len(field.Index) > 1 {
+			parentField := refType.Field(field.Index[0])
+			if parentField.Anonymous {
+				tagInfo := parseStructTag(parentField, "json", "")
+				if tagInfo.HasTag && !tagInfo.Skip && tagInfo.Name != "" {
+					continue
+				}
+			}
+		}
+		tagInfo := parseStructTag(field, "json", fieldName)
+		if tagInfo.Skip {
+			continue
+		}
+		jsonFields = append(jsonFields, nativeJSONField{
+			index:     field.Index,
+			jsonName:  tagInfo.Name,
+			omitEmpty: tagInfo.OmitEmpty,
+			hasTag:    tagInfo.HasTag,
+		})
+	}
+
 	return &NativeType{
 		typeName:     fmt.Sprintf("%s.%s", simplePkgAlias(refType.PkgPath()), refType.Name()),
 		refType:      refType,
 		fieldsByName: fieldsByName,
+		jsonFields:   jsonFields,
 	}, nil
 }
 
@@ -490,6 +571,18 @@ func safeSetFieldByIndex(v reflect.Value, index []int) reflect.Value {
 }
 
 func safeGetFieldByIndex(v reflect.Value, index []int) reflect.Value {
+	if len(index) == 1 {
+		if v.Kind() == reflect.Pointer {
+			if v.IsNil() {
+				return reflect.Value{}
+			}
+			v = v.Elem()
+		}
+		if v.Kind() != reflect.Struct || index[0] >= v.NumField() {
+			return reflect.Value{}
+		}
+		return v.Field(index[0])
+	}
 	for _, i := range index {
 		if v.Kind() == reflect.Pointer {
 			if v.IsNil() {
