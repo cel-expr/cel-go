@@ -1750,7 +1750,10 @@ type TestEmbeddedPointerTypes struct {
 type TestSpecialJSONTags struct {
 	Ignored              string `json:"-" cel:"ignored"`
 	HyphenName           string `json:"-," cel:"hyphen_name"`
+<<<<<<< HEAD
 	QuotedHyphen         string `json:"'-'" cel:"quoted_hyphen"`
+=======
+>>>>>>> 99d5973f (Update provider and native types to better support JSON conversion and type resolution)
 	Renamed              string `json:"custom_json_name" cel:"renamed"`
 	OmitEmptyInt         int    `json:"empty_int,omitempty" cel:"empty_int"`
 	OmitEmptyStr         string `json:"empty_str,omitempty" cel:"empty_str"`
