@@ -1360,9 +1360,11 @@ func TestRegistryStructTypeDescriptor_FindStructFieldType(t *testing.T) {
 
 func TestRegistryStructTypeDescriptor_FindIdent(t *testing.T) {
 	reg := newTestStructTypeRegistry(t)
-	ident, found := reg.FindIdent("custom.MyStruct")
-	if !found || ident == nil {
-		t.Fatalf("FindIdent('custom.MyStruct') not found")
+	for _, identName := range []string{"custom.MyStruct", ".custom.MyStruct"} {
+		ident, found := reg.FindIdent(identName)
+		if !found || ident == nil {
+			t.Fatalf("FindIdent(%q) not found", identName)
+		}
 	}
 }
 
@@ -2704,3 +2706,106 @@ func TestRegistry_NativeReflectTypes(t *testing.T) {
 		}
 	})
 }
+
+func TestParseStructTag(t *testing.T) {
+	tests := []struct {
+		name        string
+		tag         string
+		tagName     string
+		defaultName string
+		want        structTagInfo
+	}{
+		{
+			name:        "no_tag",
+			tag:         ``,
+			tagName:     "json",
+			defaultName: "DefaultField",
+			want:        structTagInfo{Name: "DefaultField", OmitEmpty: false, Skip: false, HasTag: false},
+		},
+		{
+			name:        "hyphen_skip",
+			tag:         `json:"-"`,
+			tagName:     "json",
+			defaultName: "DefaultField",
+			want:        structTagInfo{Name: "", OmitEmpty: false, Skip: true, HasTag: true},
+		},
+		{
+			name:        "hyphen_with_trailing_comma_skip",
+			tag:         `json:"-,"`,
+			tagName:     "json",
+			defaultName: "DefaultField",
+			want:        structTagInfo{Name: "", OmitEmpty: false, Skip: true, HasTag: true},
+		},
+		{
+			name:        "hyphen_with_omitempty_skip",
+			tag:         `json:"-,omitempty"`,
+			tagName:     "json",
+			defaultName: "DefaultField",
+			want:        structTagInfo{Name: "", OmitEmpty: false, Skip: true, HasTag: true},
+		},
+		{
+			name:        "quoted_hyphen_literal",
+			tag:         `json:"'-'"`,
+			tagName:     "json",
+			defaultName: "DefaultField",
+			want:        structTagInfo{Name: "-", OmitEmpty: false, Skip: false, HasTag: true},
+		},
+		{
+			name:        "quoted_hyphen_with_omitempty",
+			tag:         `json:"'-',omitempty"`,
+			tagName:     "json",
+			defaultName: "DefaultField",
+			want:        structTagInfo{Name: "-", OmitEmpty: true, Skip: false, HasTag: true},
+		},
+		{
+			name:        "custom_name",
+			tag:         `json:"custom_name"`,
+			tagName:     "json",
+			defaultName: "DefaultField",
+			want:        structTagInfo{Name: "custom_name", OmitEmpty: false, Skip: false, HasTag: true},
+		},
+		{
+			name:        "custom_name_omitempty",
+			tag:         `json:"custom_name,omitempty"`,
+			tagName:     "json",
+			defaultName: "DefaultField",
+			want:        structTagInfo{Name: "custom_name", OmitEmpty: true, Skip: false, HasTag: true},
+		},
+		{
+			name:        "empty_name_with_omitempty",
+			tag:         `json:",omitempty"`,
+			tagName:     "json",
+			defaultName: "DefaultField",
+			want:        structTagInfo{Name: "DefaultField", OmitEmpty: true, Skip: false, HasTag: true},
+		},
+		{
+			name:        "cel_tag_hyphen_skip",
+			tag:         `cel:"-"`,
+			tagName:     "cel",
+			defaultName: "DefaultField",
+			want:        structTagInfo{Name: "", OmitEmpty: false, Skip: true, HasTag: true},
+		},
+		{
+			name:        "cel_tag_quoted_hyphen",
+			tag:         `cel:"'-'"`,
+			tagName:     "cel",
+			defaultName: "DefaultField",
+			want:        structTagInfo{Name: "-", OmitEmpty: false, Skip: false, HasTag: true},
+		},
+	}
+
+	for _, tt := range tests {
+		tc := tt
+		t.Run(tc.name, func(t *testing.T) {
+			field := reflect.StructField{
+				Name: "DefaultField",
+				Tag:  reflect.StructTag(tc.tag),
+			}
+			got := parseStructTag(field, tc.tagName, tc.defaultName)
+			if got != tc.want {
+				t.Errorf("parseStructTag(%q, %q, %q) = %+v, want %+v", tc.tag, tc.tagName, tc.defaultName, got, tc.want)
+			}
+		})
+	}
+}
+

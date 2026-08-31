@@ -437,7 +437,6 @@ func TestNativeTypesJsonSerialization(t *testing.T) {
 				CustomName: "name",
 			}`,
 			out: `{
-				"BoolVal":  true,
 				"CustomName":  "name",
 				"DoubleVal":  1.5,
 				"DurationVal":  "5s",
@@ -446,16 +445,17 @@ func TestNativeTypesJsonSerialization(t *testing.T) {
 				"Int64Val":  64,
 				"MapVal": {
 	              "map-key": {
-    	            "BoolVal": true
+    	            "boolVal": true
         	      }
             	},
-				"NestedVal": {
+				"StringVal":  "string",
+				"boolVal":  true,
+				"nestedVal": {
 					"NestedListVal": [
 					  "first",
 					  "second"
 					]
-				},
-				"StringVal":  "string"
+				}
 			  }`,
 		},
 		{
@@ -478,7 +478,6 @@ func TestNativeTypesJsonSerialization(t *testing.T) {
                 custom_name: "name",
 			}`,
 			out: `{
-				"BoolVal":  true,
 				"DoubleVal":  1.5,
 				"DurationVal":  "5s",
 				"FloatVal":  2,
@@ -486,18 +485,93 @@ func TestNativeTypesJsonSerialization(t *testing.T) {
 				"Int64Val":  64,
 				"MapVal": {
 	              "map-key": {
-    	            "BoolVal": true
+    	            "boolVal": true
         	      }
             	},
-				"NestedVal": {
+				"StringVal":  "string",
+				"boolVal":  true,
+				"custom_name": "name",
+				"nestedVal": {
 					"NestedListVal": [
 					  "first",
 					  "second"
 					]
-				},
-				"StringVal":  "string",
-                "custom_name": "name"
+				}
 			  }`,
+			additionalEnvOptions: []any{types.ParseStructTags(true)},
+		},
+		{
+			expr: `TestSpecialJSONTags{
+				ignored: "sensitive",
+				hyphen_name: "hyphen-val",
+				quoted_hyphen: "quoted-val",
+				renamed: "renamed-val",
+				empty_int: 0,
+				empty_str: "",
+				pop_int: 42,
+				keep_zero: 0,
+				keep_empty: "",
+				keep_false: false,
+				cel_field: "divergent-val",
+			}`,
+			out: `{
+				"-": "quoted-val",
+				"custom_json_name": "renamed-val",
+				"json_field": "divergent-val",
+				"keep_empty": "",
+				"keep_false": false,
+				"keep_zero": 0,
+				"pop_int": 42
+			}`,
+			additionalEnvOptions: []any{types.ParseStructTags(true)},
+		},
+		{
+			expr: `TestEmbeddedTypes{
+				name: "alice",
+				Skipped: "secret",
+				NestedListVal: ["a", "b"],
+				custom_name: "nested",
+			}`,
+			out: `{
+				"embedded": {
+					"NestedListVal": [
+						"a",
+						"b"
+					],
+					"custom_name": "nested"
+				},
+				"name": "alice"
+			}`,
+			additionalEnvOptions: []any{types.ParseStructTags(true)},
+		},
+		{
+			expr: `TestEmbeddedTypes{
+				name: "bob",
+				Skipped: "secret",
+			}`,
+			out: `{
+				"name": "bob"
+			}`,
+			additionalEnvOptions: []any{types.ParseStructTags(true)},
+		},
+		{
+			expr: `TestEmbeddedPointerTypes{
+				NestedListVal: ["x"],
+				custom_name: "ptr_nested",
+			}`,
+			out: `{
+				"embedded": {
+					"NestedListVal": [
+						"x"
+					],
+					"custom_name": "ptr_nested"
+				}
+			}`,
+			additionalEnvOptions: []any{types.ParseStructTags(true)},
+		},
+		{
+			expr:                 `TestEmbeddedPointerTypes{}`,
+			out:                  `{}`,
 			additionalEnvOptions: []any{types.ParseStructTags(true)},
 		},
 	}
@@ -1572,6 +1646,9 @@ func testNativeEnv(t testing.TB, opts ...any) *cel.Env {
 	nativeOpts := []any{
 		reflect.ValueOf(&TestAllTypes{}),
 		reflect.ValueOf(&TestRefValFieldType{}),
+		reflect.ValueOf(&TestEmbeddedTypes{}),
+		reflect.ValueOf(&TestEmbeddedPointerTypes{}),
+		reflect.ValueOf(&TestSpecialJSONTags{}),
 	}
 	for _, o := range opts {
 		switch opt := o.(type) {
@@ -1617,12 +1694,12 @@ type TestStructWithMultipleSameNames struct {
 type TestNestedType struct {
 	NestedListVal    []string
 	NestedMapVal     map[int64]bool
-	NestedCustomName string `cel:"custom_name" json:"custom_name"`
+	NestedCustomName string `cel:"custom_name" json:"custom_name,omitempty"`
 }
 
 type TestAllTypes struct {
 	NestedVal       *TestNestedType `json:"nestedVal,omitempty"`
-	NestedStructVal TestNestedType  `json:"nestedStructVal"`
+	NestedStructVal TestNestedType  `json:"nestedStructVal,omitempty"`
 	BoolVal         bool            `json:"boolVal"`
 	BytesVal        []byte
 	DurationVal     time.Duration
@@ -1668,6 +1745,20 @@ type TestEmbeddedTypes struct {
 
 type TestEmbeddedPointerTypes struct {
 	*TestNestedType `json:"embedded,omitempty"`
+}
+
+type TestSpecialJSONTags struct {
+	Ignored              string `json:"-" cel:"ignored"`
+	HyphenName           string `json:"-," cel:"hyphen_name"`
+	QuotedHyphen         string `json:"'-'" cel:"quoted_hyphen"`
+	Renamed              string `json:"custom_json_name" cel:"renamed"`
+	OmitEmptyInt         int    `json:"empty_int,omitempty" cel:"empty_int"`
+	OmitEmptyStr         string `json:"empty_str,omitempty" cel:"empty_str"`
+	PopulatedInt         int    `json:"pop_int,omitempty" cel:"pop_int"`
+	NonOmitEmptyZero     int    `json:"keep_zero" cel:"keep_zero"`
+	NonOmitEmptyEmptyStr string `json:"keep_empty" cel:"keep_empty"`
+	NonOmitEmptyFalse    bool   `json:"keep_false" cel:"keep_false"`
+	DivergentField       string `cel:"cel_field" json:"json_field"`
 }
 
 type TestRefValFieldType struct {
