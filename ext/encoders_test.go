@@ -43,6 +43,106 @@ func TestEncoders(t *testing.T) {
 			err:       "no such overload",
 			parseOnly: true,
 		},
+		{expr: "base64.decodeUrl('aGVsbG8=') == b'hello'"},
+		{expr: "base64.decodeUrl('aGVsbG8') == b'hello'"},
+		{expr: "base64.decodeUrl('____') == b'\\xff\\xff\\xff'"},
+		{expr: "base64.decodeUrl('-_==') == b'\\xfb'"},
+		{
+			expr:      "base64.decodeUrl(b'aGVsbG8=') == b'hello'",
+			err:       "no such overload",
+			parseOnly: true,
+		},
+		{expr: "base64.encodeUrl(b'hello') == 'aGVsbG8='"},
+		{expr: "base64.encodeUrl(b'\\xff\\xff\\xff') == '____'"},
+		{
+			expr:      "base64.encodeUrl('hello') == b'aGVsbG8='",
+			err:       "no such overload",
+			parseOnly: true,
+		},
+		// Differences between standard Base64 and Base64URL encoding and decoding
+		{expr: "base64.encode(b'\\xff\\xff\\xff') == '////'"},
+		{expr: "base64.encode(b'\\xff\\xff\\xff') != base64.encodeUrl(b'\\xff\\xff\\xff')"},
+		{expr: "base64.encode(b'\\xfb') == '+w=='"},
+		{expr: "base64.encodeUrl(b'\\xfb') == '-w=='"},
+		{expr: "base64.encode(b'\\xfb') != base64.encodeUrl(b'\\xfb')"},
+		{expr: "base64.encode(b'\\xfb\\xef\\xbe') == '++++'"},
+		{expr: "base64.encodeUrl(b'\\xfb\\xef\\xbe') == '----'"},
+		{expr: "base64.encode(b'\\xfb\\xef\\xbe') != base64.encodeUrl(b'\\xfb\\xef\\xbe')"},
+		{expr: "base64.encode(b'\\xfb\\xff\\xfe') == '+//+'"},
+		{expr: "base64.encodeUrl(b'\\xfb\\xff\\xfe') == '-__-'"},
+		{expr: "base64.encode(b'\\xfb\\xff\\xfe') != base64.encodeUrl(b'\\xfb\\xff\\xfe')"},
+		// Base64 decoding fails for characters unique to Base64URL (- and _)
+		{
+			expr: "base64.decode('____')",
+			err:  "illegal base64 data",
+		},
+		{
+			expr: "base64.decode('----')",
+			err:  "illegal base64 data",
+		},
+		{
+			expr: "base64.decode('-__-')",
+			err:  "illegal base64 data",
+		},
+		{
+			expr: "base64.decode('-w==')",
+			err:  "illegal base64 data",
+		},
+		{
+			expr: "base64.decode('-w')",
+			err:  "illegal base64 data",
+		},
+		{
+			expr: "base64.decode(base64.encodeUrl(b'\\xff\\xff\\xff'))",
+			err:  "illegal base64 data",
+		},
+		{
+			expr: "base64.decode(base64.encodeUrl(b'\\xfb'))",
+			err:  "illegal base64 data",
+		},
+		// Base64URL decoding fails for characters unique to standard Base64 (+ and /)
+		{
+			expr: "base64.decodeUrl('////')",
+			err:  "illegal base64 data",
+		},
+		{
+			expr: "base64.decodeUrl('++++')",
+			err:  "illegal base64 data",
+		},
+		{
+			expr: "base64.decodeUrl('+//+')",
+			err:  "illegal base64 data",
+		},
+		{
+			expr: "base64.decodeUrl('+w==')",
+			err:  "illegal base64 data",
+		},
+		{
+			expr: "base64.decodeUrl('+w')",
+			err:  "illegal base64 data",
+		},
+		{
+			expr: "base64.decodeUrl(base64.encode(b'\\xff\\xff\\xff'))",
+			err:  "illegal base64 data",
+		},
+		{
+			expr: "base64.decodeUrl(base64.encode(b'\\xfb'))",
+			err:  "illegal base64 data",
+		},
+		// Respective decoders produce matching byte results for equivalent inputs
+		{expr: "base64.decode('////') == b'\\xff\\xff\\xff'"},
+		{expr: "base64.decode('+w==') == b'\\xfb'"},
+		{expr: "base64.decode('+w') == b'\\xfb'"},
+		{expr: "base64.decode('++++') == b'\\xfb\\xef\\xbe'"},
+		{expr: "base64.decodeUrl('-w==') == b'\\xfb'"},
+		{expr: "base64.decodeUrl('-w') == b'\\xfb'"},
+		{expr: "base64.decodeUrl('----') == b'\\xfb\\xef\\xbe'"},
+		{expr: "base64.decode('+//+') == b'\\xfb\\xff\\xfe'"},
+		{expr: "base64.decodeUrl('-__-') == b'\\xfb\\xff\\xfe'"},
+		{expr: "base64.decode('////') == base64.decodeUrl('____')"},
+		{expr: "base64.decode('+w==') == base64.decodeUrl('-w==')"},
+		{expr: "base64.decode('++++') == base64.decodeUrl('----')"},
+		{expr: "base64.decode('+//+') == base64.decodeUrl('-__-')"},
 		{expr: "json.encode('hello') == '\"hello\"'"},
 		{expr: `json.encode([1, 'two', true]) == '[1,"two",true]'`},
 		{expr: `json.encode({'items': [1, 'two', false]}) == '{"items":[1,"two",false]}'`},
@@ -103,6 +203,9 @@ func TestEncodersVersion(t *testing.T) {
 	if _, iss := env.Compile("json.encode('hello')"); iss.Err() == nil {
 		t.Fatal("json.encode() got no error, wanted version-gated function to be unavailable")
 	}
+	if _, iss := env.Compile("base64.encodeUrl(b'hello')"); iss.Err() == nil {
+		t.Fatal("base64.encodeUrl() got no error, wanted version-gated function to be unavailable")
+	}
 
 	env, err = cel.NewEnv(Encoders(EncodersVersion(1)))
 	if err != nil {
@@ -110,6 +213,20 @@ func TestEncodersVersion(t *testing.T) {
 	}
 	if _, iss := env.Compile("json.encode('hello')"); iss.Err() != nil {
 		t.Fatalf("json.encode() got %v, wanted no error", iss.Err())
+	}
+	if _, iss := env.Compile("base64.encodeUrl(b'hello')"); iss.Err() == nil {
+		t.Fatal("base64.encodeUrl() got no error, wanted version-gated function to be unavailable")
+	}
+
+	env, err = cel.NewEnv(Encoders(EncodersVersion(2)))
+	if err != nil {
+		t.Fatalf("EncodersVersion(2) failed: %v", err)
+	}
+	if _, iss := env.Compile("base64.encodeUrl(b'hello')"); iss.Err() != nil {
+		t.Fatalf("base64.encodeUrl() got %v, wanted no error", iss.Err())
+	}
+	if _, iss := env.Compile("base64.decodeUrl('aGVsbG8=')"); iss.Err() != nil {
+		t.Fatalf("base64.decodeUrl() got %v, wanted no error", iss.Err())
 	}
 }
 
@@ -252,6 +369,38 @@ func TestEncodersCosts(t *testing.T) {
 			actualCost:    math.MaxUint64,
 			version:       1,
 		},
+		{
+			name: "encode_url_bytes_v2",
+			expr: "base64.encodeUrl(x) == '____'",
+			vars: []cel.EnvOption{
+				cel.Variable("x", cel.BytesType),
+			},
+			in: map[string]any{
+				"x": []byte("\xff\xff\xff"),
+			},
+			hints: map[string]uint64{
+				"x": 100,
+			},
+			estimatedCost: checker.CostEstimate{Min: 3, Max: 13},
+			actualCost:    4,
+			version:       2,
+		},
+		{
+			name: "decode_url_string_v2",
+			expr: "base64.decodeUrl(x) == b'hello'",
+			vars: []cel.EnvOption{
+				cel.Variable("x", cel.StringType),
+			},
+			in: map[string]any{
+				"x": "aGVsbG8=",
+			},
+			hints: map[string]uint64{
+				"x": 100,
+			},
+			estimatedCost: checker.CostEstimate{Min: 3, Max: 13},
+			actualCost:    4,
+			version:       2,
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -297,6 +446,31 @@ func TestDecodeNonBase64Error(t *testing.T) {
 	_, _, err = prg.Eval(cel.NoVars())
 	if err == nil {
 		t.Fatal("expected eval error for non-base64 string decoding, got nil")
+	}
+}
+
+func TestDecodeNonBase64UrlError(t *testing.T) {
+	env := testEncodersCostsEnv(t, 2)
+	pAst, iss := env.Parse("base64.decodeUrl('abc!') == b''")
+	if iss.Err() != nil {
+		t.Fatalf("env.Parse() failed: %v", iss.Err())
+	}
+	cAst, iss := env.Check(pAst)
+	if iss.Err() != nil {
+		t.Fatalf("env.Check() failed: %v", iss.Err())
+	}
+	testCheckCost(t, env, cAst, nil, checker.FixedCostEstimate(2))
+	prgOpts := []cel.ProgramOption{}
+	if cAst.IsChecked() {
+		prgOpts = append(prgOpts, cel.CostTracking(nil))
+	}
+	prg, err := env.Program(cAst, prgOpts...)
+	if err != nil {
+		t.Fatalf("env.Program() failed: %v", err)
+	}
+	_, _, err = prg.Eval(cel.NoVars())
+	if err == nil {
+		t.Fatal("expected eval error for non-base64url string decoding, got nil")
 	}
 }
 

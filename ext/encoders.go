@@ -21,11 +21,9 @@ import (
 	"math"
 
 	"cel.dev/cel-go/cel"
-	"cel.dev/cel-go/checker"
 	"cel.dev/cel-go/common/cost"
 	"cel.dev/cel-go/common/types"
 	"cel.dev/cel-go/common/types/ref"
-	"cel.dev/cel-go/interpreter"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/structpb"
 )
@@ -46,6 +44,22 @@ import (
 //	base64.decode('aGVsbG8=')  // return b'hello'
 //	base64.decode('aGVsbG8')   // return b'hello'
 //
+// # Base64.DecodeUrl
+//
+// Introduced at version: 2
+//
+// Decodes a base64url-encoded string to bytes.
+//
+// This function will return an error if the string input is not base64url-encoded.
+//
+//	base64.decodeUrl(<string>) -> <bytes>
+//
+// Examples:
+//
+//	base64.decodeUrl('aGVsbG8=')  // return b'hello'
+//	base64.decodeUrl('aGVsbG8')   // return b'hello'
+//	base64.decodeUrl('____')      // return b'\xff\xff\xff'
+//
 // # Base64.Encode
 //
 // Encodes bytes to a base64-encoded string.
@@ -55,6 +69,19 @@ import (
 // Examples:
 //
 //	base64.encode(b'hello') // return b'aGVsbG8='
+//
+// # Base64.EncodeUrl
+//
+// Introduced at version: 2
+//
+// Encodes bytes to a base64url-encoded string.
+//
+//	base64.encodeUrl(<bytes>)  -> <string>
+//
+// Examples:
+//
+//	base64.encodeUrl(b'hello')        // return 'aGVsbG8='
+//	base64.encodeUrl(b'\xff\xff\xff') // return '____'
 //
 // # JSON.Encode
 //
@@ -110,10 +137,10 @@ func (lib *encoderLib) CompileOptions() []cel.EnvOption {
 				}))),
 	}
 	if lib.version >= 1 {
-		estimators := []checker.CostOption{
-			checker.OverloadCostEstimate("base64_decode_string", estimateDecode),
-			checker.OverloadCostEstimate("base64_encode_bytes", estimateEncode),
-			checker.OverloadCostEstimate("json_encode_dyn", estimateJSONEncode),
+		estimators := []cost.CostOption{
+			cost.OverloadCostEstimate("base64_decode_string", estimateDecode),
+			cost.OverloadCostEstimate("base64_encode_bytes", estimateEncode),
+			cost.OverloadCostEstimate("json_encode_dyn", estimateJSONEncode),
 		}
 		opts = append(opts, cel.CostEstimatorOptions(estimators...))
 		opts = append(opts,
@@ -124,16 +151,44 @@ func (lib *encoderLib) CompileOptions() []cel.EnvOption {
 					}))),
 		)
 	}
+	if lib.version >= 2 {
+		estimators := []cost.CostOption{
+			cost.OverloadCostEstimate("base64_decode_url_string", estimateDecode),
+			cost.OverloadCostEstimate("base64_encode_url_bytes", estimateEncode),
+		}
+		opts = append(opts, cel.CostEstimatorOptions(estimators...))
+		opts = append(opts,
+			cel.Function("base64.decodeUrl",
+				cel.Overload("base64_decode_url_string", []*cel.Type{cel.StringType}, cel.BytesType,
+					cel.UnaryBinding(func(str ref.Val) ref.Val {
+						s := str.(types.String)
+						return bytesOrError(base64DecodeUrlString(string(s)))
+					}))),
+			cel.Function("base64.encodeUrl",
+				cel.Overload("base64_encode_url_bytes", []*cel.Type{cel.BytesType}, cel.StringType,
+					cel.UnaryBinding(func(bytes ref.Val) ref.Val {
+						b := bytes.(types.Bytes)
+						return stringOrError(base64EncodeUrlBytes([]byte(b)))
+					}))),
+		)
+	}
 	return opts
 }
 
 func (lib *encoderLib) ProgramOptions() []cel.ProgramOption {
 	var opts []cel.ProgramOption
 	if lib.version >= 1 {
-		trackers := []interpreter.CostTrackerOption{
-			interpreter.OverloadCostTracker("base64_decode_string", trackDecode),
-			interpreter.OverloadCostTracker("base64_encode_bytes", trackEncode),
-			interpreter.OverloadCostTracker("json_encode_dyn", trackJSONEncode),
+		trackers := []cost.TrackerOption{
+			cost.OverloadTracker("base64_decode_string", trackDecode),
+			cost.OverloadTracker("base64_encode_bytes", trackEncode),
+			cost.OverloadTracker("json_encode_dyn", trackJSONEncode),
+		}
+		opts = append(opts, cel.CostTrackerOptions(trackers...))
+	}
+	if lib.version >= 2 {
+		trackers := []cost.TrackerOption{
+			cost.OverloadTracker("base64_decode_url_string", trackDecode),
+			cost.OverloadTracker("base64_encode_url_bytes", trackEncode),
 		}
 		opts = append(opts, cel.CostTrackerOptions(trackers...))
 	}
@@ -151,36 +206,51 @@ func base64DecodeString(str string) ([]byte, error) {
 	return nil, err
 }
 
+func base64DecodeUrlString(str string) ([]byte, error) {
+	b, err := base64.URLEncoding.DecodeString(str)
+	if err == nil {
+		return b, nil
+	}
+	if _, tryAltEncoding := err.(base64.CorruptInputError); tryAltEncoding {
+		return base64.RawURLEncoding.DecodeString(str)
+	}
+	return nil, err
+}
+
 func base64EncodeBytes(bytes []byte) (string, error) {
 	return base64.StdEncoding.EncodeToString(bytes), nil
 }
 
-func estimateEncode(estimator checker.CostEstimator, target *checker.AstNode, args []checker.AstNode) *checker.CallEstimate {
+func base64EncodeUrlBytes(bytes []byte) (string, error) {
+	return base64.URLEncoding.EncodeToString(bytes), nil
+}
+
+func estimateEncode(estimator cost.Estimator, target *cost.AstNode, args []cost.AstNode) *cost.CallEstimate {
 	if len(args) != 1 {
 		return nil
 	}
 	sz := estimateSize(estimator, args[0])
-	cost := sz.MultiplyByCostFactor(stringCostFactor).Add(callCostEstimate)
+	estimate := sz.MultiplyByCostFactor(stringCostFactor).Add(callCostEstimate)
 	resSize := estimateEncodeSize(sz)
-	return &checker.CallEstimate{CostEstimate: cost, ResultSize: &resSize}
+	return &cost.CallEstimate{CostEstimate: estimate, ResultSize: &resSize}
 }
 
-func estimateJSONEncode(estimator checker.CostEstimator, target *checker.AstNode, args []checker.AstNode) *checker.CallEstimate {
+func estimateJSONEncode(estimator cost.Estimator, target *cost.AstNode, args []cost.AstNode) *cost.CallEstimate {
 	if len(args) != 1 {
 		return nil
 	}
 	size := estimateJSONEncodeSize()
-	return &checker.CallEstimate{CostEstimate: checker.UnknownCostEstimate(), ResultSize: &size}
+	return &cost.CallEstimate{CostEstimate: cost.UnknownCostEstimate(), ResultSize: &size}
 }
 
-func estimateDecode(estimator checker.CostEstimator, target *checker.AstNode, args []checker.AstNode) *checker.CallEstimate {
+func estimateDecode(estimator cost.Estimator, target *cost.AstNode, args []cost.AstNode) *cost.CallEstimate {
 	if len(args) != 1 {
 		return nil
 	}
 	sz := estimateSize(estimator, args[0])
-	cost := sz.MultiplyByCostFactor(stringCostFactor).Add(callCostEstimate)
+	estimate := sz.MultiplyByCostFactor(stringCostFactor).Add(callCostEstimate)
 	resSize := estimateDecodeSize(sz)
-	return &checker.CallEstimate{CostEstimate: cost, ResultSize: &resSize}
+	return &cost.CallEstimate{CostEstimate: estimate, ResultSize: &resSize}
 }
 
 func trackEncode(args []ref.Val, _ ref.Val) *uint64 {
@@ -200,24 +270,24 @@ func trackDecode(args []ref.Val, _ ref.Val) *uint64 {
 	return &total
 }
 
-func estimateEncodeSize(sz checker.SizeEstimate) checker.SizeEstimate {
+func estimateEncodeSize(sz cost.SizeEstimate) cost.SizeEstimate {
 	minVal := (sz.Min*4 + 2) / 3
 	maxVal := (sz.Max*4 + 2) / 3
 	if sz.Max > math.MaxUint64/4 {
 		maxVal = math.MaxUint64
 	}
-	return checker.SizeEstimate{Min: minVal, Max: maxVal}
+	return cost.SizeEstimate{Min: minVal, Max: maxVal}
 }
 
-func estimateJSONEncodeSize() checker.SizeEstimate {
+func estimateJSONEncodeSize() cost.SizeEstimate {
 	// TODO: provide a more sophisticated size estimate based on the CEL value's type.
-	return checker.UnknownSizeEstimate()
+	return cost.UnknownSizeEstimate()
 }
 
-func estimateDecodeSize(sz checker.SizeEstimate) checker.SizeEstimate {
+func estimateDecodeSize(sz cost.SizeEstimate) cost.SizeEstimate {
 	minVal := sz.Min * 3 / 4
 	maxVal := sz.Max * 3 / 4
-	return checker.SizeEstimate{Min: minVal, Max: maxVal}
+	return cost.SizeEstimate{Min: minVal, Max: maxVal}
 }
 
 func jsonEncodeValue(val ref.Val) (string, error) {
