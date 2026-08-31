@@ -2482,6 +2482,137 @@ func TestInterpreter_PlanMapComprehensionTwoVar(t *testing.T) {
 	}
 }
 
+type testCustomFoldableEntry struct {
+	key ref.Val
+	val ref.Val
+}
+
+type testCustomFoldable struct {
+	entries []testCustomFoldableEntry
+}
+
+func (c *testCustomFoldable) ConvertToNative(typeDesc reflect.Type) (any, error) {
+	return c, nil
+}
+
+func (c *testCustomFoldable) ConvertToType(typeVal ref.Type) ref.Val {
+	return types.NewErr("unsupported type conversion")
+}
+
+func (c *testCustomFoldable) Equal(other ref.Val) ref.Val {
+	return types.Bool(reflect.DeepEqual(c, other))
+}
+
+func (c *testCustomFoldable) Type() ref.Type {
+	return types.NewOpaqueType("custom_foldable")
+}
+
+func (c *testCustomFoldable) Value() any {
+	return c
+}
+
+func (c *testCustomFoldable) Fold(f traits.Folder) {
+	for _, entry := range c.entries {
+		if !f.FoldEntry(entry.key, entry.val) {
+			return
+		}
+	}
+}
+
+func TestInterpreter_PlanCustomFoldableComprehensionTwoVar(t *testing.T) {
+	fac := ast.NewExprFactory()
+	foldableTuples := fac.NewComprehensionTwoVar(1,
+		fac.NewIdent(2, "foldableRange"),
+		"k",
+		"v",
+		fac.AccuIdentName(),
+		fac.NewList(3, []ast.Expr{}, []int32{}),
+		fac.NewLiteral(4, types.True),
+		fac.NewCall(5, operators.Add, fac.NewAccuIdent(6),
+			fac.NewList(7, []ast.Expr{fac.NewIdent(8, "k"), fac.NewIdent(9, "v")}, []int32{})),
+		fac.NewAccuIdent(10),
+	)
+	cont := containers.DefaultContainer
+	reg := newTestRegistry(t)
+	attrs := NewAttributeFactory(cont, reg, reg)
+	interp := newStandardInterpreter(t, cont, reg, reg, attrs)
+	expr, err := interp.NewInterpretable(ast.NewAST(foldableTuples, nil), Optimize())
+	if err != nil {
+		t.Fatalf("interp.NewInterpretable() failed for two-variable comprehension: %v", err)
+	}
+	customRange := &testCustomFoldable{
+		entries: []testCustomFoldableEntry{
+			{key: types.String("first"), val: types.Int(1)},
+			{key: types.String("second"), val: types.Int(2)},
+		},
+	}
+	vars, err := NewActivation(map[string]any{
+		"foldableRange": customRange,
+	})
+	if err != nil {
+		t.Fatalf("NewActivation() failed: %v", err)
+	}
+	result := expr.Eval(vars)
+	if types.IsError(result) {
+		t.Fatalf("expr.Eval() yielded error: %v", result)
+	}
+	want := []any{"first", int64(1), "second", int64(2)}
+	out, err := result.ConvertToNative(reflect.TypeOf(want))
+	if err != nil {
+		t.Fatalf("result.ConvertToNative() failed: %v", err)
+	}
+	if !reflect.DeepEqual(out, want) {
+		t.Errorf("got %v, wanted %v", out, want)
+	}
+}
+
+func TestInterpreter_PlanCustomFoldableComprehensionTwoVar_EarlyTermination(t *testing.T) {
+	fac := ast.NewExprFactory()
+	foldableEarlyTerm := fac.NewComprehensionTwoVar(1,
+		fac.NewIdent(2, "foldableRange"),
+		"k",
+		"v",
+		fac.AccuIdentName(),
+		fac.NewList(3, []ast.Expr{}, []int32{}),
+		fac.NewCall(4, operators.NotEquals, fac.NewIdent(5, "k"), fac.NewLiteral(6, types.String("second"))),
+		fac.NewCall(7, operators.Add, fac.NewAccuIdent(8),
+			fac.NewList(9, []ast.Expr{fac.NewIdent(10, "k"), fac.NewIdent(11, "v")}, []int32{})),
+		fac.NewAccuIdent(12),
+	)
+	cont := containers.DefaultContainer
+	reg := newTestRegistry(t)
+	attrs := NewAttributeFactory(cont, reg, reg)
+	interp := newStandardInterpreter(t, cont, reg, reg, attrs)
+	expr, err := interp.NewInterpretable(ast.NewAST(foldableEarlyTerm, nil), Optimize())
+	if err != nil {
+		t.Fatalf("interp.NewInterpretable() failed for two-variable comprehension: %v", err)
+	}
+	customRange := &testCustomFoldable{
+		entries: []testCustomFoldableEntry{
+			{key: types.String("first"), val: types.Int(1)},
+			{key: types.String("second"), val: types.Int(2)},
+		},
+	}
+	vars, err := NewActivation(map[string]any{
+		"foldableRange": customRange,
+	})
+	if err != nil {
+		t.Fatalf("NewActivation() failed: %v", err)
+	}
+	result := expr.Eval(vars)
+	if types.IsError(result) {
+		t.Fatalf("expr.Eval() yielded error: %v", result)
+	}
+	want := []any{"first", int64(1)}
+	out, err := result.ConvertToNative(reflect.TypeOf(want))
+	if err != nil {
+		t.Fatalf("result.ConvertToNative() failed: %v", err)
+	}
+	if !reflect.DeepEqual(out, want) {
+		t.Errorf("got %v, wanted %v", out, want)
+	}
+}
+
 func testContainer(name string) *containers.Container {
 	cont, _ := containers.NewContainer(containers.Name(name))
 	return cont
