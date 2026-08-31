@@ -21,7 +21,7 @@ import (
 	"testing"
 
 	"cel.dev/cel-go/cel"
-	"cel.dev/cel-go/checker"
+	"cel.dev/cel-go/common/cost"
 	"cel.dev/cel-go/common/types"
 	"cel.dev/cel-go/common/types/ref"
 
@@ -34,7 +34,7 @@ func TestSets(t *testing.T) {
 		vars          []cel.EnvOption
 		in            map[string]any
 		hints         map[string]uint64
-		estimatedCost checker.CostEstimate
+		estimatedCost cost.CostEstimate
 		actualCost    uint64
 	}{
 		// set containment
@@ -45,7 +45,7 @@ func TestSets(t *testing.T) {
 			hints: map[string]uint64{"x": 10},
 			// min cost is input 'x' length 0, 10 for list creation, 2 for arg costs
 			// max cost is input 'x' length 10, 10 for list creation, 2 for arg costs
-			estimatedCost: checker.CostEstimate{Min: 12, Max: 42},
+			estimatedCost: cost.CostEstimate{Min: 12, Max: 42},
 			// actual cost is 'x' length 5 * list literal length 3, 10 for list creation, 2 for arg cost
 			actualCost: 27,
 		},
@@ -55,223 +55,223 @@ func TestSets(t *testing.T) {
 			in:   map[string]any{"x": []int64{5, 4, 3, 2, 1}},
 			// min cost is input 'x' length 0, 10 for list creation, 2 for arg costs
 			// max cost is effectively infinite due to missing size hint for 'x'
-			estimatedCost: checker.CostEstimate{Min: 12, Max: math.MaxUint64},
+			estimatedCost: cost.CostEstimate{Min: 12, Max: math.MaxUint64},
 			// actual cost is 'x' length 5 * list literal length 5, 10 for list creation, 2 for arg cost
 			actualCost: 37,
 		},
 		{
 			expr:          `sets.contains([], [])`,
-			estimatedCost: checker.FixedCostEstimate(21),
+			estimatedCost: cost.FixedCostEstimate(21),
 			actualCost:    21,
 		},
 		{
 			expr:          `sets.contains([1], [])`,
-			estimatedCost: checker.FixedCostEstimate(21),
+			estimatedCost: cost.FixedCostEstimate(21),
 			actualCost:    21,
 		},
 		{
 			expr:          `sets.contains([1], [1])`,
-			estimatedCost: checker.FixedCostEstimate(22),
+			estimatedCost: cost.FixedCostEstimate(22),
 			actualCost:    22,
 		},
 		{
 			expr:          `sets.contains([1], [1, 1])`,
-			estimatedCost: checker.FixedCostEstimate(23),
+			estimatedCost: cost.FixedCostEstimate(23),
 			actualCost:    23,
 		},
 		{
 			expr:          `sets.contains([1, 1], [1])`,
-			estimatedCost: checker.FixedCostEstimate(23),
+			estimatedCost: cost.FixedCostEstimate(23),
 			actualCost:    23,
 		},
 		{
 			expr:          `sets.contains([2, 1], [1])`,
-			estimatedCost: checker.FixedCostEstimate(23),
+			estimatedCost: cost.FixedCostEstimate(23),
 			actualCost:    23,
 		},
 		{
 			expr:          `sets.contains([1, 2, 3, 4], [2, 3])`,
-			estimatedCost: checker.FixedCostEstimate(29),
+			estimatedCost: cost.FixedCostEstimate(29),
 			actualCost:    29,
 		},
 		{
 			expr:          `sets.contains([1], [1.0, 1])`,
-			estimatedCost: checker.FixedCostEstimate(23),
+			estimatedCost: cost.FixedCostEstimate(23),
 			actualCost:    23,
 		},
 		{
 			expr:          `sets.contains([1, 2], [2u, 2.0])`,
-			estimatedCost: checker.FixedCostEstimate(25),
+			estimatedCost: cost.FixedCostEstimate(25),
 			actualCost:    25,
 		},
 		{
 			expr:          `sets.contains([1, 2u], [2, 2.0])`,
-			estimatedCost: checker.FixedCostEstimate(25),
+			estimatedCost: cost.FixedCostEstimate(25),
 			actualCost:    25,
 		},
 		{
 			expr:          `sets.contains([1, 2.0, 3u], [1.0, 2u, 3])`,
-			estimatedCost: checker.FixedCostEstimate(30),
+			estimatedCost: cost.FixedCostEstimate(30),
 			actualCost:    30,
 		},
 		{
 			expr: `sets.contains([[1], [2, 3]], [[2, 3.0]])`,
 			// 10 for each list creation, top-level list sizes are 2, 1
-			estimatedCost: checker.FixedCostEstimate(53),
+			estimatedCost: cost.FixedCostEstimate(53),
 			actualCost:    53,
 		},
 		{
 			expr:          `!sets.contains([1], [2])`,
-			estimatedCost: checker.FixedCostEstimate(23),
+			estimatedCost: cost.FixedCostEstimate(23),
 			actualCost:    23,
 		},
 		{
 			expr:          `!sets.contains([1], [1, 2])`,
-			estimatedCost: checker.FixedCostEstimate(24),
+			estimatedCost: cost.FixedCostEstimate(24),
 			actualCost:    24,
 		},
 		{
 			expr:          `!sets.contains([1], ["1", 1])`,
-			estimatedCost: checker.FixedCostEstimate(24),
+			estimatedCost: cost.FixedCostEstimate(24),
 			actualCost:    24,
 		},
 		{
 			expr:          `!sets.contains([1], [1.1, 1u])`,
-			estimatedCost: checker.FixedCostEstimate(24),
+			estimatedCost: cost.FixedCostEstimate(24),
 			actualCost:    24,
 		},
 
 		// set equivalence (note the cost factor is higher as it's basically two contains checks)
 		{
 			expr:          `sets.equivalent([], [])`,
-			estimatedCost: checker.FixedCostEstimate(21),
+			estimatedCost: cost.FixedCostEstimate(21),
 			actualCost:    21,
 		},
 		{
 			expr:          `sets.equivalent([1], [1])`,
-			estimatedCost: checker.FixedCostEstimate(23),
+			estimatedCost: cost.FixedCostEstimate(23),
 			actualCost:    23,
 		},
 		{
 			expr:          `sets.equivalent([1], [1, 1])`,
-			estimatedCost: checker.FixedCostEstimate(25),
+			estimatedCost: cost.FixedCostEstimate(25),
 			actualCost:    25,
 		},
 		{
 			expr:          `sets.equivalent([1, 1], [1])`,
-			estimatedCost: checker.FixedCostEstimate(25),
+			estimatedCost: cost.FixedCostEstimate(25),
 			actualCost:    25,
 		},
 		{
 			expr:          `sets.equivalent([1], [1u, 1.0])`,
-			estimatedCost: checker.FixedCostEstimate(25),
+			estimatedCost: cost.FixedCostEstimate(25),
 			actualCost:    25,
 		},
 		{
 			expr:          `sets.equivalent([1], [1u, 1.0])`,
-			estimatedCost: checker.FixedCostEstimate(25),
+			estimatedCost: cost.FixedCostEstimate(25),
 			actualCost:    25,
 		},
 		{
 			expr:          `sets.equivalent([1, 2, 3], [3u, 2.0, 1])`,
-			estimatedCost: checker.FixedCostEstimate(39),
+			estimatedCost: cost.FixedCostEstimate(39),
 			actualCost:    39,
 		},
 		{
 			expr:          `sets.equivalent([[1.0], [2, 3]], [[1], [2, 3.0]])`,
-			estimatedCost: checker.FixedCostEstimate(69),
+			estimatedCost: cost.FixedCostEstimate(69),
 			actualCost:    69,
 		},
 		{
 			expr:          `!sets.equivalent([2, 1], [1])`,
-			estimatedCost: checker.FixedCostEstimate(26),
+			estimatedCost: cost.FixedCostEstimate(26),
 			actualCost:    26,
 		},
 		{
 			expr:          `!sets.equivalent([1], [1, 2])`,
-			estimatedCost: checker.FixedCostEstimate(26),
+			estimatedCost: cost.FixedCostEstimate(26),
 			actualCost:    26,
 		},
 		{
 			expr:          `!sets.equivalent([1, 2], [2u, 2, 2.0])`,
-			estimatedCost: checker.FixedCostEstimate(34),
+			estimatedCost: cost.FixedCostEstimate(34),
 			actualCost:    34,
 		},
 		{
 			expr:          `!sets.equivalent([1, 2], [1u, 2, 2.3])`,
-			estimatedCost: checker.FixedCostEstimate(34),
+			estimatedCost: cost.FixedCostEstimate(34),
 			actualCost:    34,
 		},
 
 		// set intersection
 		{
 			expr:          `sets.intersects([1], [1])`,
-			estimatedCost: checker.FixedCostEstimate(22),
+			estimatedCost: cost.FixedCostEstimate(22),
 			actualCost:    22,
 		},
 		{
 			expr:          `sets.intersects([1], [1, 1])`,
-			estimatedCost: checker.FixedCostEstimate(23),
+			estimatedCost: cost.FixedCostEstimate(23),
 			actualCost:    23,
 		},
 		{
 			expr:          `sets.intersects([1, 1], [1])`,
-			estimatedCost: checker.FixedCostEstimate(23),
+			estimatedCost: cost.FixedCostEstimate(23),
 			actualCost:    23,
 		},
 		{
 			expr:          `sets.intersects([2, 1], [1])`,
-			estimatedCost: checker.FixedCostEstimate(23),
+			estimatedCost: cost.FixedCostEstimate(23),
 			actualCost:    23,
 		},
 		{
 			expr:          `sets.intersects([1], [1, 2])`,
-			estimatedCost: checker.FixedCostEstimate(23),
+			estimatedCost: cost.FixedCostEstimate(23),
 			actualCost:    23,
 		},
 		{
 			expr:          `sets.intersects([1], [1.0, 2])`,
-			estimatedCost: checker.FixedCostEstimate(23),
+			estimatedCost: cost.FixedCostEstimate(23),
 			actualCost:    23,
 		},
 		{
 			expr:          `sets.intersects([1, 2], [2u, 2, 2.0])`,
-			estimatedCost: checker.FixedCostEstimate(27),
+			estimatedCost: cost.FixedCostEstimate(27),
 			actualCost:    27,
 		},
 		{
 			expr:          `sets.intersects([1, 2], [1u, 2, 2.3])`,
-			estimatedCost: checker.FixedCostEstimate(27),
+			estimatedCost: cost.FixedCostEstimate(27),
 			actualCost:    27,
 		},
 		{
 			expr:          `sets.intersects([[1], [2, 3]], [[1, 2], [2, 3.0]])`,
-			estimatedCost: checker.FixedCostEstimate(65),
+			estimatedCost: cost.FixedCostEstimate(65),
 			actualCost:    65,
 		},
 		{
 			expr:          `!sets.intersects([], [])`,
-			estimatedCost: checker.FixedCostEstimate(22),
+			estimatedCost: cost.FixedCostEstimate(22),
 			actualCost:    22,
 		},
 		{
 			expr:          `!sets.intersects([1], [])`,
-			estimatedCost: checker.FixedCostEstimate(22),
+			estimatedCost: cost.FixedCostEstimate(22),
 			actualCost:    22,
 		},
 		{
 			expr:          `!sets.intersects([1], [2])`,
-			estimatedCost: checker.FixedCostEstimate(23),
+			estimatedCost: cost.FixedCostEstimate(23),
 			actualCost:    23,
 		},
 		{
 			expr:          `!sets.intersects([1], ["1", 2])`,
-			estimatedCost: checker.FixedCostEstimate(24),
+			estimatedCost: cost.FixedCostEstimate(24),
 			actualCost:    24,
 		},
 		{
 			expr:          `!sets.intersects([1], [1.1, 2u])`,
-			estimatedCost: checker.FixedCostEstimate(24),
+			estimatedCost: cost.FixedCostEstimate(24),
 			actualCost:    24,
 		},
 	}
@@ -485,7 +485,7 @@ func testSetsEnv(t *testing.T, opts ...cel.EnvOption) *cel.Env {
 	return env
 }
 
-func testCheckCost(t *testing.T, env *cel.Env, ast *cel.Ast, hints map[string]uint64, wantEst checker.CostEstimate) {
+func testCheckCost(t *testing.T, env *cel.Env, ast *cel.Ast, hints map[string]uint64, wantEst cost.CostEstimate) {
 	t.Helper()
 	if len(hints) == 0 {
 		hints = map[string]uint64{}
@@ -528,13 +528,13 @@ type testCostHintEstimator struct {
 	hints map[string]uint64
 }
 
-func (tc testCostHintEstimator) EstimateSize(element checker.AstNode) *checker.SizeEstimate {
+func (tc testCostHintEstimator) EstimateSize(element cost.AstNode) *cost.SizeEstimate {
 	if l, ok := tc.hints[strings.Join(element.Path(), ".")]; ok {
-		return &checker.SizeEstimate{Min: 0, Max: l}
+		return &cost.SizeEstimate{Min: 0, Max: l}
 	}
 	return nil
 }
 
-func (testCostHintEstimator) EstimateCallCost(function, overloadID string, target *checker.AstNode, args []checker.AstNode) *checker.CallEstimate {
+func (testCostHintEstimator) EstimateCallCost(function, overloadID string, target *cost.AstNode, args []cost.AstNode) *cost.CallEstimate {
 	return nil
 }
