@@ -20,7 +20,7 @@ import (
 	"testing"
 
 	"cel.dev/cel-go/cel"
-	"cel.dev/cel-go/checker"
+	"cel.dev/cel-go/common/cost"
 	"cel.dev/cel-go/common/types"
 )
 
@@ -695,7 +695,7 @@ func TestMathCosts(t *testing.T) {
 		vars          []cel.EnvOption
 		in            map[string]any
 		hints         map[string]uint64
-		estimatedCost checker.CostEstimate
+		estimatedCost cost.CostEstimate
 		actualCost    uint64
 		version       int
 	}{
@@ -711,7 +711,7 @@ func TestMathCosts(t *testing.T) {
 			hints: map[string]uint64{
 				"x": 10,
 			},
-			estimatedCost: checker.CostEstimate{Min: 3, Max: 3},
+			estimatedCost: cost.CostEstimate{Min: 3, Max: 3},
 			actualCost:    3,
 			version:       2,
 		},
@@ -727,7 +727,7 @@ func TestMathCosts(t *testing.T) {
 			hints: map[string]uint64{
 				"x": 10,
 			},
-			estimatedCost: checker.CostEstimate{Min: 3, Max: 13},
+			estimatedCost: cost.CostEstimate{Min: 3, Max: 13},
 			actualCost:    8,
 			version:       3,
 		},
@@ -743,7 +743,7 @@ func TestMathCosts(t *testing.T) {
 			hints: map[string]uint64{
 				"x": 100,
 			},
-			estimatedCost: checker.CostEstimate{Min: 3, Max: 3},
+			estimatedCost: cost.CostEstimate{Min: 3, Max: 3},
 			actualCost:    3,
 			version:       2,
 		},
@@ -759,7 +759,7 @@ func TestMathCosts(t *testing.T) {
 			hints: map[string]uint64{
 				"x": 100,
 			},
-			estimatedCost: checker.CostEstimate{Min: 3, Max: 103},
+			estimatedCost: cost.CostEstimate{Min: 3, Max: 103},
 			actualCost:    6,
 			version:       3,
 		},
