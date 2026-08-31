@@ -46,7 +46,7 @@ type EstimateContext interface {
 	// Estimator returns the user-provided Estimator, if configured.
 	Estimator() Estimator
 
-	// Size returns the estimated size of the node (delegating to SizingStrategy if present).
+	// Size returns the estimated size based on the SizingStrategy configured on the Estimator.
 	Size(node AstNode) SizeEstimate
 }
 
