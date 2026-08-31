@@ -23,8 +23,10 @@ import (
 
 // TypeContext provides type information for AST nodes.
 type TypeContext interface {
+	// TargetType returns the deduced type of the receiver/target object, if present.
 	TargetType() (*types.Type, bool)
 
+	// ArgType returns the deduced type of the argument at the given 0-based index.
 	ArgType(index int) (*types.Type, bool)
 }
 
@@ -74,10 +76,12 @@ type QuantityExpr interface {
 	track(ctx TrackContext) uint64
 }
 
+// targetInspector is an internal interface for expressions that inspect receiver/target presence.
 type targetInspector interface {
 	hasTarget() bool
 }
 
+// hasTarget returns true if the expression or any of its subexpressions references the target object.
 func hasTarget(expr QuantityExpr) bool {
 	if expr == nil {
 		return false
@@ -88,6 +92,7 @@ func hasTarget(expr QuantityExpr) bool {
 	return false
 }
 
+// constExpr represents a constant integer quantity.
 type constExpr struct {
 	val uint64
 }
@@ -107,6 +112,7 @@ func Const(val uint64) QuantityExpr {
 	return constExpr{val: val}
 }
 
+// argExpr represents the size of a function argument.
 type argExpr struct {
 	index int
 }
@@ -129,50 +135,17 @@ func Arg(index int) QuantityExpr {
 	return argExpr{index: index}
 }
 
-type argElemExpr struct {
-	index int
-}
-
-func (a argElemExpr) estimate(ctx EstimateContext) SizeEstimate {
-	if sz, ok := ctx.Arg(a.index); ok && sz.Elem != nil {
-		return *sz.Elem
-	}
-	return UnknownSizeEstimate()
-}
-
-func (a argElemExpr) track(ctx TrackContext) uint64 {
-	return 0
-}
-
-func (argElemExpr) hasTarget() bool { return false }
-
 // ArgElem creates an expression referencing the element size of the argument at the given index.
 func ArgElem(index int) QuantityExpr {
-	return argElemExpr{index: index}
+	return ElemOf(Arg(index))
 }
-
-type argKeyExpr struct {
-	index int
-}
-
-func (a argKeyExpr) estimate(ctx EstimateContext) SizeEstimate {
-	if sz, ok := ctx.Arg(a.index); ok && sz.Key != nil {
-		return *sz.Key
-	}
-	return FixedSizeEstimate(1)
-}
-
-func (a argKeyExpr) track(ctx TrackContext) uint64 {
-	return 1
-}
-
-func (argKeyExpr) hasTarget() bool { return false }
 
 // ArgKey creates an expression referencing the key size of the argument at the given index.
 func ArgKey(index int) QuantityExpr {
-	return argKeyExpr{index: index}
+	return KeyOf(Arg(index))
 }
 
+// targetExpr represents the size of the receiver/target object.
 type targetExpr struct{}
 
 func (targetExpr) estimate(ctx EstimateContext) SizeEstimate {
@@ -193,26 +166,12 @@ func Target() QuantityExpr {
 	return targetExpr{}
 }
 
-type targetElemExpr struct{}
-
-func (targetElemExpr) estimate(ctx EstimateContext) SizeEstimate {
-	if sz, ok := ctx.Target(); ok && sz.Elem != nil {
-		return *sz.Elem
-	}
-	return UnknownSizeEstimate()
-}
-
-func (targetElemExpr) track(ctx TrackContext) uint64 {
-	return 0
-}
-
-func (targetElemExpr) hasTarget() bool { return true }
-
 // TargetElem creates an expression referencing the element size of the receiver / target object.
 func TargetElem() QuantityExpr {
-	return targetElemExpr{}
+	return ElemOf(Target())
 }
 
+// elemExpr represents the element size of another quantity expression.
 type elemExpr struct {
 	expr QuantityExpr
 }
@@ -238,26 +197,12 @@ func ElemOf(expr QuantityExpr) QuantityExpr {
 	return elemExpr{expr: expr}
 }
 
-type targetKeyExpr struct{}
-
-func (targetKeyExpr) estimate(ctx EstimateContext) SizeEstimate {
-	if sz, ok := ctx.Target(); ok && sz.Key != nil {
-		return *sz.Key
-	}
-	return FixedSizeEstimate(1)
-}
-
-func (targetKeyExpr) track(ctx TrackContext) uint64 {
-	return 1
-}
-
-func (targetKeyExpr) hasTarget() bool { return true }
-
 // TargetKey creates an expression referencing the key size of the receiver / target object.
 func TargetKey() QuantityExpr {
-	return targetKeyExpr{}
+	return KeyOf(Target())
 }
 
+// keyExpr represents the key size of another quantity expression.
 type keyExpr struct {
 	expr QuantityExpr
 }
@@ -283,6 +228,7 @@ func KeyOf(expr QuantityExpr) QuantityExpr {
 	return keyExpr{expr: expr}
 }
 
+// resultExpr represents the size of the evaluated result.
 type resultExpr struct{}
 
 func (resultExpr) estimate(ctx EstimateContext) SizeEstimate {
@@ -303,6 +249,7 @@ func Result() QuantityExpr {
 	return resultExpr{}
 }
 
+// addExpr represents the sum of multiple quantity expressions.
 type addExpr struct {
 	terms []QuantityExpr
 }
@@ -371,6 +318,7 @@ func Mul(terms ...QuantityExpr) QuantityExpr {
 	return mulExpr{terms: terms}
 }
 
+// scaleExpr represents an expression scaled by a factor function.
 type scaleExpr struct {
 	expr    QuantityExpr
 	scaleBy ScaleFn
@@ -420,25 +368,30 @@ func ArgTypeScale(index int, scaler func(targetType *types.Type) float64) ScaleF
 	}
 }
 
+// containerElemType extracts the element type from a parameterized container (List, Map value, or Opaque).
+func containerElemType(t *types.Type) *types.Type {
+	if t == nil || len(t.Parameters()) == 0 {
+		return nil
+	}
+	switch t.Kind() {
+	case types.ListKind, types.OpaqueKind:
+		return t.Parameters()[0]
+	case types.MapKind:
+		if len(t.Parameters()) >= 2 {
+			return t.Parameters()[1]
+		}
+	}
+	return nil
+}
+
 // ArgElemTypeScale returns a scale factor based on the element type of the i-th argument.
 func ArgElemTypeScale(index int, scaler func(elemType *types.Type) float64) ScaleFn {
 	return func(ctx TypeContext) float64 {
 		t, ok := ctx.ArgType(index)
-		if !ok || t == nil {
+		if !ok {
 			return scaler(nil)
 		}
-		if len(t.Parameters()) == 0 {
-			return scaler(nil)
-		}
-		switch t.Kind() {
-		case types.ListKind, types.OpaqueKind:
-			elem := t.Parameters()[0]
-			return scaler(elem)
-		case types.MapKind:
-			elem := t.Parameters()[1]
-			return scaler(elem)
-		}
-		return scaler(nil)
+		return scaler(containerElemType(t))
 	}
 }
 
@@ -457,21 +410,10 @@ func TargetTypeScale(scaler func(targetType *types.Type) float64) ScaleFn {
 func TargetElemTypeScale(scaler func(*types.Type) float64) ScaleFn {
 	return func(ctx TypeContext) float64 {
 		t, ok := ctx.TargetType()
-		if !ok || t == nil {
+		if !ok {
 			return scaler(nil)
 		}
-		if len(t.Parameters()) == 0 {
-			return scaler(nil)
-		}
-		switch t.Kind() {
-		case types.ListKind, types.OpaqueKind:
-			elem := t.Parameters()[0]
-			return scaler(elem)
-		case types.MapKind:
-			elem := t.Parameters()[1]
-			return scaler(elem)
-		}
-		return scaler(nil)
+		return scaler(containerElemType(t))
 	}
 }
 
@@ -480,6 +422,7 @@ func Square(expr QuantityExpr) QuantityExpr {
 	return Mul(expr, expr)
 }
 
+// minExpr represents the minimum of two quantity expressions.
 type minExpr struct {
 	lhs, rhs QuantityExpr
 }
@@ -508,6 +451,7 @@ func Min(lhs, rhs QuantityExpr) QuantityExpr {
 	return minExpr{lhs: lhs, rhs: rhs}
 }
 
+// maxExpr represents the maximum of two quantity expressions.
 type maxExpr struct {
 	lhs, rhs QuantityExpr
 }
@@ -534,6 +478,7 @@ func Max(lhs, rhs QuantityExpr) QuantityExpr {
 	return maxExpr{lhs: lhs, rhs: rhs}
 }
 
+// unionExpr represents the union interval of multiple quantity expressions.
 type unionExpr struct {
 	terms []QuantityExpr
 }
@@ -566,6 +511,7 @@ func Union(terms ...QuantityExpr) QuantityExpr {
 	return unionExpr{terms: terms}
 }
 
+// intersectExpr represents the intersection interval of multiple quantity expressions.
 type intersectExpr struct {
 	terms []QuantityExpr
 }
@@ -607,6 +553,7 @@ func Intersect(terms ...QuantityExpr) QuantityExpr {
 	return intersectExpr{terms: terms}
 }
 
+// rangedExpr represents a quantity bounded by minExpr on the bottom and maxExpr on top.
 type rangedExpr struct {
 	minExpr QuantityExpr
 	maxExpr QuantityExpr
@@ -639,6 +586,7 @@ func AtMost(maxExpr QuantityExpr) QuantityExpr {
 	return Ranged(Const(0), maxExpr)
 }
 
+// listExpr represents a list size estimate composed of length and element size expressions.
 type listExpr struct {
 	lenExpr  QuantityExpr
 	elemExpr QuantityExpr
@@ -664,6 +612,7 @@ func List(lenExpr, elemExpr QuantityExpr) QuantityExpr {
 	return listExpr{lenExpr: lenExpr, elemExpr: elemExpr}
 }
 
+// mapExpr represents a map size estimate composed of size, key size, and value size expressions.
 type mapExpr struct {
 	sizeExpr QuantityExpr
 	keyExpr  QuantityExpr
@@ -788,6 +737,7 @@ func (m OverloadModel) FunctionTrackerWithOptions(strategy SizingStrategy) Funct
 	}
 }
 
+// estimatorEvalContext provides evaluation context for cost estimation.
 type estimatorEvalContext struct {
 	estimator Estimator
 	strategy  SizingStrategy
@@ -796,6 +746,7 @@ type estimatorEvalContext struct {
 	hasTarget bool
 }
 
+// Arg returns the size estimate for the argument at index.
 func (e *estimatorEvalContext) Arg(index int) (SizeEstimate, bool) {
 	if index < len(e.args) {
 		return e.Size(e.args[index]), true
@@ -803,6 +754,7 @@ func (e *estimatorEvalContext) Arg(index int) (SizeEstimate, bool) {
 	return UnknownSizeEstimate(), false
 }
 
+// Target returns the size estimate for the receiver/target object.
 func (e *estimatorEvalContext) Target() (SizeEstimate, bool) {
 	if e.target != nil {
 		return e.Size(*e.target), true
@@ -810,14 +762,17 @@ func (e *estimatorEvalContext) Target() (SizeEstimate, bool) {
 	return UnknownSizeEstimate(), false
 }
 
+// Result returns the size estimate of the result.
 func (e *estimatorEvalContext) Result() (SizeEstimate, bool) {
 	return UnknownSizeEstimate(), false
 }
 
+// Estimator returns the underlying Estimator.
 func (e *estimatorEvalContext) Estimator() Estimator {
 	return e.estimator
 }
 
+// Size returns the estimated size of an AST node.
 func (e *estimatorEvalContext) Size(node AstNode) SizeEstimate {
 	if node == nil {
 		return UnknownSizeEstimate()
@@ -838,6 +793,7 @@ func (e *estimatorEvalContext) Size(node AstNode) SizeEstimate {
 	return UnknownSizeEstimate()
 }
 
+// TargetType returns the type of the receiver/target object.
 func (e *estimatorEvalContext) TargetType() (*types.Type, bool) {
 	if e.target != nil && (*e.target) != nil {
 		return (*e.target).Type(), true
@@ -845,6 +801,7 @@ func (e *estimatorEvalContext) TargetType() (*types.Type, bool) {
 	return nil, false
 }
 
+// ArgType returns the type of the argument at index.
 func (e *estimatorEvalContext) ArgType(index int) (*types.Type, bool) {
 	if index < len(e.args) && e.args[index] != nil {
 		return e.args[index].Type(), true
@@ -852,6 +809,7 @@ func (e *estimatorEvalContext) ArgType(index int) (*types.Type, bool) {
 	return nil, false
 }
 
+// trackerEvalContext provides evaluation context for runtime cost tracking.
 type trackerEvalContext struct {
 	estimator ActualCostEstimator
 	strategy  SizingStrategy
@@ -860,6 +818,7 @@ type trackerEvalContext struct {
 	isMember  bool
 }
 
+// TargetType returns the type of the receiver/target object.
 func (t *trackerEvalContext) TargetType() (*types.Type, bool) {
 	if t.isMember && len(t.args) > 0 && t.args[0] != nil {
 		if tp, ok := t.args[0].Type().(*types.Type); ok {
@@ -869,6 +828,7 @@ func (t *trackerEvalContext) TargetType() (*types.Type, bool) {
 	return nil, false
 }
 
+// ArgType returns the type of the argument at index.
 func (t *trackerEvalContext) ArgType(index int) (*types.Type, bool) {
 	idx := index
 	if t.isMember {
@@ -882,10 +842,12 @@ func (t *trackerEvalContext) ArgType(index int) (*types.Type, bool) {
 	return nil, false
 }
 
+// Estimator returns the runtime ActualCostEstimator.
 func (t *trackerEvalContext) Estimator() ActualCostEstimator {
 	return t.estimator
 }
 
+// Size returns the actual runtime size of a value.
 func (t *trackerEvalContext) Size(value ref.Val) uint64 {
 	if value == nil {
 		return 0
@@ -898,6 +860,7 @@ func (t *trackerEvalContext) Size(value ref.Val) uint64 {
 	return ActualSize(value)
 }
 
+// Arg returns the runtime size of the argument at index.
 func (t *trackerEvalContext) Arg(index int) uint64 {
 	idx := index
 	if t.isMember {
@@ -909,6 +872,7 @@ func (t *trackerEvalContext) Arg(index int) uint64 {
 	return 0
 }
 
+// Target returns the runtime size of the receiver/target object.
 func (t *trackerEvalContext) Target() uint64 {
 	if t.isMember && len(t.args) > 0 {
 		return t.Size(t.args[0])
@@ -916,6 +880,7 @@ func (t *trackerEvalContext) Target() uint64 {
 	return 0
 }
 
+// Result returns the runtime size of the result.
 func (t *trackerEvalContext) Result() uint64 {
 	if t.result != nil {
 		return t.Size(t.result)

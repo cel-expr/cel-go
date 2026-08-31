@@ -28,8 +28,10 @@ func DefaultSizingStrategy() SizingStrategy {
 	return defaultSizing
 }
 
+// defaultSizingStrategy is the default implementation of SizingStrategy.
 type defaultSizingStrategy struct{}
 
+// EstimateSize computes the size estimate for an AST node during cost estimation.
 func (defaultSizingStrategy) EstimateSize(ctx EstimateContext, node AstNode) (SizeEstimate, bool) {
 	if node == nil {
 		return SizeEstimate{}, false
@@ -50,6 +52,7 @@ func (defaultSizingStrategy) EstimateSize(ctx EstimateContext, node AstNode) (Si
 	}
 }
 
+// estimateDefaultListSize calculates the size and element size of a list AST node.
 func estimateDefaultListSize(ctx EstimateContext, node AstNode) (SizeEstimate, bool) {
 	elemType := listElemType(node.Type())
 	listSize, elemSize := estimateListExpr(ctx, node, elemType)
@@ -58,18 +61,12 @@ func estimateDefaultListSize(ctx EstimateContext, node AstNode) (SizeEstimate, b
 		listSize = ctx.Estimator().EstimateSize(node)
 	}
 	if elemSize == nil {
-		if len(node.Path()) > 0 && ctx != nil && ctx.Estimator() != nil {
-			elemPath := append(slices.Clone(node.Path()), "@items")
-			elemNode := NewAstNode(nil, elemPath, elemType, nil)
-			elemSize = ctx.Estimator().EstimateSize(elemNode)
-		}
-		if elemSize == nil {
-			elemSize = computeTypeSize(elemType)
-		}
+		elemSize = estimateSubpath(ctx, node.Path(), "@items", elemType)
 	}
 	return combineListSize(listSize, elemSize)
 }
 
+// estimateDefaultMapSize calculates the size, key size, and value size of a map AST node.
 func estimateDefaultMapSize(ctx EstimateContext, node AstNode) (SizeEstimate, bool) {
 	keyType, valType := mapKeyValueTypes(node.Type())
 	mapSize, keySize, valSize := estimateMapExpr(ctx, node, keyType, valType)
@@ -77,25 +74,28 @@ func estimateDefaultMapSize(ctx EstimateContext, node AstNode) (SizeEstimate, bo
 	if mapSize == nil && ctx != nil && ctx.Estimator() != nil {
 		mapSize = ctx.Estimator().EstimateSize(node)
 	}
-	if len(node.Path()) > 0 && ctx != nil && ctx.Estimator() != nil {
-		if keySize == nil {
-			kPath := append(slices.Clone(node.Path()), "@keys")
-			keySize = ctx.Estimator().EstimateSize(NewAstNode(nil, kPath, keyType, nil))
-		}
-		if valSize == nil {
-			vPath := append(slices.Clone(node.Path()), "@values")
-			valSize = ctx.Estimator().EstimateSize(NewAstNode(nil, vPath, valType, nil))
-		}
-	}
 	if keySize == nil {
-		keySize = computeTypeSize(keyType)
+		keySize = estimateSubpath(ctx, node.Path(), "@keys", keyType)
 	}
 	if valSize == nil {
-		valSize = computeTypeSize(valType)
+		valSize = estimateSubpath(ctx, node.Path(), "@values", valType)
 	}
 	return combineMapSize(mapSize, keySize, valSize)
 }
 
+// estimateSubpath attempts to estimate the size of a nested child node by path, falling back to primitive type size.
+func estimateSubpath(ctx EstimateContext, basePath []string, subpath string, t *types.Type) *SizeEstimate {
+	if len(basePath) > 0 && ctx != nil && ctx.Estimator() != nil {
+		childPath := append(slices.Clone(basePath), subpath)
+		childNode := NewAstNode(nil, childPath, t, nil)
+		if sz := ctx.Estimator().EstimateSize(childNode); sz != nil {
+			return sz
+		}
+	}
+	return computeTypeSize(t)
+}
+
+// TrackSize computes the actual runtime size of a value.
 func (defaultSizingStrategy) TrackSize(ctx TrackContext, value ref.Val) (uint64, bool) {
 	if value == nil {
 		return 0, false
@@ -122,6 +122,25 @@ func mapKeyValueTypes(t *types.Type) (keyType, valType *types.Type) {
 	return keyType, valType
 }
 
+// unionAccumulator merges a new size estimate into an existing accumulator pointer.
+func unionAccumulator(acc *SizeEstimate, next SizeEstimate) *SizeEstimate {
+	if acc == nil {
+		return &next
+	}
+	u := acc.Union(next)
+	return &u
+}
+
+// estimateConditionalSize computes the union SizeEstimate of the branches in a conditional call.
+func estimateConditionalSize(ctx EstimateContext, nodeType *types.Type, args []ast.Expr) (SizeEstimate, bool) {
+	if len(args) == 3 {
+		tVal := ctx.Size(NewAstNode(args[1], nil, nodeType, nil))
+		fVal := ctx.Size(NewAstNode(args[2], nil, nodeType, nil))
+		return tVal.Union(fVal), true
+	}
+	return SizeEstimate{}, false
+}
+
 // estimateListExpr computes the list and element size estimates for literal list expressions
 // or container call operations (e.g. Add, Conditional).
 func estimateListExpr(ctx EstimateContext, node AstNode, elemType *types.Type) (listSize *SizeEstimate, elemSize *SizeEstimate) {
@@ -135,13 +154,7 @@ func estimateListExpr(ctx EstimateContext, node AstNode, elemType *types.Type) (
 		listSize = &l
 		for _, elem := range elements {
 			elemNode := NewAstNode(elem, nil, elemType, nil)
-			sz := ctx.Size(elemNode)
-			if elemSize == nil {
-				elemSize = &sz
-			} else {
-				u := elemSize.Union(sz)
-				elemSize = &u
-			}
+			elemSize = unionAccumulator(elemSize, ctx.Size(elemNode))
 		}
 	case ast.CallKind:
 		call := node.Expr().AsCall()
@@ -156,10 +169,7 @@ func estimateListExpr(ctx EstimateContext, node AstNode, elemType *types.Type) (
 				elemSize = added.Elem
 			}
 		case operators.Conditional:
-			if len(args) == 3 {
-				tVal := ctx.Size(NewAstNode(args[1], nil, node.Type(), nil))
-				fVal := ctx.Size(NewAstNode(args[2], nil, node.Type(), nil))
-				u := tVal.Union(fVal)
+			if u, ok := estimateConditionalSize(ctx, node.Type(), args); ok {
 				listSize = &u
 				elemSize = u.Elem
 			}
@@ -183,31 +193,17 @@ func estimateMapExpr(ctx EstimateContext, node AstNode, keyType, valType *types.
 			mapEntry := entry.AsMapEntry()
 			kNode := NewAstNode(mapEntry.Key(), nil, keyType, nil)
 			vNode := NewAstNode(mapEntry.Value(), nil, valType, nil)
-			kSz := ctx.Size(kNode)
-			vSz := ctx.Size(vNode)
-			if keySize == nil {
-				keySize = &kSz
-			} else {
-				u := keySize.Union(kSz)
-				keySize = &u
-			}
-			if valSize == nil {
-				valSize = &vSz
-			} else {
-				u := valSize.Union(vSz)
-				valSize = &u
-			}
+			keySize = unionAccumulator(keySize, ctx.Size(kNode))
+			valSize = unionAccumulator(valSize, ctx.Size(vNode))
 		}
 	case ast.CallKind:
 		call := node.Expr().AsCall()
-		args := call.Args()
-		if call.FunctionName() == operators.Conditional && len(args) == 3 {
-			tVal := ctx.Size(NewAstNode(args[1], nil, node.Type(), nil))
-			fVal := ctx.Size(NewAstNode(args[2], nil, node.Type(), nil))
-			u := tVal.Union(fVal)
-			mapSize = &u
-			keySize = u.Key
-			valSize = u.Elem
+		if call.FunctionName() == operators.Conditional {
+			if u, ok := estimateConditionalSize(ctx, node.Type(), call.Args()); ok {
+				mapSize = &u
+				keySize = u.Key
+				valSize = u.Elem
+			}
 		}
 	}
 	return mapSize, keySize, valSize

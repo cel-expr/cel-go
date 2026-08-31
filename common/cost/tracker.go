@@ -35,7 +35,10 @@ type FunctionTracker func(args []ref.Val, result ref.Val) *uint64
 
 // Call represents an invocable function with a name and overload ID.
 type Call interface {
+	// Function returns the name of the function being called.
 	Function() string
+
+	// OverloadID returns the specific overload ID being invoked.
 	OverloadID() string
 }
 
@@ -84,6 +87,7 @@ type LimitExceededError struct {
 	Message string
 }
 
+// Error returns the error message for LimitExceededError.
 func (e LimitExceededError) Error() string {
 	return e.Message
 }
@@ -170,18 +174,21 @@ func (c *Tracker) Qualify(id int64) {
 	c.checkLimit()
 }
 
+func (c *Tracker) recordCallCost(call Call, args []ref.Val, result ref.Val) {
+	c.cost = SafeAdd(c.cost, c.CostCall(call, args, result))
+	c.checkLimit()
+}
+
 // EvalZeroArity records the cost for a 0-arity call expression.
 func (c *Tracker) EvalZeroArity(vars any, id int64, call Call, result ref.Val) {
-	c.cost = SafeAdd(c.cost, c.CostCall(call, nil, result))
-	c.checkLimit()
+	c.recordCallCost(call, nil, result)
 }
 
 // EvalUnary records the cost for a unary call expression.
 func (c *Tracker) EvalUnary(vars any, id int64, call Call, arg ref.Val, result ref.Val) {
 	var buf [1]ref.Val
 	buf[0] = arg
-	c.cost = SafeAdd(c.cost, c.CostCall(call, buf[:], result))
-	c.checkLimit()
+	c.recordCallCost(call, buf[:], result)
 }
 
 // EvalBinary records the cost for a binary call expression.
@@ -189,14 +196,12 @@ func (c *Tracker) EvalBinary(vars any, id int64, call Call, lhs, rhs ref.Val, re
 	var buf [2]ref.Val
 	buf[0] = lhs
 	buf[1] = rhs
-	c.cost = SafeAdd(c.cost, c.CostCall(call, buf[:], result))
-	c.checkLimit()
+	c.recordCallCost(call, buf[:], result)
 }
 
 // EvalVarArgs records the cost for a variadic call expression.
 func (c *Tracker) EvalVarArgs(vars any, id int64, call Call, args []ref.Val, result ref.Val) {
-	c.cost = SafeAdd(c.cost, c.CostCall(call, args, result))
-	c.checkLimit()
+	c.recordCallCost(call, args, result)
 }
 
 func (c *Tracker) checkLimit() {

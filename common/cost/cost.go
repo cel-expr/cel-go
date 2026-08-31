@@ -125,12 +125,16 @@ func SafeCeil(x float64) uint64 {
 
 // SizeEstimate represents an estimated size of a variable length string, bytes, map or list.
 type SizeEstimate struct {
-	Min, Max uint64
+	// Min is the minimum estimated size (inclusive).
+	Min uint64
 
-	// Key indicates the estimated size of a key, set if the size estimate is for a map
+	// Max is the maximum estimated size (inclusive).
+	Max uint64
+
+	// Key indicates the estimated size of a key, set if the size estimate is for a map.
 	Key *SizeEstimate
 
-	// Elem indicates the estimated size of a value, set if size estimate is for a map or list
+	// Elem indicates the estimated size of a value, set if size estimate is for a map or list.
 	Elem *SizeEstimate
 }
 
@@ -180,8 +184,8 @@ func (se SizeEstimate) Add(sizeEstimate SizeEstimate) SizeEstimate {
 		Min: SafeAdd(se.Min, sizeEstimate.Min),
 		Max: SafeAdd(se.Max, sizeEstimate.Max),
 	}
-	res.Key = mergeKey(se.Key, sizeEstimate.Key)
-	res.Elem = mergeElem(se.Elem, sizeEstimate.Elem)
+	res.Key = mergeSizeEstimatePtr(se.Key, sizeEstimate.Key)
+	res.Elem = mergeSizeEstimatePtr(se.Elem, sizeEstimate.Elem)
 	return res
 }
 
@@ -198,8 +202,8 @@ func (se SizeEstimate) Multiply(sizeEstimate SizeEstimate) SizeEstimate {
 // nearest integer of the result, rounded up.
 func (se SizeEstimate) MultiplyByCostFactor(costPerUnit float64) CostEstimate {
 	return CostEstimate{
-		SafeMultiplyByFactor(se.Min, costPerUnit),
-		SafeMultiplyByFactor(se.Max, costPerUnit),
+		Min: SafeMultiplyByFactor(se.Min, costPerUnit),
+		Max: SafeMultiplyByFactor(se.Max, costPerUnit),
 	}
 }
 
@@ -221,23 +225,13 @@ func (se SizeEstimate) Union(size SizeEstimate) SizeEstimate {
 	if size.Max > result.Max {
 		result.Max = size.Max
 	}
-	result.Key = mergeKey(se.Key, size.Key)
-	result.Elem = mergeElem(se.Elem, size.Elem)
+	result.Key = mergeSizeEstimatePtr(se.Key, size.Key)
+	result.Elem = mergeSizeEstimatePtr(se.Elem, size.Elem)
 	return result
 }
 
-func mergeKey(a, b *SizeEstimate) *SizeEstimate {
-	if a == nil {
-		return b
-	}
-	if b == nil {
-		return a
-	}
-	u := a.Union(*b)
-	return &u
-}
-
-func mergeElem(a, b *SizeEstimate) *SizeEstimate {
+// mergeSizeEstimatePtr merges two optional SizeEstimate pointers using union.
+func mergeSizeEstimatePtr(a, b *SizeEstimate) *SizeEstimate {
 	if a == nil {
 		return b
 	}
