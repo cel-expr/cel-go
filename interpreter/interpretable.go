@@ -1075,6 +1075,8 @@ func (fold *evalFold) Exec(frame *ExecutionFrame) ref.Val {
 	if fold.iterVar2 != "" {
 		var foldable traits.Foldable
 		switch r := foldRange.(type) {
+		case traits.Foldable:
+			foldable = r
 		case traits.Mapper:
 			foldable = types.ToFoldableMap(r)
 		case traits.Lister:
