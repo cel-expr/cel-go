@@ -504,6 +504,7 @@ func TestNativeTypesJsonSerialization(t *testing.T) {
 			expr: `TestSpecialJSONTags{
 				ignored: "sensitive",
 				hyphen_name: "hyphen-val",
+				quoted_hyphen: "quoted-val",
 				renamed: "renamed-val",
 				empty_int: 0,
 				empty_str: "",
@@ -514,7 +515,7 @@ func TestNativeTypesJsonSerialization(t *testing.T) {
 				cel_field: "divergent-val",
 			}`,
 			out: `{
-				"-": "hyphen-val",
+				"-": "quoted-val",
 				"custom_json_name": "renamed-val",
 				"json_field": "divergent-val",
 				"keep_empty": "",
@@ -1749,6 +1750,7 @@ type TestEmbeddedPointerTypes struct {
 type TestSpecialJSONTags struct {
 	Ignored              string `json:"-" cel:"ignored"`
 	HyphenName           string `json:"-," cel:"hyphen_name"`
+	QuotedHyphen         string `json:"'-'" cel:"quoted_hyphen"`
 	Renamed              string `json:"custom_json_name" cel:"renamed"`
 	OmitEmptyInt         int    `json:"empty_int,omitempty" cel:"empty_int"`
 	OmitEmptyStr         string `json:"empty_str,omitempty" cel:"empty_str"`

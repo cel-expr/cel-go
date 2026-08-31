@@ -68,6 +68,9 @@ type NativeTypeOption func(*NativeTypeOptions) error
 
 // ParseStructTags configures if native types field names should be overridable by CEL struct tags.
 // This is equivalent to ParseStructTag("cel").
+//
+// A tag starting with "-" (e.g. `cel:"-"` or `cel:"-,"`) marks the field as skipped.
+// A literal "-" can be specified by single-quoting the name (e.g. `cel:"'-'"`).
 func ParseStructTags(enabled bool) NativeTypeOption {
 	if enabled {
 		return ParseStructTag("cel")
@@ -76,6 +79,9 @@ func ParseStructTags(enabled bool) NativeTypeOption {
 }
 
 // ParseStructTag configures the struct tag to parse. The 0th item in the tag is used as the name of the CEL field.
+//
+// A tag starting with "-" (e.g. `cel:"-"` or `cel:"-,"`) marks the field as skipped.
+// A literal "-" can be specified by single-quoting the name (e.g. `cel:"'-'"`).
 func ParseStructTag(tag string) NativeTypeOption {
 	return ParseStructField(fieldNameByTag(tag))
 }
@@ -313,16 +319,21 @@ type structTagInfo struct {
 	HasTag    bool
 }
 
+// parseStructTag parses a struct field's tag for the given tagName (e.g. "cel" or "json").
+//
+// If the tag name or leading comma-separated segment is "-" (such as `json:"-"` or `json:"-,"`),
+// the field is marked as skipped. To specify a literal "-" as the field name, single quotes
+// can be used, such as `json:"'-'"`.
 func parseStructTag(field reflect.StructField, tagName, defaultName string) structTagInfo {
 	tag, found := field.Tag.Lookup(tagName)
 	if !found {
 		return structTagInfo{Name: defaultName}
 	}
-	if tag == "-" {
+	parts := strings.Split(tag, ",")
+	if parts[0] == "-" {
 		return structTagInfo{Skip: true, HasTag: true}
 	}
-	parts := strings.Split(tag, ",")
-	name := parts[0]
+	name := strings.Trim(parts[0], "'")
 	if name == "" {
 		name = defaultName
 	}
