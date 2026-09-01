@@ -150,6 +150,78 @@ var comparableTypes = []*cel.Type{
 //	  Player { name: "baz", score: 1000 },
 //	].sortBy(e, e.score).map(e, e.name)
 //	== ["bar", "foo", "baz"]
+//
+// # HasOnly
+//
+// Introduced in version: 5
+//
+// Returns whether every element of the target list is contained within the
+// argument list, i.e. whether the target is a subset of the argument. Standard
+// CEL equality is used to determine whether two elements are equal, and neither
+// list is required to contain unique elements. An empty target list always
+// returns true.
+//
+//	<list(T)>.hasOnly(<list(T)>) -> <bool>
+//
+// Examples:
+//
+//	[].hasOnly([1, 2]) // return true
+//	[1, 1, 2].hasOnly([1, 2, 3]) // return true
+//	[1, 2.0, 3u].hasOnly([1.0, 2u, 3]) // return true
+//	[1, 4].hasOnly([1, 2, 3]) // return false
+//	[1].hasOnly([]) // return false
+//
+// # HasAny
+//
+// Introduced in version: 5
+//
+// Returns whether the target list has at least one element which is equal to an
+// element of the argument list. If either list is empty, the result is false.
+//
+//	<list(T)>.hasAny(<list(T)>) -> <bool>
+//
+// Examples:
+//
+//	[1, 2, 3].hasAny([3, 4]) // return true
+//	[[1], [2, 3]].hasAny([[1, 2], [2, 3.0]]) // return true
+//	[1, 2].hasAny([3, 4]) // return false
+//	[1].hasAny([]) // return false
+//
+// # HasAll
+//
+// Introduced in version: 5
+//
+// Returns whether every element of the argument list is contained within the
+// target list, i.e. whether the target is a superset of the argument. An empty
+// argument list always returns true.
+//
+//	<list(T)>.hasAll(<list(T)>) -> <bool>
+//
+// Examples:
+//
+//	[1, 2, 3].hasAll([]) // return true
+//	[1, 2, 3, 4].hasAll([2, 3]) // return true
+//	[1, 2.0, 3u].hasAll([1.0, 2u, 3]) // return true
+//	[1, 2, 3].hasAll([2, 4]) // return false
+//
+// # HasExactly
+//
+// Introduced in version: 5
+//
+// Returns whether the target and argument lists are set equivalent, i.e. every
+// element of the target list is equal to an element of the argument list and
+// vice versa. The lists may differ in size since neither is guaranteed to hold
+// unique elements, so size does not factor into the computation.
+//
+//	<list(T)>.hasExactly(<list(T)>) -> <bool>
+//
+// Examples:
+//
+//	[].hasExactly([]) // return true
+//	[1].hasExactly([1, 1]) // return true
+//	[1].hasExactly([1u, 1.0]) // return true
+//	[1, 2, 3].hasExactly([3u, 2.0, 1]) // return true
+//	[1, 2].hasExactly([1, 2, 3]) // return false
 func Lists(options ...ListsOption) cel.EnvOption {
 	l := &listsLib{version: math.MaxUint32, maxRangeSize: defaultMaxRangeSize}
 	for _, o := range options {
@@ -403,6 +475,41 @@ func (lib listsLib) CompileOptions() []cel.EnvOption {
 		}
 		opts = append(opts, cel.CostEstimatorOptions(estimators...))
 	}
+	if lib.version >= 5 {
+		opts = append(opts,
+			cel.Function("hasOnly",
+				cel.MemberOverload("list_hasOnly_list",
+					[]*cel.Type{listType, listType}, cel.BoolType,
+					cel.BinaryBinding(listHasOnly),
+				),
+			),
+			cel.Function("hasAny",
+				cel.MemberOverload("list_hasAny_list",
+					[]*cel.Type{listType, listType}, cel.BoolType,
+					cel.BinaryBinding(listHasAny),
+				),
+			),
+			cel.Function("hasAll",
+				cel.MemberOverload("list_hasAll_list",
+					[]*cel.Type{listType, listType}, cel.BoolType,
+					cel.BinaryBinding(listHasAll),
+				),
+			),
+			cel.Function("hasExactly",
+				cel.MemberOverload("list_hasExactly_list",
+					[]*cel.Type{listType, listType}, cel.BoolType,
+					cel.BinaryBinding(listHasExactly),
+				),
+			),
+			cel.CostEstimatorOptions(
+				checker.OverloadCostEstimate("list_hasOnly_list", estimateListSetOp(1)),
+				checker.OverloadCostEstimate("list_hasAny_list", estimateListSetOp(1)),
+				checker.OverloadCostEstimate("list_hasAll_list", estimateListSetOp(1)),
+				// set equivalence requires up to two m*n comparisons to ensure each list contains the other
+				checker.OverloadCostEstimate("list_hasExactly_list", estimateListSetOp(2)),
+			),
+		)
+	}
 
 	return opts
 }
@@ -438,6 +545,14 @@ func (lib *listsLib) ProgramOptions() []cel.ProgramOption {
 					fmt.Sprintf("list_%s_sortByAssociatedKeys", t.TypeName()),
 					trackListSortBy,
 				),
+			)
+		}
+		if lib.version >= 5 {
+			trackers = append(trackers,
+				interpreter.OverloadCostTracker("list_hasOnly_list", trackSetsCost(1)),
+				interpreter.OverloadCostTracker("list_hasAny_list", trackSetsCost(1)),
+				interpreter.OverloadCostTracker("list_hasAll_list", trackSetsCost(1)),
+				interpreter.OverloadCostTracker("list_hasExactly_list", trackSetsCost(2)),
 			)
 		}
 		opts = append(opts, cel.CostTrackerOptions(trackers...))
@@ -650,12 +765,45 @@ func distinctList(list traits.Lister) (ref.Val, error) {
 	return types.DefaultTypeAdapter.NativeToValue(uniqueList), nil
 }
 
+// listHasOnly returns true if every element of the target list is contained within the argument list.
+func listHasOnly(list, other ref.Val) ref.Val {
+	return setsContains(other, list)
+}
+
+// listHasAny returns true if the target list and the argument list share at least one element.
+func listHasAny(list, other ref.Val) ref.Val {
+	return setsIntersects(list, other)
+}
+
+// listHasAll returns true if every element of the argument list is contained within the target list.
+func listHasAll(list, other ref.Val) ref.Val {
+	return setsContains(list, other)
+}
+
+// listHasExactly returns true if the target list and the argument list are set equivalent.
+func listHasExactly(list, other ref.Val) ref.Val {
+	return setsEquivalent(list, other)
+}
+
 func templatedOverloads(types []*cel.Type, template func(t *cel.Type) cel.FunctionOpt) []cel.FunctionOpt {
 	overloads := make([]cel.FunctionOpt, len(types))
 	for i, t := range types {
 		overloads[i] = template(t)
 	}
 	return overloads
+}
+
+// estimateListSetOp computes an O(m*n) comparison between the target list and its argument, scaled
+// by the number of passes the operation makes over the pair of lists.
+func estimateListSetOp(costFactor float64) checker.FunctionEstimator {
+	return func(estimator checker.CostEstimator, target *checker.AstNode, args []checker.AstNode) *checker.CallEstimate {
+		if target == nil || len(args) != 1 {
+			return nil
+		}
+		targetSize := estimateSize(estimator, *target)
+		argSize := estimateSize(estimator, args[0])
+		return callEstimate(targetSize.Multiply(argSize).MultiplyByCostFactor(costFactor).Add(callCostEstimate), nil)
+	}
 }
 
 // estimateListSlice computes an O(n) slice operation with a cost factor of 1.
