@@ -1199,8 +1199,14 @@ func (e *Evaluator) loadExtensionOption(idx int, args []string) error {
 
 	argExtType := args[idx]
 	if argExtType == "all" {
-		// Load all extension types as a convenience
+		// Load optional first as dependent extensions (e.g. encoders, regex) require it
+		if err := e.loadExtensionOptionType("optional"); err != nil {
+			return err
+		}
 		for val := range extensionMap {
+			if val == "optional" {
+				continue
+			}
 			err := e.loadExtensionOptionType(val)
 			if err != nil {
 				return err
