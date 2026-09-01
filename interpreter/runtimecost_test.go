@@ -126,3 +126,100 @@ func TestCostLimitExceededPanic(t *testing.T) {
 
 	tracker.CreateList(1, nil) // base cost = 10 > 5 -> triggers limitExceededHandler -> panics EvalCancelledError
 }
+
+func TestListMapAccessCost(t *testing.T) {
+	obj := map[string]any{
+		"listMap": []any{
+			map[string]any{"k": "a1", "v": "b1"},
+			map[string]any{"k": "a2", "v": "b2"},
+			map[string]any{"k": "a3", "v": "b3", "v2": "z"},
+		},
+	}
+	expectCost := map[string]uint64{
+		"has(self.listMap[0].v)":                           3,
+		"self.listMap.all(m, m.k.startsWith('a'))":         21,
+		"self.listMap.all(m, !has(m.v2) || m.v2 == 'z')":   21,
+		"self.listMap.exists(m, m.k.endsWith('1'))":        13,
+		"self.listMap.exists_one(m, m.k == 'a3')":          15,
+		"!self.listMap.all(m, m.k.endsWith('1'))":          18,
+		"!self.listMap.exists(m, m.v == 'x')":              25,
+		"!self.listMap.exists_one(m, m.k.startsWith('a'))": 20,
+		// In v0.28.1, filter and map did not incur a +10 base creation cost on empty accumulator init.
+		// In HEAD, evaluating the empty list literal in accu_init incurs +10 per comprehension:
+		// - size(filter) == 1 was 27 in v0.28.1, currently 37
+		"size(self.listMap.filter(m, m.k == 'a1')) == 1":     37,
+		"self.listMap.exists(m, m.k == 'a1' && m.v == 'b1')": 16,
+		// - map.exists was 55 in v0.28.1, currently 65
+		"self.listMap.map(m, m.v).exists(v, v == 'b1')": 65,
+
+		// test comprehensions where the field used in predicates is unset on all but one of the elements:
+		// - with has checks:
+
+		"self.listMap.exists(m, has(m.v2) && m.v2 == 'z')":     21,
+		"!self.listMap.all(m, has(m.v2) && m.v2 != 'z')":       10,
+		"self.listMap.exists_one(m, has(m.v2) && m.v2 == 'z')": 12,
+		// - filter.size == 1 was 24 in v0.28.1, currently 34
+		"self.listMap.filter(m, has(m.v2) && m.v2 == 'z').size() == 1": 34,
+		// - map(filter, transform).size == 1 was 25 in v0.28.1, currently 35
+		"self.listMap.map(m, has(m.v2) && m.v2 == 'z', m.v2).size() == 1": 35,
+		// - filter.map.size == 1 was 39 in v0.28.1 (two comprehensions), currently 59 (+20)
+		"self.listMap.filter(m, has(m.v2) && m.v2 == 'z').map(m, m.v2).size() == 1": 59,
+		// - without has checks:
+
+		// all() and exists() macros ignore errors from predicates so long as the condition holds for at least one element
+		"self.listMap.exists(m, m.v2 == 'z')": 24,
+		"!self.listMap.all(m, m.v2 != 'z')":   22,
+	}
+
+	p, err := parser.NewParser(parser.Macros(parser.AllMacros...))
+	if err != nil {
+		t.Fatalf("NewParser() failed: %v", err)
+	}
+	cont := containers.DefaultContainer
+	reg := newTestRegistry(t)
+	attrs := NewAttributeFactory(cont, reg, reg)
+	env := newTestEnv(t, cont, reg)
+	err = env.AddIdents(decls.NewVariable("self", types.DynType))
+	if err != nil {
+		t.Fatalf("AddIdents() failed: %v", err)
+	}
+
+	for expr, expected := range expectCost {
+		t.Run(expr, func(t *testing.T) {
+			src := common.NewTextSource(expr)
+			parsed, errs := p.Parse(src)
+			if len(errs.GetErrors()) != 0 {
+				t.Fatalf("Parse(%q) failed: %v", expr, errs.ToDisplayString())
+			}
+			checked, errs := checker.Check(parsed, src, env)
+			if len(errs.GetErrors()) != 0 {
+				t.Fatalf("Check(%q) failed: %v", expr, errs.ToDisplayString())
+			}
+			tracker, err := NewCostTracker(nil,
+				PresenceTestHasCost(false),
+			)
+			if err != nil {
+				t.Fatalf("NewCostTracker() failed: %v", err)
+			}
+			interp := newStandardInterpreter(t, cont, reg, reg, attrs)
+			prg, err := interp.NewInterpretable(checked,
+				CostObserver(CostTrackerFactory(func() (*CostTracker, error) {
+					return tracker, nil
+				})))
+			if err != nil {
+				t.Fatalf("NewInterpretable(%q) failed: %v", expr, err)
+			}
+			act, err := NewActivation(map[string]any{"self": obj})
+			if err != nil {
+				t.Fatalf("NewActivation() failed: %v", err)
+			}
+			frame := AsFrame(act)
+			res := prg.Exec(frame)
+			actual := tracker.ActualCost()
+			t.Logf("expr: %s => res: %v, actual cost: %d, expected: %d", expr, res, actual, expected)
+			if actual != expected {
+				t.Errorf("expr %q actual cost = %d, wanted %d (res: %v)", expr, actual, expected, res)
+			}
+		})
+	}
+}

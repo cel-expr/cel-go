@@ -1319,13 +1319,9 @@ func applyQualifiers(vars Activation, obj any, qualifiers []Qualifier) (any, boo
 		if isOpt {
 			var present bool
 			qualObj, present, err = qual.QualifyIfPresent(vars, obj, false)
+			trackCostQualify(AsFrame(vars), qual.ID())
 			if err != nil {
 				return nil, false, err
-			}
-			if frame := AsFrame(vars); frame != nil {
-				if costs := frame.CostTracker(); costs != nil {
-					costs.Qualify(qual.ID())
-				}
 			}
 			if !present {
 				// We return optional none here with a presence of 'false' as the layers
@@ -1335,13 +1331,9 @@ func applyQualifiers(vars Activation, obj any, qualifiers []Qualifier) (any, boo
 			}
 		} else {
 			qualObj, err = qual.Qualify(vars, obj)
+			trackCostQualify(AsFrame(vars), qual.ID())
 			if err != nil {
 				return nil, false, err
-			}
-			if frame := AsFrame(vars); frame != nil {
-				if costs := frame.CostTracker(); costs != nil {
-					costs.Qualify(qual.ID())
-				}
 			}
 		}
 		obj = qualObj

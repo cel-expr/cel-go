@@ -108,13 +108,12 @@ func (fn *evalAsyncFunc) Exec(frame *ExecutionFrame) ref.Val {
 		unk, _ = types.MaybeMergeUnknowns(argVals[i], unk)
 	}
 	if unk != nil {
+		trackCostEvalVarArgs(frame, fn.id, fn, argVals, unk)
 		return unk
 	}
 	result := frame.ComputeResult(fn.ID(), fn.Function(), fn.OverloadID(), fn.impl, argVals)
 	val := types.LabelErrNode(fn.id, result)
-	if costs := frame.CostTracker(); costs != nil {
-		costs.EvalVarArgs(frame, fn.id, fn, argVals, val)
-	}
+	trackCostEvalVarArgs(frame, fn.id, fn, argVals, val)
 	return val
 }
 
