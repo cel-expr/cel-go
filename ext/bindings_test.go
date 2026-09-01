@@ -23,8 +23,8 @@ import (
 	"time"
 
 	"cel.dev/cel-go/cel"
-	"cel.dev/cel-go/checker"
 	"cel.dev/cel-go/common/ast"
+	"cel.dev/cel-go/common/cost"
 	"cel.dev/cel-go/common/operators"
 	"cel.dev/cel-go/common/types"
 	"cel.dev/cel-go/common/types/ref"
@@ -39,14 +39,14 @@ var bindingTests = []struct {
 	vars          []cel.EnvOption
 	in            map[string]any
 	hints         map[string]uint64
-	estimatedCost checker.CostEstimate
+	estimatedCost cost.CostEstimate
 	actualCost    uint64
 }{
 	{
 		name: "single bind",
 		expr: `cel.bind(a, 'hell' + 'o' + '!', "%s, %s, %s".format([a, a, a])) ==
 	                       'hello!, hello!, hello' + '!'`,
-		estimatedCost: checker.CostEstimate{Min: 30, Max: 32},
+		estimatedCost: cost.CostEstimate{Min: 30, Max: 32},
 		actualCost:    32,
 	},
 	{
@@ -54,7 +54,7 @@ var bindingTests = []struct {
 		expr: `cel.bind(a, 'hello!',
 		       cel.bind(b, 'goodbye',
 				a + ' and, ' + b)) == 'hello! and, goodbye'`,
-		estimatedCost: checker.CostEstimate{Min: 27, Max: 28},
+		estimatedCost: cost.CostEstimate{Min: 27, Max: 28},
 		actualCost:    28,
 	},
 	{
@@ -62,7 +62,7 @@ var bindingTests = []struct {
 		expr: `cel.bind(a,
 		       cel.bind(a, 'world', a + '!'),
 		   	    'hello ' + a) == 'hello ' + 'world' + '!'`,
-		estimatedCost: checker.CostEstimate{Min: 30, Max: 31},
+		estimatedCost: cost.CostEstimate{Min: 30, Max: 31},
 		actualCost:    31,
 	},
 	{
@@ -77,7 +77,7 @@ var bindingTests = []struct {
 		hints: map[string]uint64{
 			"x": 3,
 		},
-		estimatedCost: checker.CostEstimate{Min: 39, Max: 39},
+		estimatedCost: cost.CostEstimate{Min: 39, Max: 39},
 		actualCost:    39,
 	},
 	{
@@ -93,7 +93,7 @@ var bindingTests = []struct {
 			"x":        3,
 			"x.@items": 10,
 		},
-		estimatedCost: checker.CostEstimate{Min: 38, Max: 40},
+		estimatedCost: cost.CostEstimate{Min: 38, Max: 40},
 		actualCost:    39,
 	},
 	{
@@ -103,7 +103,7 @@ var bindingTests = []struct {
 		in: map[string]any{
 			"cel.example.x": "1",
 		},
-		estimatedCost: checker.FixedCostEstimate(12),
+		estimatedCost: cost.FixedCostEstimate(12),
 		actualCost:    12,
 	},
 	{
@@ -116,7 +116,7 @@ var bindingTests = []struct {
 		in: map[string]any{
 			"cel.example.x": "1",
 		},
-		estimatedCost: checker.FixedCostEstimate(12),
+		estimatedCost: cost.FixedCostEstimate(12),
 		actualCost:    12,
 	},
 	{
@@ -129,7 +129,7 @@ var bindingTests = []struct {
 		in: map[string]any{
 			"cel.example.x.y": 1,
 		},
-		estimatedCost: checker.FixedCostEstimate(43),
+		estimatedCost: cost.FixedCostEstimate(43),
 		actualCost:    43,
 	},
 	{
@@ -141,7 +141,7 @@ var bindingTests = []struct {
 		in: map[string]any{
 			"x.y": 0,
 		},
-		estimatedCost: checker.FixedCostEstimate(44),
+		estimatedCost: cost.FixedCostEstimate(44),
 		actualCost:    44,
 	},
 	{
@@ -153,13 +153,13 @@ var bindingTests = []struct {
 		in: map[string]any{
 			"y": 1,
 		},
-		estimatedCost: checker.FixedCostEstimate(13),
+		estimatedCost: cost.FixedCostEstimate(13),
 		actualCost:    13,
 	},
 	{
 		name:          "nesting shadowing",
 		expr:          `cel.bind(y, 0, cel.bind(y, 1, y != 0))`,
-		estimatedCost: checker.FixedCostEstimate(22),
+		estimatedCost: cost.FixedCostEstimate(22),
 		actualCost:    22,
 	},
 }
