@@ -4884,3 +4884,40 @@ func TestOptionalOperatorsLegacyEval(t *testing.T) {
 		})
 	}
 }
+
+func TestNativeTypeForAndAlias(t *testing.T) {
+	type CustomAccount struct {
+		ID   int64
+		Name string
+	}
+
+	env, err := NewEnv(
+		Types(
+			NativeTypeFor[CustomAccount](NativeTypeAlias("custom.Account")),
+		),
+		Variable("acct", ObjectType("custom.Account")),
+	)
+	if err != nil {
+		t.Fatalf("NewEnv() failed: %v", err)
+	}
+
+	ast, iss := env.Compile(`acct.Name == "Alice" && custom.Account{ID: 100, Name: "Bob"}.ID == 100`)
+	if iss.Err() != nil {
+		t.Fatalf("Compile() failed: %v", iss.Err())
+	}
+
+	prg, err := env.Program(ast)
+	if err != nil {
+		t.Fatalf("Program() failed: %v", err)
+	}
+
+	out, _, err := prg.Eval(map[string]any{
+		"acct": CustomAccount{ID: 42, Name: "Alice"},
+	})
+	if err != nil {
+		t.Fatalf("Eval() failed: %v", err)
+	}
+	if out != types.True {
+		t.Errorf("Eval() got %v, wanted true", out)
+	}
+}
