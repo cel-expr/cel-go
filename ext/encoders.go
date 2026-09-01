@@ -17,6 +17,7 @@ package ext
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -40,6 +41,9 @@ const maxJSONSize = 10 * 1024 * 1024 // 10MB maximum allowed JSON string size
 
 // Encoders returns a cel.EnvOption to configure extended functions for string, byte, and object
 // encodings.
+//
+// This library depends on the CEL optional type when using version 2 or higher. Please ensure that
+// cel.OptionalTypes() is enabled when using version 2+ of the encoders extension.
 //
 // # Base64.Decode
 //
@@ -107,7 +111,7 @@ const maxJSONSize = 10 * 1024 * 1024 // 10MB maximum allowed JSON string size
 //
 // # JSON.Parse
 //
-// Introduced at version: 1
+// Introduced at version: 2
 //
 // Parses a JSON string to a CEL value or a specific type.
 //
@@ -161,28 +165,43 @@ func (lib *encoderLib) CompileOptions() []cel.EnvOption {
 				}))),
 	}
 	if lib.version >= 1 {
-		var adapt types.Adapter = types.DefaultTypeAdapter
-		var prov types.Provider
 		estimators := []cost.CostOption{
 			cost.OverloadCostEstimate("base64_decode_string", estimateDecode),
 			cost.OverloadCostEstimate("base64_encode_bytes", estimateEncode),
 			cost.OverloadCostEstimate("json_encode_dyn", estimateJSONEncode),
-			cost.OverloadCostEstimate("json_parse_string", estimateJSONParse),
-			cost.OverloadCostEstimate("json_parse_string_type", estimateJSONParse),
 		}
 		opts = append(opts,
-			cel.OptionalTypes(),
-			func(e *cel.Env) (*cel.Env, error) {
-				adapt = e.CELTypeAdapter()
-				prov = e.CELTypeProvider()
-				return e, nil
-			},
 			cel.CostEstimatorOptions(estimators...),
 			cel.Function("json.encode",
 				cel.Overload("json_encode_dyn", []*cel.Type{cel.DynType}, cel.StringType,
 					cel.UnaryBinding(func(val ref.Val) ref.Val {
 						return stringOrError(jsonEncodeValue(val))
 					}))),
+		)
+	}
+	if lib.version >= 2 {
+		var adapt types.Adapter = types.DefaultTypeAdapter
+		var prov types.Provider
+		estimators := []cost.CostOption{
+			cost.OverloadCostEstimate("json_parse_string", estimateJSONParse),
+			cost.OverloadCostEstimate("json_parse_string_type", estimateJSONParse),
+			cost.OverloadCostEstimate("base64_decode_url_string", estimateDecode),
+			cost.OverloadCostEstimate("base64_encode_url_bytes", estimateEncode),
+		}
+		optionalTypesEnabled := func(env *cel.Env) (*cel.Env, error) {
+			if !env.HasLibrary("cel.lib.optional") {
+				return nil, errors.New("encoders library requires the optional library")
+			}
+			return env, nil
+		}
+		opts = append(opts, cel.CostEstimatorOptions(estimators...))
+		opts = append(opts,
+			cel.EnvOption(optionalTypesEnabled),
+			func(e *cel.Env) (*cel.Env, error) {
+				adapt = e.CELTypeAdapter()
+				prov = e.CELTypeProvider()
+				return e, nil
+			},
 			cel.Function("json.parse",
 				cel.Overload("json_parse_string",
 					[]*cel.Type{cel.StringType},
@@ -202,15 +221,6 @@ func (lib *encoderLib) CompileOptions() []cel.EnvOption {
 					}),
 				),
 			),
-		)
-	}
-	if lib.version >= 2 {
-		estimators := []cost.CostOption{
-			cost.OverloadCostEstimate("base64_decode_url_string", estimateDecode),
-			cost.OverloadCostEstimate("base64_encode_url_bytes", estimateEncode),
-		}
-		opts = append(opts, cel.CostEstimatorOptions(estimators...))
-		opts = append(opts,
 			cel.Function("base64.decodeUrl",
 				cel.Overload("base64_decode_url_string", []*cel.Type{cel.StringType}, cel.BytesType,
 					cel.UnaryBinding(func(str ref.Val) ref.Val {
@@ -235,13 +245,13 @@ func (lib *encoderLib) ProgramOptions() []cel.ProgramOption {
 			cost.OverloadTracker("base64_decode_string", trackDecode),
 			cost.OverloadTracker("base64_encode_bytes", trackEncode),
 			cost.OverloadTracker("json_encode_dyn", trackJSONEncode),
-			cost.OverloadTracker("json_parse_string", trackJSONParse),
-			cost.OverloadTracker("json_parse_string_type", trackJSONParse),
 		}
 		opts = append(opts, cel.CostTrackerOptions(trackers...))
 	}
 	if lib.version >= 2 {
 		trackers := []cost.TrackerOption{
+			cost.OverloadTracker("json_parse_string", trackJSONParse),
+			cost.OverloadTracker("json_parse_string_type", trackJSONParse),
 			cost.OverloadTracker("base64_decode_url_string", trackDecode),
 			cost.OverloadTracker("base64_encode_url_bytes", trackEncode),
 		}

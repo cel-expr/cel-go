@@ -92,7 +92,7 @@ Examples:
 
 ### JSON.Encode
 
-Introduced at version: 1
+**Introduced in version 1**
 
 Encodes a CEL value to a JSON string.
 
@@ -103,6 +103,20 @@ Examples:
     json.encode('hello')                      // return '"hello"'
     json.encode([1, 'two', true])             // return '[1,"two",true]'
     json.encode({'items': [1, 'two', false]}) // return '{"items":[1,"two",false]}'
+
+### JSON.Parse
+
+**Introduced in version 2**
+
+Parses a JSON string to a CEL value or a specific type.
+
+    json.parse(<string>) -> <optional_type(dyn)>
+    json.parse(<string>, <type(T)>) -> <optional_type(T)>
+
+Examples:
+
+    json.parse('{"hello":"world"}') // return optional.of({'hello': 'world'})
+    json.parse('123', int)          // return optional.of(123)
 
 ## Math
 

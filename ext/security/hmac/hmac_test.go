@@ -216,6 +216,7 @@ func TestAlgorithmConstants(t *testing.T) {
 
 func TestHMACCompositionWithEncodersAndStrings(t *testing.T) {
 	env, err := cel.NewEnv(
+		cel.OptionalTypes(),
 		hmaclib.Library(),
 		ext.Encoders(),
 		ext.Strings(),
@@ -543,6 +544,7 @@ func TestHMACDigest(t *testing.T) {
 	unicodeSum := sha256.Sum256([]byte(unicodeStr))
 
 	env, err := cel.NewEnv(
+		cel.OptionalTypes(),
 		hmaclib.Library(),
 		ext.Encoders(),
 		ext.Strings(),
@@ -697,6 +699,7 @@ func TestHMACEqual(t *testing.T) {
 	mac256Bytes := h256.Sum(nil)
 
 	env, err := cel.NewEnv(
+		cel.OptionalTypes(),
 		hmaclib.Library(),
 		ext.Encoders(),
 		cel.Variable("msgBytes", cel.BytesType),
@@ -803,6 +806,7 @@ func TestHMACREADMEExamples(t *testing.T) {
 	const sigHex = "5d98b45c90a207fa998ce639fea6f02ecc8cc3f36fef81d694fb856b4d0a28ca"
 
 	env, err := cel.NewEnv(
+		cel.OptionalTypes(),
 		hmaclib.Library(),
 		ext.Encoders(),
 		ext.Strings(),
