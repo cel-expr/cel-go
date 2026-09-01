@@ -703,7 +703,7 @@ func TestNativeTypesErrors(t *testing.T) {
 		},
 		{
 			nativeType: 1,
-			err:        "must be reflect.Type or reflect.Value",
+			err:        "must be reflect.Type",
 		},
 	}
 	for i, tst := range envTests {
@@ -1792,4 +1792,27 @@ func (a *recordingAdapter) NativeToValue(value any) ref.Val {
 		return types.String("from-base-adapter")
 	}
 	return a.base.NativeToValue(value)
+}
+
+func TestNativeTypeAlias(t *testing.T) {
+	type CustomStruct struct {
+		Name string
+	}
+
+	desc := types.NativeTypeFor[CustomStruct](types.NativeTypeAlias("custom.MyStruct"))
+	if desc.ReflectType() != reflect.TypeFor[CustomStruct]() {
+		t.Fatalf("ReflectType() got %v, wanted %v", desc.ReflectType(), reflect.TypeFor[CustomStruct]())
+	}
+
+	nt, err := types.NewNativeType(desc.ReflectType(), desc.Options()...)
+	if err != nil {
+		t.Fatalf("NewNativeType() failed: %v", err)
+	}
+
+	if nt.TypeName() != "custom.MyStruct" {
+		t.Errorf("nt.TypeName() got %s, wanted custom.MyStruct", nt.TypeName())
+	}
+	if nt.String() != "custom.MyStruct" {
+		t.Errorf("nt.String() got %s, wanted custom.MyStruct", nt.String())
+	}
 }

@@ -17,6 +17,7 @@ package cel
 import (
 	"errors"
 	"fmt"
+	"reflect"
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protodesc"
@@ -328,6 +329,22 @@ func Abbrevs(qualifiedNames ...string) EnvOption {
 	}
 }
 
+// NativeTypeDesc describes a native Go struct type for registration with CEL.
+type NativeTypeDesc = types.NativeTypeDesc
+
+// NativeTypeOption is a functional option for configuring handling of native types.
+type NativeTypeOption = types.NativeTypeOption
+
+var (
+	// NativeTypeAlias configures a custom CEL type name (alias) for a native type descriptor.
+	NativeTypeAlias = types.NativeTypeAlias
+)
+
+// NativeTypeFor constructs a NativeTypeDesc for a Go struct type T with the given options.
+func NativeTypeFor[T any](opts ...NativeTypeOption) *NativeTypeDesc {
+	return types.NativeTypeFor[T](opts...)
+}
+
 // protoTypeRegistry is an internal-only interface containing the minimum methods required to support
 // custom types. It is a subset of methods from ref.TypeRegistry.
 type protoTypeRegistry interface {
@@ -335,11 +352,16 @@ type protoTypeRegistry interface {
 	RegisterType(...ref.Type) error
 }
 
+type nativeTypeRegistry interface {
+	RegisterNativeType(reflect.Type, ...types.NativeTypeOption) error
+	RegisterNativeTypeDesc(*types.NativeTypeDesc) error
+}
+
 // Types adds one or more type declarations to the environment, allowing for construction of
 // type-literals whose definitions are included in the common expression built-in set.
 //
-// The input types may either be instances of `proto.Message` or `ref.Type`. Any other type
-// provided to this option will result in an error.
+// The input types may either be instances of `proto.Message`, `ref.Type`, `reflect.Type`, or `*NativeTypeDesc`.
+// Any other type provided to this option will result in an error.
 //
 // Well-known protobuf types within the `google.protobuf.*` package are included in the standard
 // environment by default.
@@ -363,6 +385,24 @@ func Types(addTypes ...any) EnvOption {
 				}
 			case ref.Type:
 				err := reg.RegisterType(v)
+				if err != nil {
+					return nil, err
+				}
+			case reflect.Type:
+				nreg, isNReg := e.provider.(nativeTypeRegistry)
+				if !isNReg {
+					return nil, fmt.Errorf("native types not supported by provider: %T", e.provider)
+				}
+				err := nreg.RegisterNativeType(v)
+				if err != nil {
+					return nil, err
+				}
+			case *types.NativeTypeDesc:
+				nreg, isNReg := e.provider.(nativeTypeRegistry)
+				if !isNReg {
+					return nil, fmt.Errorf("native types not supported by provider: %T", e.provider)
+				}
+				err := nreg.RegisterNativeTypeDesc(v)
 				if err != nil {
 					return nil, err
 				}

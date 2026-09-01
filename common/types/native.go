@@ -51,7 +51,7 @@ func NewNativeType(rawType reflect.Type, opts ...NativeTypeOption) (*NativeType,
 			return nil, err
 		}
 	}
-	return newNativeType(rawType, tpOptions.fieldNameHandler)
+	return newNativeType(rawType, tpOptions)
 }
 
 // NativeTypesFieldNameHandler is a handler for mapping a reflect.StructField to a CEL field name.
@@ -61,10 +61,43 @@ type NativeTypesFieldNameHandler = func(field reflect.StructField) string
 // NativeTypeOptions holds options for native types.
 type NativeTypeOptions struct {
 	fieldNameHandler NativeTypesFieldNameHandler
+	typeName         string
 }
 
 // NativeTypeOption is a functional option for configuring handling of native types.
 type NativeTypeOption func(*NativeTypeOptions) error
+
+// NativeTypeAlias configures a custom CEL type name (alias) for a native type.
+func NativeTypeAlias(alias string) NativeTypeOption {
+	return func(opts *NativeTypeOptions) error {
+		opts.typeName = alias
+		return nil
+	}
+}
+
+// NativeTypeDesc describes a native Go struct type for registration with CEL.
+type NativeTypeDesc struct {
+	refType reflect.Type
+	options []NativeTypeOption
+}
+
+// ReflectType returns the reflect.Type wrapped by this descriptor.
+func (d *NativeTypeDesc) ReflectType() reflect.Type {
+	return d.refType
+}
+
+// Options returns the NativeTypeOption slice for this descriptor.
+func (d *NativeTypeDesc) Options() []NativeTypeOption {
+	return d.options
+}
+
+// NativeTypeFor constructs a NativeTypeDesc for a Go struct type T with the given options.
+func NativeTypeFor[T any](opts ...NativeTypeOption) *NativeTypeDesc {
+	return &NativeTypeDesc{
+		refType: reflect.TypeFor[T](),
+		options: opts,
+	}
+}
 
 // ParseStructTags configures if native types field names should be overridable by CEL struct tags.
 // This is equivalent to ParseStructTag("cel").
@@ -441,8 +474,15 @@ func (o *nativeObj) AggregateSize(sizer AggregateSizer) uint32 {
 	return total
 }
 
-func newNativeTypes(rawType reflect.Type, fieldNameHandler NativeTypesFieldNameHandler) ([]*NativeType, error) {
-	nt, err := newNativeType(rawType, fieldNameHandler)
+func getNativeTypeName(refType reflect.Type, customName string) string {
+	if customName != "" {
+		return customName
+	}
+	return fmt.Sprintf("%s.%s", simplePkgAlias(refType.PkgPath()), refType.Name())
+}
+
+func newNativeTypes(rawType reflect.Type, options NativeTypeOptions) ([]*NativeType, error) {
+	nt, err := newNativeType(rawType, options)
 	if err != nil {
 		return nil, err
 	}
@@ -465,7 +505,9 @@ func newNativeTypes(rawType reflect.Type, fieldNameHandler NativeTypesFieldNameH
 			return
 		}
 		alreadySeen[t.String()] = struct{}{}
-		nt, ntErr := newNativeType(t, fieldNameHandler)
+		// Nested member structs use fieldNameHandler only (custom typeName applies to root rawType)
+		nestedOpts := NativeTypeOptions{fieldNameHandler: options.fieldNameHandler}
+		nt, ntErr := newNativeType(t, nestedOpts)
 		if ntErr != nil {
 			err = ntErr
 			return
@@ -491,7 +533,7 @@ func toFieldName(f reflect.StructField, fieldNameHandler NativeTypesFieldNameHan
 	return fieldNameHandler(f)
 }
 
-func newNativeType(rawType reflect.Type, fieldNameHandler NativeTypesFieldNameHandler) (*NativeType, error) {
+func newNativeType(rawType reflect.Type, options NativeTypeOptions) (*NativeType, error) {
 	refType := rawType
 	if refType.Kind() == reflect.Pointer {
 		refType = refType.Elem()
@@ -505,7 +547,7 @@ func newNativeType(rawType reflect.Type, fieldNameHandler NativeTypesFieldNameHa
 		if !field.IsExported() || !isSupportedType(field.Type) {
 			continue
 		}
-		fieldName := toFieldName(field, fieldNameHandler)
+		fieldName := toFieldName(field, options.fieldNameHandler)
 		if isSkippedFieldName(fieldName) {
 			continue
 		}
@@ -520,7 +562,7 @@ func newNativeType(rawType reflect.Type, fieldNameHandler NativeTypesFieldNameHa
 		if !field.IsExported() || !isSupportedType(field.Type) {
 			continue
 		}
-		fieldName := toFieldName(field, fieldNameHandler)
+		fieldName := toFieldName(field, options.fieldNameHandler)
 		if isSkippedFieldName(fieldName) {
 			continue
 		}
@@ -554,7 +596,7 @@ func newNativeType(rawType reflect.Type, fieldNameHandler NativeTypesFieldNameHa
 	}
 
 	return &NativeType{
-		typeName:     fmt.Sprintf("%s.%s", simplePkgAlias(refType.PkgPath()), refType.Name()),
+		typeName:     getNativeTypeName(refType, options.typeName),
 		refType:      refType,
 		fieldsByName: fieldsByName,
 		jsonFields:   jsonFields,
@@ -694,9 +736,7 @@ func convertToCelType(refType reflect.Type) (*Type, bool) {
 			emptyCelVal := reflect.New(refType).Elem().Interface().(ref.Val)
 			return emptyCelVal.Type().(*Type), true
 		}
-		return NewObjectType(
-			fmt.Sprintf("%s.%s", simplePkgAlias(refType.PkgPath()), refType.Name()),
-		), true
+		return NewObjectType(getNativeTypeName(refType, "")), true
 	case reflect.Pointer:
 		if refType.Implements(refValType) {
 			emptyCelVal := reflect.New(refType.Elem()).Interface().(ref.Val)

@@ -628,7 +628,7 @@ func TestNativeTypesErrors(t *testing.T) {
 		},
 		{
 			nativeType: 1,
-			err:        "must be reflect.Type or reflect.Value",
+			err:        "must be reflect.Type",
 		},
 	}
 	for i, tst := range envTests {

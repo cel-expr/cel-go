@@ -533,8 +533,14 @@ func (p *Registry) RegisterType(types ...ref.Type) error {
 }
 
 // RegisterNativeType creates nativeType instances for the given reflect.Type and registers them.
-func (p *Registry) RegisterNativeType(refType reflect.Type) error {
-	result, err := newNativeTypes(refType, p.nativeOptions.fieldNameHandler)
+func (p *Registry) RegisterNativeType(refType reflect.Type, opts ...NativeTypeOption) error {
+	nativeOpts := p.nativeOptions
+	for _, opt := range opts {
+		if err := opt(&nativeOpts); err != nil {
+			return err
+		}
+	}
+	result, err := newNativeTypes(refType, nativeOpts)
 	if err != nil {
 		return err
 	}
@@ -544,6 +550,14 @@ func (p *Registry) RegisterNativeType(refType reflect.Type) error {
 		}
 	}
 	return nil
+}
+
+// RegisterNativeTypeDesc creates nativeType instances for a NativeTypeDesc and registers them.
+func (p *Registry) RegisterNativeTypeDesc(desc *NativeTypeDesc) error {
+	if desc == nil {
+		return nil
+	}
+	return p.RegisterNativeType(desc.ReflectType(), desc.Options()...)
 }
 
 func (p *Registry) findStructDescriptorByReflectType(rt reflect.Type) (StructTypeDescriptor, bool) {
@@ -858,13 +872,15 @@ func registerTypeItem(r *Registry, t any) error {
 		return r.RegisterNativeType(v)
 	case reflect.Value:
 		return r.RegisterNativeType(v.Type())
+	case *NativeTypeDesc:
+		return r.RegisterNativeTypeDesc(v)
 	case NativeTypeOption:
 		return v(&r.nativeOptions)
 	case RegistryOption:
 		_, err := v(r)
 		return err
 	default:
-		return fmt.Errorf("unsupported type: %v (%T) must be reflect.Type or reflect.Value", t, t)
+		return fmt.Errorf("unsupported type: %v (%T) must be reflect.Type, reflect.Value, or NativeTypeDesc", t, t)
 	}
 }
 
