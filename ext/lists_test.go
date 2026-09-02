@@ -747,25 +747,25 @@ func TestListsCosts(t *testing.T) {
 		{
 			name:          "list_hasOnly",
 			expr:          `[1, 2].hasOnly([1, 2, 3])`,
-			estimatedCost: checker.FixedCostEstimate(27),
+			estimatedCost: cost.FixedCostEstimate(27),
 			actualCost:    27,
 		},
 		{
 			name:          "list_hasAny",
 			expr:          `[1, 2].hasAny([2, 3])`,
-			estimatedCost: checker.FixedCostEstimate(25),
+			estimatedCost: cost.FixedCostEstimate(25),
 			actualCost:    25,
 		},
 		{
 			name:          "list_hasAll",
 			expr:          `[1, 2, 3].hasAll([1, 2])`,
-			estimatedCost: checker.FixedCostEstimate(27),
+			estimatedCost: cost.FixedCostEstimate(27),
 			actualCost:    27,
 		},
 		{
 			name:          "list_hasExactly",
 			expr:          `[1, 2].hasExactly([2, 1])`,
-			estimatedCost: checker.FixedCostEstimate(29),
+			estimatedCost: cost.FixedCostEstimate(29),
 			actualCost:    29,
 		},
 		{
@@ -774,7 +774,7 @@ func TestListsCosts(t *testing.T) {
 			vars:          []cel.EnvOption{cel.Variable("x", cel.ListType(cel.StringType))},
 			in:            map[string]any{"x": []string{"a", "b", "c"}},
 			hints:         map[string]uint64{"x": 10},
-			estimatedCost: checker.CostEstimate{Min: 12, Max: 32},
+			estimatedCost: cost.CostEstimate{Min: 12, Max: 32},
 			actualCost:    18,
 		},
 	}
