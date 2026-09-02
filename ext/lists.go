@@ -502,11 +502,11 @@ func (lib listsLib) CompileOptions() []cel.EnvOption {
 				),
 			),
 			cel.CostEstimatorOptions(
-				checker.OverloadCostEstimate("list_hasOnly_list", estimateListSetOp(1)),
-				checker.OverloadCostEstimate("list_hasAny_list", estimateListSetOp(1)),
-				checker.OverloadCostEstimate("list_hasAll_list", estimateListSetOp(1)),
+				cost.OverloadCostEstimate("list_hasOnly_list", estimateListSetOp(1)),
+				cost.OverloadCostEstimate("list_hasAny_list", estimateListSetOp(1)),
+				cost.OverloadCostEstimate("list_hasAll_list", estimateListSetOp(1)),
 				// set equivalence requires up to two m*n comparisons to ensure each list contains the other
-				checker.OverloadCostEstimate("list_hasExactly_list", estimateListSetOp(2)),
+				cost.OverloadCostEstimate("list_hasExactly_list", estimateListSetOp(2)),
 			),
 		)
 	}
@@ -549,10 +549,10 @@ func (lib *listsLib) ProgramOptions() []cel.ProgramOption {
 		}
 		if lib.version >= 5 {
 			trackers = append(trackers,
-				interpreter.OverloadCostTracker("list_hasOnly_list", trackSetsCost(1)),
-				interpreter.OverloadCostTracker("list_hasAny_list", trackSetsCost(1)),
-				interpreter.OverloadCostTracker("list_hasAll_list", trackSetsCost(1)),
-				interpreter.OverloadCostTracker("list_hasExactly_list", trackSetsCost(2)),
+				cost.OverloadTracker("list_hasOnly_list", trackSetsCost(1)),
+				cost.OverloadTracker("list_hasAny_list", trackSetsCost(1)),
+				cost.OverloadTracker("list_hasAll_list", trackSetsCost(1)),
+				cost.OverloadTracker("list_hasExactly_list", trackSetsCost(2)),
 			)
 		}
 		opts = append(opts, cel.CostTrackerOptions(trackers...))
@@ -795,8 +795,8 @@ func templatedOverloads(types []*cel.Type, template func(t *cel.Type) cel.Functi
 
 // estimateListSetOp computes an O(m*n) comparison between the target list and its argument, scaled
 // by the number of passes the operation makes over the pair of lists.
-func estimateListSetOp(costFactor float64) checker.FunctionEstimator {
-	return func(estimator checker.CostEstimator, target *checker.AstNode, args []checker.AstNode) *checker.CallEstimate {
+func estimateListSetOp(costFactor float64) cost.FunctionEstimator {
+	return func(estimator cost.Estimator, target *cost.AstNode, args []cost.AstNode) *cost.CallEstimate {
 		if target == nil || len(args) != 1 {
 			return nil
 		}
