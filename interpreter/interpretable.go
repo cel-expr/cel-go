@@ -918,6 +918,17 @@ func (m *evalMap) Exec(frame *ExecutionFrame) ref.Val {
 			}
 			valVal = optVal.GetValue()
 		}
+		// Reject duplicate keys. The CEL specification defines a map literal with
+		// repeated keys as an evaluation error. Map keys are compared using CEL
+		// equality, so equal values of different runtime types (e.g. the int 1 and
+		// the uint 1u) collide even though they are distinct Go map keys. This
+		// mirrors the check already performed by mutableMap.Insert for the
+		// comprehension map-building path.
+		for existingKey := range entries {
+			if keyVal.Equal(existingKey) == types.True {
+				return types.LabelErrNode(m.id, types.NewErr("insert failed: key %v already exists", keyVal))
+			}
+		}
 		entries[keyVal] = valVal
 	}
 	if unk != nil {

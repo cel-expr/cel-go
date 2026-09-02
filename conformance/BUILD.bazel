@@ -40,8 +40,7 @@ _ALL_TESTS = [
 
 _TESTS_TO_SKIP = [
     # Failing conformance tests.
-    "fields/qualified_identifier_resolution/map_key_float,map_key_null,map_value_repeat_key",
-    "fields/qualified_identifier_resolution/map_value_repeat_key_heterogeneous",
+    "fields/qualified_identifier_resolution/map_key_float,map_key_null",
     "timestamps/duration_converters/get_milliseconds",
     "optionals/optionals/map_optional_select_has",
 
