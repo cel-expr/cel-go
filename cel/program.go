@@ -22,6 +22,7 @@ import (
 
 	"cel.dev/cel-go/cel/async"
 	"cel.dev/cel-go/common/ast"
+	"cel.dev/cel-go/common/cost"
 	"cel.dev/cel-go/common/operators"
 	"cel.dev/cel-go/common/overloads"
 	"cel.dev/cel-go/common/types"
@@ -140,7 +141,7 @@ type AttributePatternType = interpreter.AttributePattern
 // EvalDetails holds additional information observed during the Eval() call.
 type EvalDetails struct {
 	state       interpreter.EvalState
-	costTracker *interpreter.CostTracker
+	costTracker *cost.Tracker
 	memTracker  *types.MemoryTracker
 }
 
@@ -197,8 +198,8 @@ type prog struct {
 	// Interpretable configured from an Ast and aggregate decorator set based on program options.
 	interpretable     interpreter.InterpretableV2
 	observable        *interpreter.ObservableInterpretable
-	callCostEstimator interpreter.ActualCostEstimator
-	costOptions       []interpreter.CostTrackerOption
+	callCostEstimator cost.ActualCostEstimator
+	costOptions       []cost.TrackerOption
 	costLimit         *uint64
 	memoryOptions     []types.MemoryTrackerOption
 	memoryLimit       *uint32
@@ -260,7 +261,7 @@ func newProgram(e *Env, a *ast.AST, opts []ProgramOption) (Program, error) {
 		Env:            e,
 		plannerOptions: []interpreter.PlannerOption{},
 		dispatcher:     disp,
-		costOptions:    []interpreter.CostTrackerOption{},
+		costOptions:    []cost.TrackerOption{},
 		drainStrategy:  async.DrainReady(100 * time.Microsecond),
 		hasAsync:       hasAsync,
 	}
@@ -339,20 +340,20 @@ func newProgram(e *Env, a *ast.AST, opts []ProgramOption) (Program, error) {
 			if p.costLimit != nil {
 				costOptCount++
 			}
-			costOpts := make([]interpreter.CostTrackerOption, 0, costOptCount)
+			costOpts := make([]cost.TrackerOption, 0, costOptCount)
 			costOpts = append(costOpts, p.costOptions...)
 			if p.costLimit != nil {
-				costOpts = append(costOpts, interpreter.CostTrackerLimit(*p.costLimit))
+				costOpts = append(costOpts, cost.TrackerLimit(*p.costLimit))
 			}
 			// Creating a new cost tracker for each evaluation causes significant work that
 			// needs to be repeated for each evaluation even though the cost tracker is
 			// mostly read-only once constructed. Therefore it gets constructed
 			// once now and later a cheap clone is used for each evaluation.
-			tracker, err := interpreter.NewCostTracker(p.callCostEstimator, costOpts...)
+			tracker, err := cost.NewTracker(p.callCostEstimator, costOpts...)
 			if err != nil {
 				return nil, fmt.Errorf("construct cost tracker: %w", err)
 			}
-			trackerFactory := func() (*interpreter.CostTracker, error) {
+			trackerFactory := func() (*cost.Tracker, error) {
 				return tracker.Clone()
 			}
 			plannerOptions = append(plannerOptions, interpreter.CostObserver(interpreter.CostTrackerFactory(trackerFactory)))

@@ -21,7 +21,7 @@ import (
 	"testing"
 
 	"cel.dev/cel-go/cel"
-	"cel.dev/cel-go/checker"
+	"cel.dev/cel-go/common/cost"
 )
 
 func TestEncoders(t *testing.T) {
@@ -250,7 +250,7 @@ func TestEncodersCosts(t *testing.T) {
 		vars          []cel.EnvOption
 		in            map[string]any
 		hints         map[string]uint64
-		estimatedCost checker.CostEstimate
+		estimatedCost cost.CostEstimate
 		actualCost    uint64
 		version       int
 	}{
@@ -266,7 +266,7 @@ func TestEncodersCosts(t *testing.T) {
 			hints: map[string]uint64{
 				"x": 100,
 			},
-			estimatedCost: checker.FixedCostEstimate(3), // x lookup (1) + encode (1) + == (1) = 3
+			estimatedCost: cost.FixedCostEstimate(3), // x lookup (1) + encode (1) + == (1) = 3
 			actualCost:    3,
 			version:       0,
 		},
@@ -282,8 +282,8 @@ func TestEncodersCosts(t *testing.T) {
 			hints: map[string]uint64{
 				"x": 100,
 			},
-			estimatedCost: checker.CostEstimate{Min: 3, Max: 13}, // x lookup (1) + encode (100 * 0.1 + 1 = 11) + == (1) = 13
-			actualCost:    4,                                     // x lookup (1) + encode (ceil(5 * 0.1) + 1 = 2) + == (1) = 4
+			estimatedCost: cost.CostEstimate{Min: 3, Max: 13}, // x lookup (1) + encode (100 * 0.1 + 1 = 11) + == (1) = 13
+			actualCost:    4,                                  // x lookup (1) + encode (ceil(5 * 0.1) + 1 = 2) + == (1) = 4
 			version:       1,
 		},
 		{
@@ -298,7 +298,7 @@ func TestEncodersCosts(t *testing.T) {
 			hints: map[string]uint64{
 				"x": 100,
 			},
-			estimatedCost: checker.FixedCostEstimate(3),
+			estimatedCost: cost.FixedCostEstimate(3),
 			actualCost:    3,
 			version:       0,
 		},
@@ -314,42 +314,42 @@ func TestEncodersCosts(t *testing.T) {
 			hints: map[string]uint64{
 				"x": 100,
 			},
-			estimatedCost: checker.CostEstimate{Min: 3, Max: 13}, // x lookup (1) + decode (100 * 0.1 + 1 = 11) + == (1) = 13
-			actualCost:    4,                                     // x lookup (1) + decode (ceil(8 * 0.1) + 1 = 2) + == (1) = 4
+			estimatedCost: cost.CostEstimate{Min: 3, Max: 13}, // x lookup (1) + decode (100 * 0.1 + 1 = 11) + == (1) = 13
+			actualCost:    4,                                  // x lookup (1) + decode (ceil(8 * 0.1) + 1 = 2) + == (1) = 4
 			version:       1,
 		},
 		{
 			name:          "encode_bytes_v1_literal",
 			expr:          "base64.encode(b'hello') == 'aGVsbG8='",
-			estimatedCost: checker.FixedCostEstimate(3),
+			estimatedCost: cost.FixedCostEstimate(3),
 			actualCost:    3,
 			version:       1,
 		},
 		{
 			name:          "decode_string_v1_literal",
 			expr:          "base64.decode('aGVsbG8=') == b'hello'",
-			estimatedCost: checker.FixedCostEstimate(3),
+			estimatedCost: cost.FixedCostEstimate(3),
 			actualCost:    3,
 			version:       1,
 		},
 		{
 			name:          "encode_empty_bytes_v1_literal",
 			expr:          "base64.encode(b'') == ''",
-			estimatedCost: checker.FixedCostEstimate(1),
+			estimatedCost: cost.FixedCostEstimate(1),
 			actualCost:    1,
 			version:       1,
 		},
 		{
 			name:          "decode_empty_string_v1_literal",
 			expr:          "base64.decode('') == b''",
-			estimatedCost: checker.FixedCostEstimate(1),
+			estimatedCost: cost.FixedCostEstimate(1),
 			actualCost:    1,
 			version:       1,
 		},
 		{
 			name:          "encode_non_utf8_bytes_v1_literal",
 			expr:          "base64.encode(b'\xff\xfe\xfd') != '////'",
-			estimatedCost: checker.FixedCostEstimate(3),
+			estimatedCost: cost.FixedCostEstimate(3),
 			actualCost:    3,
 			version:       1,
 		},
@@ -365,7 +365,7 @@ func TestEncodersCosts(t *testing.T) {
 			hints: map[string]uint64{
 				"x": 100,
 			},
-			estimatedCost: checker.CostEstimate{Min: 2, Max: math.MaxUint64},
+			estimatedCost: cost.CostEstimate{Min: 2, Max: math.MaxUint64},
 			actualCost:    math.MaxUint64,
 			version:       1,
 		},
@@ -381,7 +381,7 @@ func TestEncodersCosts(t *testing.T) {
 			hints: map[string]uint64{
 				"x": 100,
 			},
-			estimatedCost: checker.CostEstimate{Min: 3, Max: 13},
+			estimatedCost: cost.CostEstimate{Min: 3, Max: 13},
 			actualCost:    4,
 			version:       2,
 		},
@@ -397,7 +397,7 @@ func TestEncodersCosts(t *testing.T) {
 			hints: map[string]uint64{
 				"x": 100,
 			},
-			estimatedCost: checker.CostEstimate{Min: 3, Max: 13},
+			estimatedCost: cost.CostEstimate{Min: 3, Max: 13},
 			actualCost:    4,
 			version:       2,
 		},
@@ -434,7 +434,7 @@ func TestDecodeNonBase64Error(t *testing.T) {
 	if iss.Err() != nil {
 		t.Fatalf("env.Check() failed: %v", iss.Err())
 	}
-	testCheckCost(t, env, cAst, nil, checker.FixedCostEstimate(2))
+	testCheckCost(t, env, cAst, nil, cost.FixedCostEstimate(2))
 	prgOpts := []cel.ProgramOption{}
 	if cAst.IsChecked() {
 		prgOpts = append(prgOpts, cel.CostTracking(nil))
@@ -459,7 +459,7 @@ func TestDecodeNonBase64UrlError(t *testing.T) {
 	if iss.Err() != nil {
 		t.Fatalf("env.Check() failed: %v", iss.Err())
 	}
-	testCheckCost(t, env, cAst, nil, checker.FixedCostEstimate(2))
+	testCheckCost(t, env, cAst, nil, cost.FixedCostEstimate(2))
 	prgOpts := []cel.ProgramOption{}
 	if cAst.IsChecked() {
 		prgOpts = append(prgOpts, cel.CostTracking(nil))
@@ -489,7 +489,7 @@ func TestJSONEncodeCostUnbounded(t *testing.T) {
 	if err != nil {
 		t.Fatalf("env.EstimateCost() failed: %v", err)
 	}
-	wantEst := checker.CostEstimate{Min: 0, Max: math.MaxUint64}
+	wantEst := cost.CostEstimate{Min: 0, Max: math.MaxUint64}
 	if est != wantEst {
 		t.Errorf("env.EstimateCost() got %v, wanted %v", est, wantEst)
 	}

@@ -25,7 +25,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"cel.dev/cel-go/cel"
-	"cel.dev/cel-go/checker"
+	"cel.dev/cel-go/common/cost"
 	"cel.dev/cel-go/common/types"
 	"cel.dev/cel-go/common/types/ref"
 
@@ -52,7 +52,7 @@ func TestStringFormatV2(t *testing.T) {
 		err                   string
 		expectedOutput        string
 		expectedRuntimeCost   uint64
-		expectedEstimatedCost checker.CostEstimate
+		expectedEstimatedCost cost.CostEstimate
 		skipCompileCheck      bool
 	}{
 		{
@@ -60,7 +60,7 @@ func TestStringFormatV2(t *testing.T) {
 			format:                "no substitution",
 			expectedOutput:        "no substitution",
 			expectedRuntimeCost:   12,
-			expectedEstimatedCost: checker.CostEstimate{Min: 12, Max: 12},
+			expectedEstimatedCost: cost.CostEstimate{Min: 12, Max: 12},
 		},
 
 		{
@@ -69,14 +69,14 @@ func TestStringFormatV2(t *testing.T) {
 			formatArgs:            `"filler"`,
 			expectedOutput:        "str is filler and some more",
 			expectedRuntimeCost:   13,
-			expectedEstimatedCost: checker.CostEstimate{Min: 13, Max: 13},
+			expectedEstimatedCost: cost.CostEstimate{Min: 13, Max: 13},
 		},
 		{
 			name:                  "percent escaping",
 			format:                "%% and also %%",
 			expectedOutput:        "% and also %",
 			expectedRuntimeCost:   12,
-			expectedEstimatedCost: checker.CostEstimate{Min: 12, Max: 12},
+			expectedEstimatedCost: cost.CostEstimate{Min: 12, Max: 12},
 		},
 		{
 			name:                  "substution inside escaped percent signs",
@@ -84,7 +84,7 @@ func TestStringFormatV2(t *testing.T) {
 			formatArgs:            `"text"`,
 			expectedOutput:        "%text%",
 			expectedRuntimeCost:   11,
-			expectedEstimatedCost: checker.CostEstimate{Min: 11, Max: 11},
+			expectedEstimatedCost: cost.CostEstimate{Min: 11, Max: 11},
 		},
 		{
 			name:                  "substitution with one escaped percent sign on the right",
@@ -92,7 +92,7 @@ func TestStringFormatV2(t *testing.T) {
 			formatArgs:            `"percent on the right"`,
 			expectedOutput:        "percent on the right%",
 			expectedRuntimeCost:   11,
-			expectedEstimatedCost: checker.CostEstimate{Min: 11, Max: 11},
+			expectedEstimatedCost: cost.CostEstimate{Min: 11, Max: 11},
 		},
 		{
 			name:                  "substitution with one escaped percent sign on the left",
@@ -100,7 +100,7 @@ func TestStringFormatV2(t *testing.T) {
 			formatArgs:            `"percent on the left"`,
 			expectedOutput:        "%percent on the left",
 			expectedRuntimeCost:   11,
-			expectedEstimatedCost: checker.CostEstimate{Min: 11, Max: 11},
+			expectedEstimatedCost: cost.CostEstimate{Min: 11, Max: 11},
 		},
 		{
 			name:                  "multiple substitutions",
@@ -108,7 +108,7 @@ func TestStringFormatV2(t *testing.T) {
 			formatArgs:            `1, 2, 3, "A", "B", "C", 4, 5, 6, "D", "E", "F"`,
 			expectedOutput:        "1 2 3, A B C, 4 5 6, D E F",
 			expectedRuntimeCost:   14,
-			expectedEstimatedCost: checker.CostEstimate{Min: 14, Max: 14},
+			expectedEstimatedCost: cost.CostEstimate{Min: 14, Max: 14},
 		},
 		{
 			name:                  "percent sign escape sequence support",
@@ -116,7 +116,7 @@ func TestStringFormatV2(t *testing.T) {
 			formatArgs:            `"percent"`,
 			expectedOutput:        "%escaped percent%",
 			expectedRuntimeCost:   12,
-			expectedEstimatedCost: checker.FixedCostEstimate(12),
+			expectedEstimatedCost: cost.FixedCostEstimate(12),
 		},
 		{
 			name:                  "fixed point formatting clause",
@@ -124,7 +124,7 @@ func TestStringFormatV2(t *testing.T) {
 			formatArgs:            "1.2345",
 			expectedOutput:        "1.234",
 			expectedRuntimeCost:   11,
-			expectedEstimatedCost: checker.FixedCostEstimate(11),
+			expectedEstimatedCost: cost.FixedCostEstimate(11),
 		},
 		{
 			name:                  "fixed point formatting clause with int",
@@ -132,7 +132,7 @@ func TestStringFormatV2(t *testing.T) {
 			formatArgs:            "1, 1u",
 			expectedOutput:        "1.000 + 1.00",
 			expectedRuntimeCost:   12,
-			expectedEstimatedCost: checker.FixedCostEstimate(12),
+			expectedEstimatedCost: cost.FixedCostEstimate(12),
 		},
 		{
 			name:                  "binary formatting clause",
@@ -140,7 +140,7 @@ func TestStringFormatV2(t *testing.T) {
 			formatArgs:            "5",
 			expectedOutput:        "this is 5 in binary: 101",
 			expectedRuntimeCost:   13,
-			expectedEstimatedCost: checker.CostEstimate{Min: 13, Max: 13},
+			expectedEstimatedCost: cost.CostEstimate{Min: 13, Max: 13},
 		},
 		{
 			name:                  "negative binary formatting clause",
@@ -148,7 +148,7 @@ func TestStringFormatV2(t *testing.T) {
 			formatArgs:            "-5",
 			expectedOutput:        "this is -5 in binary: -101",
 			expectedRuntimeCost:   13,
-			expectedEstimatedCost: checker.CostEstimate{Min: 13, Max: 13},
+			expectedEstimatedCost: cost.CostEstimate{Min: 13, Max: 13},
 		},
 		{
 			name:                  "uint support for binary formatting",
@@ -156,7 +156,7 @@ func TestStringFormatV2(t *testing.T) {
 			formatArgs:            "uint(64)",
 			expectedOutput:        "unsigned 64 in binary: 1000000",
 			expectedRuntimeCost:   14,
-			expectedEstimatedCost: checker.CostEstimate{Min: 14, Max: 14},
+			expectedEstimatedCost: cost.CostEstimate{Min: 14, Max: 14},
 		},
 		{
 			name:                  "bool support for binary formatting",
@@ -164,7 +164,7 @@ func TestStringFormatV2(t *testing.T) {
 			formatArgs:            "true",
 			expectedOutput:        "bit set from bool: 1",
 			expectedRuntimeCost:   13,
-			expectedEstimatedCost: checker.CostEstimate{Min: 13, Max: 13},
+			expectedEstimatedCost: cost.CostEstimate{Min: 13, Max: 13},
 		},
 		{
 			name:                  "octal formatting clause",
@@ -172,7 +172,7 @@ func TestStringFormatV2(t *testing.T) {
 			formatArgs:            "11",
 			expectedOutput:        "13",
 			expectedRuntimeCost:   11,
-			expectedEstimatedCost: checker.CostEstimate{Min: 11, Max: 11},
+			expectedEstimatedCost: cost.CostEstimate{Min: 11, Max: 11},
 		},
 		{
 			name:                  "negative octal formatting clause",
@@ -180,7 +180,7 @@ func TestStringFormatV2(t *testing.T) {
 			formatArgs:            "-11",
 			expectedOutput:        "-13",
 			expectedRuntimeCost:   11,
-			expectedEstimatedCost: checker.CostEstimate{Min: 11, Max: 11},
+			expectedEstimatedCost: cost.CostEstimate{Min: 11, Max: 11},
 		},
 		{
 			name:                  "uint support for octal formatting clause",
@@ -188,7 +188,7 @@ func TestStringFormatV2(t *testing.T) {
 			formatArgs:            "uint(65535)",
 			expectedOutput:        "this is an unsigned octal: 177777",
 			expectedRuntimeCost:   14,
-			expectedEstimatedCost: checker.CostEstimate{Min: 14, Max: 14},
+			expectedEstimatedCost: cost.CostEstimate{Min: 14, Max: 14},
 		},
 		{
 			name:                  "lowercase hexadecimal formatting clause",
@@ -196,7 +196,7 @@ func TestStringFormatV2(t *testing.T) {
 			formatArgs:            "30",
 			expectedOutput:        "1e is 30 in hexadecimal",
 			expectedRuntimeCost:   13,
-			expectedEstimatedCost: checker.CostEstimate{Min: 13, Max: 13},
+			expectedEstimatedCost: cost.CostEstimate{Min: 13, Max: 13},
 		},
 		{
 			name:                  "uppercase hexadecimal formatting clause",
@@ -204,7 +204,7 @@ func TestStringFormatV2(t *testing.T) {
 			formatArgs:            "30",
 			expectedOutput:        "1E is 20 in hexadecimal",
 			expectedRuntimeCost:   13,
-			expectedEstimatedCost: checker.CostEstimate{Min: 13, Max: 13},
+			expectedEstimatedCost: cost.CostEstimate{Min: 13, Max: 13},
 		},
 		{
 			name:                  "negative hexadecimal formatting clause",
@@ -212,7 +212,7 @@ func TestStringFormatV2(t *testing.T) {
 			formatArgs:            "-30",
 			expectedOutput:        "-1e is -30 in hexadecimal",
 			expectedRuntimeCost:   13,
-			expectedEstimatedCost: checker.CostEstimate{Min: 13, Max: 13},
+			expectedEstimatedCost: cost.CostEstimate{Min: 13, Max: 13},
 		},
 		{
 			name:                  "unsigned support for hexadecimal formatting clause",
@@ -220,7 +220,7 @@ func TestStringFormatV2(t *testing.T) {
 			formatArgs:            "uint(6000)",
 			expectedOutput:        "1770 is 6000 in hexadecimal",
 			expectedRuntimeCost:   14,
-			expectedEstimatedCost: checker.CostEstimate{Min: 14, Max: 14},
+			expectedEstimatedCost: cost.CostEstimate{Min: 14, Max: 14},
 		},
 		{
 			name:                  "string support with hexadecimal formatting clause",
@@ -228,7 +228,7 @@ func TestStringFormatV2(t *testing.T) {
 			formatArgs:            `"Hello world!"`,
 			expectedOutput:        "48656c6c6f20776f726c6421",
 			expectedRuntimeCost:   11,
-			expectedEstimatedCost: checker.CostEstimate{Min: 11, Max: 11},
+			expectedEstimatedCost: cost.CostEstimate{Min: 11, Max: 11},
 		},
 		{
 			name:                  "string support with uppercase hexadecimal formatting clause",
@@ -236,7 +236,7 @@ func TestStringFormatV2(t *testing.T) {
 			formatArgs:            `"Hello world!"`,
 			expectedOutput:        "48656C6C6F20776F726C6421",
 			expectedRuntimeCost:   11,
-			expectedEstimatedCost: checker.CostEstimate{Min: 11, Max: 11},
+			expectedEstimatedCost: cost.CostEstimate{Min: 11, Max: 11},
 		},
 		{
 			name:                  "byte support with hexadecimal formatting clause",
@@ -244,7 +244,7 @@ func TestStringFormatV2(t *testing.T) {
 			formatArgs:            `b"byte string"`,
 			expectedOutput:        "6279746520737472696e67",
 			expectedRuntimeCost:   11,
-			expectedEstimatedCost: checker.CostEstimate{Min: 11, Max: 11},
+			expectedEstimatedCost: cost.CostEstimate{Min: 11, Max: 11},
 		},
 		{
 			name:                  "byte support with hexadecimal formatting clause leading zero",
@@ -252,7 +252,7 @@ func TestStringFormatV2(t *testing.T) {
 			formatArgs:            `b"\x00\x00byte string\x00"`,
 			expectedOutput:        "00006279746520737472696e6700",
 			expectedRuntimeCost:   11,
-			expectedEstimatedCost: checker.CostEstimate{Min: 11, Max: 11},
+			expectedEstimatedCost: cost.CostEstimate{Min: 11, Max: 11},
 		},
 		{
 			name:                  "byte support with uppercase hexadecimal formatting clause",
@@ -260,7 +260,7 @@ func TestStringFormatV2(t *testing.T) {
 			formatArgs:            `b"byte string"`,
 			expectedOutput:        "6279746520737472696E67",
 			expectedRuntimeCost:   11,
-			expectedEstimatedCost: checker.CostEstimate{Min: 11, Max: 11},
+			expectedEstimatedCost: cost.CostEstimate{Min: 11, Max: 11},
 		},
 		{
 			name:                  "scientific notation formatting clause",
@@ -268,7 +268,7 @@ func TestStringFormatV2(t *testing.T) {
 			formatArgs:            "1052.032911275",
 			expectedOutput:        "1.052033e+03",
 			expectedRuntimeCost:   11,
-			expectedEstimatedCost: checker.CostEstimate{Min: 11, Max: 11},
+			expectedEstimatedCost: cost.CostEstimate{Min: 11, Max: 11},
 		},
 		{
 			name:                  "scientific notation formatting clause with uint",
@@ -276,7 +276,7 @@ func TestStringFormatV2(t *testing.T) {
 			formatArgs:            "1052u",
 			expectedOutput:        "1.0520e+03",
 			expectedRuntimeCost:   11,
-			expectedEstimatedCost: checker.CostEstimate{Min: 11, Max: 11},
+			expectedEstimatedCost: cost.CostEstimate{Min: 11, Max: 11},
 		},
 		{
 			name:                  "scientific notation formatting clause with int",
@@ -284,7 +284,7 @@ func TestStringFormatV2(t *testing.T) {
 			formatArgs:            "1052",
 			expectedOutput:        "1.05200e+03",
 			expectedRuntimeCost:   11,
-			expectedEstimatedCost: checker.CostEstimate{Min: 11, Max: 11},
+			expectedEstimatedCost: cost.CostEstimate{Min: 11, Max: 11},
 		},
 		{
 			name:                  "default precision for fixed-point clause",
@@ -292,7 +292,7 @@ func TestStringFormatV2(t *testing.T) {
 			formatArgs:            "2.71828",
 			expectedOutput:        "2.718280",
 			expectedRuntimeCost:   11,
-			expectedEstimatedCost: checker.CostEstimate{Min: 11, Max: 11},
+			expectedEstimatedCost: cost.CostEstimate{Min: 11, Max: 11},
 		},
 		{
 			name:                  "default precision for scientific notation",
@@ -300,7 +300,7 @@ func TestStringFormatV2(t *testing.T) {
 			formatArgs:            "2.71828",
 			expectedOutput:        "2.718280e+00",
 			expectedRuntimeCost:   11,
-			expectedEstimatedCost: checker.CostEstimate{Min: 11, Max: 11},
+			expectedEstimatedCost: cost.CostEstimate{Min: 11, Max: 11},
 		},
 		{
 			name:                  "default precision for string",
@@ -308,7 +308,7 @@ func TestStringFormatV2(t *testing.T) {
 			formatArgs:            "2.71",
 			expectedOutput:        "2.71",
 			expectedRuntimeCost:   11,
-			expectedEstimatedCost: checker.CostEstimate{Min: 11, Max: 11},
+			expectedEstimatedCost: cost.CostEstimate{Min: 11, Max: 11},
 		},
 		{
 			name:                  "default list precision for string",
@@ -316,7 +316,7 @@ func TestStringFormatV2(t *testing.T) {
 			formatArgs:            "[2.71]",
 			expectedOutput:        "[2.71]",
 			expectedRuntimeCost:   21,
-			expectedEstimatedCost: checker.CostEstimate{Min: 21, Max: 21},
+			expectedEstimatedCost: cost.CostEstimate{Min: 21, Max: 21},
 		},
 		{
 			name:                  "default format for string",
@@ -324,7 +324,7 @@ func TestStringFormatV2(t *testing.T) {
 			formatArgs:            "0.000000002",
 			expectedOutput:        "0.000000002",
 			expectedRuntimeCost:   11,
-			expectedEstimatedCost: checker.CostEstimate{Min: 11, Max: 11},
+			expectedEstimatedCost: cost.CostEstimate{Min: 11, Max: 11},
 		},
 		{
 			name:                  "default list scientific notation for string",
@@ -332,7 +332,7 @@ func TestStringFormatV2(t *testing.T) {
 			formatArgs:            "[0.000000002]",
 			expectedOutput:        "[0.000000002]",
 			expectedRuntimeCost:   21,
-			expectedEstimatedCost: checker.CostEstimate{Min: 21, Max: 21},
+			expectedEstimatedCost: cost.CostEstimate{Min: 21, Max: 21},
 		},
 		{
 			name:                  "NaN support for fixed-point",
@@ -340,7 +340,7 @@ func TestStringFormatV2(t *testing.T) {
 			formatArgs:            `double("NaN")`,
 			expectedOutput:        "NaN",
 			expectedRuntimeCost:   12,
-			expectedEstimatedCost: checker.CostEstimate{Min: 12, Max: 12},
+			expectedEstimatedCost: cost.CostEstimate{Min: 12, Max: 12},
 		},
 		{
 			name:                  "positive infinity support for fixed-point",
@@ -348,7 +348,7 @@ func TestStringFormatV2(t *testing.T) {
 			formatArgs:            `double("Infinity")`,
 			expectedOutput:        "Infinity",
 			expectedRuntimeCost:   12,
-			expectedEstimatedCost: checker.CostEstimate{Min: 12, Max: 12},
+			expectedEstimatedCost: cost.CostEstimate{Min: 12, Max: 12},
 		},
 		{
 			name:                  "negative infinity support for fixed-point",
@@ -356,7 +356,7 @@ func TestStringFormatV2(t *testing.T) {
 			formatArgs:            `double("-Infinity")`,
 			expectedOutput:        "-Infinity",
 			expectedRuntimeCost:   12,
-			expectedEstimatedCost: checker.CostEstimate{Min: 12, Max: 12},
+			expectedEstimatedCost: cost.CostEstimate{Min: 12, Max: 12},
 		},
 		{
 			name:           "NaN support for string",
@@ -388,7 +388,7 @@ func TestStringFormatV2(t *testing.T) {
 			formatArgs:            "uint(64)",
 			expectedOutput:        "64",
 			expectedRuntimeCost:   12,
-			expectedEstimatedCost: checker.CostEstimate{Min: 12, Max: 12},
+			expectedEstimatedCost: cost.CostEstimate{Min: 12, Max: 12},
 		},
 		{
 			name:                  "null support for string",
@@ -396,7 +396,7 @@ func TestStringFormatV2(t *testing.T) {
 			formatArgs:            "null",
 			expectedOutput:        "null: null",
 			expectedRuntimeCost:   11,
-			expectedEstimatedCost: checker.CostEstimate{Min: 11, Max: 11},
+			expectedEstimatedCost: cost.CostEstimate{Min: 11, Max: 11},
 		},
 		{
 			name:                  "int support for string",
@@ -404,7 +404,7 @@ func TestStringFormatV2(t *testing.T) {
 			formatArgs:            `999999999999`,
 			expectedOutput:        "999999999999",
 			expectedRuntimeCost:   11,
-			expectedEstimatedCost: checker.CostEstimate{Min: 11, Max: 11},
+			expectedEstimatedCost: cost.CostEstimate{Min: 11, Max: 11},
 		},
 		{
 			name:                  "bytes support for string",
@@ -412,7 +412,7 @@ func TestStringFormatV2(t *testing.T) {
 			formatArgs:            `b"xyz"`,
 			expectedOutput:        "some bytes: xyz",
 			expectedRuntimeCost:   12,
-			expectedEstimatedCost: checker.CostEstimate{Min: 12, Max: 12},
+			expectedEstimatedCost: cost.CostEstimate{Min: 12, Max: 12},
 		},
 		{
 			name:                  "type() support for string",
@@ -420,7 +420,7 @@ func TestStringFormatV2(t *testing.T) {
 			formatArgs:            `type("test string")`,
 			expectedOutput:        "type is string",
 			expectedRuntimeCost:   12,
-			expectedEstimatedCost: checker.CostEstimate{Min: 12, Max: 12},
+			expectedEstimatedCost: cost.CostEstimate{Min: 12, Max: 12},
 		},
 		{
 			name:                  "timestamp support for string",
@@ -428,7 +428,7 @@ func TestStringFormatV2(t *testing.T) {
 			formatArgs:            `timestamp("2023-02-03T23:31:20+00:00")`,
 			expectedOutput:        "2023-02-03T23:31:20Z",
 			expectedRuntimeCost:   12,
-			expectedEstimatedCost: checker.CostEstimate{Min: 12, Max: 12},
+			expectedEstimatedCost: cost.CostEstimate{Min: 12, Max: 12},
 		},
 		{
 			name:                  "duration support for string",
@@ -436,7 +436,7 @@ func TestStringFormatV2(t *testing.T) {
 			formatArgs:            `duration("1h45m47s")`,
 			expectedOutput:        "6347s",
 			expectedRuntimeCost:   12,
-			expectedEstimatedCost: checker.CostEstimate{Min: 12, Max: 12},
+			expectedEstimatedCost: cost.CostEstimate{Min: 12, Max: 12},
 		},
 		{
 			name:                  "small duration support for string",
@@ -444,7 +444,7 @@ func TestStringFormatV2(t *testing.T) {
 			formatArgs:            `duration("2ns")`,
 			expectedOutput:        "0.000000002s",
 			expectedRuntimeCost:   12,
-			expectedEstimatedCost: checker.CostEstimate{Min: 12, Max: 12},
+			expectedEstimatedCost: cost.CostEstimate{Min: 12, Max: 12},
 		},
 		{
 			name:                  "list support for string",
@@ -452,7 +452,7 @@ func TestStringFormatV2(t *testing.T) {
 			formatArgs:            `["abc", 3.14, null, [9, 8, 7, 6], timestamp("2023-02-03T23:31:20Z")]`,
 			expectedOutput:        `[abc, 3.14, null, [9, 8, 7, 6], 2023-02-03T23:31:20Z]`,
 			expectedRuntimeCost:   32,
-			expectedEstimatedCost: checker.CostEstimate{Min: 32, Max: 32},
+			expectedEstimatedCost: cost.CostEstimate{Min: 32, Max: 32},
 		},
 		{
 			name:                  "map support for string",
@@ -460,7 +460,7 @@ func TestStringFormatV2(t *testing.T) {
 			formatArgs:            `{"key1": b"xyz", "key5": null, "key2": duration("2h"), "key4": true, "key3": 2.71828}`,
 			expectedOutput:        `{key1: xyz, key2: 7200s, key3: 2.71828, key4: true, key5: null}`,
 			expectedRuntimeCost:   42,
-			expectedEstimatedCost: checker.CostEstimate{Min: 42, Max: 42},
+			expectedEstimatedCost: cost.CostEstimate{Min: 42, Max: 42},
 		},
 		{
 			name:                  "map support (all key types)",
@@ -468,7 +468,7 @@ func TestStringFormatV2(t *testing.T) {
 			formatArgs:            `{1: "value1", uint(2): "value2", true: double("NaN")}`,
 			expectedOutput:        `map with multiple key types: {1: value1, 2: value2, true: NaN}`,
 			expectedRuntimeCost:   46,
-			expectedEstimatedCost: checker.CostEstimate{Min: 46, Max: 46},
+			expectedEstimatedCost: cost.CostEstimate{Min: 46, Max: 46},
 		},
 		{
 			name:                  "boolean support for %s",
@@ -476,7 +476,7 @@ func TestStringFormatV2(t *testing.T) {
 			formatArgs:            `true, false`,
 			expectedOutput:        "true bool: true, false bool: false",
 			expectedRuntimeCost:   13,
-			expectedEstimatedCost: checker.CostEstimate{Min: 13, Max: 13},
+			expectedEstimatedCost: cost.CostEstimate{Min: 13, Max: 13},
 		},
 		{
 			name:       "dyntype support for string formatting clause",
@@ -487,7 +487,7 @@ func TestStringFormatV2(t *testing.T) {
 			},
 			expectedOutput:        "dynamic string: a string",
 			expectedRuntimeCost:   13,
-			expectedEstimatedCost: checker.CostEstimate{Min: 13, Max: 13},
+			expectedEstimatedCost: cost.CostEstimate{Min: 13, Max: 13},
 		},
 		{
 			name:       "dyntype support for numbers with string formatting clause",
@@ -499,7 +499,7 @@ func TestStringFormatV2(t *testing.T) {
 			},
 			expectedOutput:        "dynIntStr: 32 dynDoubleStr: 56.8",
 			expectedRuntimeCost:   15,
-			expectedEstimatedCost: checker.CostEstimate{Min: 15, Max: 15},
+			expectedEstimatedCost: cost.CostEstimate{Min: 15, Max: 15},
 		},
 		{
 			name:       "dyntype support for integer formatting clause",
@@ -510,7 +510,7 @@ func TestStringFormatV2(t *testing.T) {
 			},
 			expectedOutput:        "dynamic int: 128",
 			expectedRuntimeCost:   13,
-			expectedEstimatedCost: checker.CostEstimate{Min: 13, Max: 13},
+			expectedEstimatedCost: cost.CostEstimate{Min: 13, Max: 13},
 		},
 		{
 			name:       "dyntype support for integer formatting clause (unsigned)",
@@ -521,7 +521,7 @@ func TestStringFormatV2(t *testing.T) {
 			},
 			expectedOutput:        "dynamic unsigned int: 256",
 			expectedRuntimeCost:   14,
-			expectedEstimatedCost: checker.CostEstimate{Min: 14, Max: 14},
+			expectedEstimatedCost: cost.CostEstimate{Min: 14, Max: 14},
 		},
 		{
 			name:       "dyntype support for hex formatting clause",
@@ -532,7 +532,7 @@ func TestStringFormatV2(t *testing.T) {
 			},
 			expectedOutput:        "dynamic hex int: 16",
 			expectedRuntimeCost:   13,
-			expectedEstimatedCost: checker.CostEstimate{Min: 13, Max: 13},
+			expectedEstimatedCost: cost.CostEstimate{Min: 13, Max: 13},
 		},
 		{
 			name:       "dyntype support for hex formatting clause (uppercase)",
@@ -543,7 +543,7 @@ func TestStringFormatV2(t *testing.T) {
 			},
 			expectedOutput:        "dynamic hex int: 1A (uppercase)",
 			expectedRuntimeCost:   15,
-			expectedEstimatedCost: checker.CostEstimate{Min: 15, Max: 15},
+			expectedEstimatedCost: cost.CostEstimate{Min: 15, Max: 15},
 		},
 		{
 			name:       "dyntype support for unsigned hex formatting clause",
@@ -554,7 +554,7 @@ func TestStringFormatV2(t *testing.T) {
 			},
 			expectedOutput:        "dynamic hex int: 1f4 (unsigned)",
 			expectedRuntimeCost:   14,
-			expectedEstimatedCost: checker.CostEstimate{Min: 14, Max: 14},
+			expectedEstimatedCost: cost.CostEstimate{Min: 14, Max: 14},
 		},
 		{
 			name:       "dyntype support for fixed-point formatting clause",
@@ -565,7 +565,7 @@ func TestStringFormatV2(t *testing.T) {
 			},
 			expectedOutput:        "dynamic double: 4.500",
 			expectedRuntimeCost:   13,
-			expectedEstimatedCost: checker.CostEstimate{Min: 13, Max: 13},
+			expectedEstimatedCost: cost.CostEstimate{Min: 13, Max: 13},
 		},
 		{
 			name:       "dyntype support for scientific notation",
@@ -576,7 +576,7 @@ func TestStringFormatV2(t *testing.T) {
 			},
 			expectedOutput:        "(dyntype) e: 2.718280e+00",
 			expectedRuntimeCost:   13,
-			expectedEstimatedCost: checker.CostEstimate{Min: 13, Max: 13},
+			expectedEstimatedCost: cost.CostEstimate{Min: 13, Max: 13},
 		},
 		{
 			name:       "dyntype NaN/infinity support for decimal",
@@ -589,7 +589,7 @@ func TestStringFormatV2(t *testing.T) {
 			},
 			expectedOutput:        "NaN: NaN, infinity: Infinity, -infinity: -Infinity",
 			expectedRuntimeCost:   17,
-			expectedEstimatedCost: checker.FixedCostEstimate(17),
+			expectedEstimatedCost: cost.FixedCostEstimate(17),
 		},
 		{
 			name:       "dyntype NaN/infinity support for fixed-point",
@@ -601,7 +601,7 @@ func TestStringFormatV2(t *testing.T) {
 			},
 			expectedOutput:        "NaN: NaN, infinity: Infinity",
 			expectedRuntimeCost:   15,
-			expectedEstimatedCost: checker.CostEstimate{Min: 15, Max: 15},
+			expectedEstimatedCost: cost.CostEstimate{Min: 15, Max: 15},
 		},
 		{
 			name:       "dyntype NaN/infinity support for scientific",
@@ -614,7 +614,7 @@ func TestStringFormatV2(t *testing.T) {
 			},
 			expectedOutput:        "NaN: NaN, infinity: Infinity, -infinity: -Infinity",
 			expectedRuntimeCost:   17,
-			expectedEstimatedCost: checker.FixedCostEstimate(17),
+			expectedEstimatedCost: cost.FixedCostEstimate(17),
 		},
 		{
 			name:       "dyntype support for timestamp",
@@ -625,7 +625,7 @@ func TestStringFormatV2(t *testing.T) {
 			},
 			expectedOutput:        "dyntype timestamp: 2009-11-10T23:00:00Z",
 			expectedRuntimeCost:   14,
-			expectedEstimatedCost: checker.CostEstimate{Min: 14, Max: 14},
+			expectedEstimatedCost: cost.CostEstimate{Min: 14, Max: 14},
 		},
 		{
 			name:       "dyntype support for duration",
@@ -636,7 +636,7 @@ func TestStringFormatV2(t *testing.T) {
 			},
 			expectedOutput:        "dyntype duration: 8747s",
 			expectedRuntimeCost:   13,
-			expectedEstimatedCost: checker.CostEstimate{Min: 13, Max: 13},
+			expectedEstimatedCost: cost.CostEstimate{Min: 13, Max: 13},
 		},
 		{
 			name:       "dyntype support for lists",
@@ -647,7 +647,7 @@ func TestStringFormatV2(t *testing.T) {
 			},
 			expectedOutput:        `dyntype list: [6, 4.2, a string]`,
 			expectedRuntimeCost:   13,
-			expectedEstimatedCost: checker.CostEstimate{Min: 13, Max: 13},
+			expectedEstimatedCost: cost.CostEstimate{Min: 13, Max: 13},
 		},
 		{
 			name:       "dyntype support for maps",
@@ -662,7 +662,7 @@ func TestStringFormatV2(t *testing.T) {
 			},
 			expectedOutput:        `dyntype map: {6: 422s, strKey: x, true: 42}`,
 			expectedRuntimeCost:   13,
-			expectedEstimatedCost: checker.CostEstimate{Min: 13, Max: 13},
+			expectedEstimatedCost: cost.CostEstimate{Min: 13, Max: 13},
 		},
 		{
 			name:       "message field support",
@@ -888,7 +888,7 @@ func TestStringFormatV2(t *testing.T) {
 			err:              "precision 9999999 exceeds maximum allowed precision 100",
 		},
 	}
-	evalExpr := func(env *cel.Env, expr string, evalArgs any, expectedRuntimeCost uint64, expectedEstimatedCost checker.CostEstimate, t *testing.T) (ref.Val, error) {
+	evalExpr := func(env *cel.Env, expr string, evalArgs any, expectedRuntimeCost uint64, expectedEstimatedCost cost.CostEstimate, t *testing.T) (ref.Val, error) {
 		t.Logf("evaluating expr: %s", expr)
 		parsedAst, issues := env.Parse(expr)
 		if issues.Err() != nil {
@@ -988,7 +988,7 @@ func TestStringFormatV2(t *testing.T) {
 		opts = append(opts, variables...)
 		return opts
 	}
-	runCase := func(format, formatArgs string, dynArgs map[string]any, skipCompileCheck bool, expectedRuntimeCost uint64, expectedEstimatedCost checker.CostEstimate, t *testing.T) (ref.Val, error) {
+	runCase := func(format, formatArgs string, dynArgs map[string]any, skipCompileCheck bool, expectedRuntimeCost uint64, expectedEstimatedCost cost.CostEstimate, t *testing.T) (ref.Val, error) {
 		env, err := cel.NewEnv(buildOpts(skipCompileCheck, buildVariables(dynArgs))...)
 		if err != nil {
 			t.Fatalf("cel.NewEnv() failed: %v", err)

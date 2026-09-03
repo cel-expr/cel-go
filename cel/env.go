@@ -28,6 +28,7 @@ import (
 	"cel.dev/cel-go/common"
 	celast "cel.dev/cel-go/common/ast"
 	"cel.dev/cel-go/common/containers"
+	"cel.dev/cel-go/common/cost"
 	"cel.dev/cel-go/common/decls"
 	"cel.dev/cel-go/common/env"
 	"cel.dev/cel-go/common/functions"
@@ -149,7 +150,7 @@ type Env struct {
 	limits          map[limitID]int
 	libraries       map[string]SingletonLibrary
 	validators      []ASTValidator
-	costOptions     []checker.CostOption
+	costOptions     []cost.CostOption
 
 	// Flags for copy-on-write behavior with env.Extend.
 	funcsShared           bool
@@ -399,7 +400,7 @@ func NewCustomEnv(opts ...EnvOption) (*Env, error) {
 		libraries:       map[string]SingletonLibrary{},
 		validators:      []ASTValidator{},
 		progOpts:        []ProgramOption{},
-		costOptions:     []checker.CostOption{},
+		costOptions:     []cost.CostOption{},
 	}).configure(opts)
 }
 
@@ -887,11 +888,11 @@ func (e *Env) ResidualAst(a *Ast, details *EvalDetails) (*Ast, error) {
 
 // EstimateCost estimates the cost of a type checked CEL expression using the length estimates of input data and
 // extension functions provided by estimator.
-func (e *Env) EstimateCost(ast *Ast, estimator checker.CostEstimator, opts ...checker.CostOption) (checker.CostEstimate, error) {
-	extendedOpts := make([]checker.CostOption, 0, len(e.costOptions))
+func (e *Env) EstimateCost(ast *Ast, estimator cost.Estimator, opts ...cost.CostOption) (cost.CostEstimate, error) {
+	extendedOpts := make([]cost.CostOption, 0, len(e.costOptions))
 	extendedOpts = append(extendedOpts, opts...)
 	extendedOpts = append(extendedOpts, e.costOptions...)
-	return checker.Cost(ast.NativeRep(), estimator, extendedOpts...)
+	return cost.Cost(ast.NativeRep(), estimator, extendedOpts...)
 }
 
 // configure applies a series of EnvOptions to the current environment.
