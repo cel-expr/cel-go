@@ -20,7 +20,7 @@ import (
 	"testing"
 
 	"cel.dev/cel-go/cel"
-	"cel.dev/cel-go/checker"
+	"cel.dev/cel-go/common/cost"
 	"cel.dev/cel-go/common/types"
 )
 
@@ -738,151 +738,151 @@ func TestNetworkCost(t *testing.T) {
 	tests := []struct {
 		name          string
 		expr          string
-		estimatedCost checker.CostEstimate
+		estimatedCost cost.CostEstimate
 		runtimeCost   uint64
 	}{
 		{
 			name:          "ip parse",
 			expr:          "ip('192.168.0.1')",
-			estimatedCost: checker.FixedCostEstimate(2),
+			estimatedCost: cost.FixedCostEstimate(2),
 			runtimeCost:   2,
 		},
 		{
 			name:          "isIP parse",
 			expr:          "isIP('192.168.0.1')",
-			estimatedCost: checker.FixedCostEstimate(2),
+			estimatedCost: cost.FixedCostEstimate(2),
 			runtimeCost:   2,
 		},
 		{
 			name:          "cidr parse",
 			expr:          "cidr('192.168.0.0/16')",
-			estimatedCost: checker.FixedCostEstimate(2),
+			estimatedCost: cost.FixedCostEstimate(2),
 			runtimeCost:   2,
 		},
 		{
 			name:          "isCIDR parse",
 			expr:          "isCIDR('192.168.0.0/16')",
-			estimatedCost: checker.FixedCostEstimate(2),
+			estimatedCost: cost.FixedCostEstimate(2),
 			runtimeCost:   2,
 		},
 		{
 			name:          "ip.isCanonical",
 			expr:          "ip.isCanonical('192.168.0.1')",
-			estimatedCost: checker.FixedCostEstimate(3),
+			estimatedCost: cost.FixedCostEstimate(3),
 			runtimeCost:   3,
 		},
 		{
 			name:          "cidr containsIP ip",
 			expr:          "cidr('192.168.0.0/16').containsIP(ip('192.169.0.1'))",
-			estimatedCost: checker.CostEstimate{Min: 5, Max: 8},
+			estimatedCost: cost.CostEstimate{Min: 5, Max: 8},
 			runtimeCost:   5,
 		},
 		{
 			name:          "cidr containsIP string",
 			expr:          "cidr('192.168.0.0/16').containsIP('192.0.0.1')",
-			estimatedCost: checker.CostEstimate{Min: 4, Max: 7},
+			estimatedCost: cost.CostEstimate{Min: 4, Max: 7},
 			runtimeCost:   4,
 		},
 		{
 			name:          "cidr containsCIDR cidr",
 			expr:          "cidr('192.168.0.0/16').containsCIDR(cidr('192.0.0.0/30'))",
-			estimatedCost: checker.CostEstimate{Min: 7, Max: 11},
+			estimatedCost: cost.CostEstimate{Min: 7, Max: 11},
 			runtimeCost:   7,
 		},
 		{
 			name:          "cidr containsCIDR string",
 			expr:          "cidr('192.168.0.0/16').containsCIDR('192.0.0.0/30')",
-			estimatedCost: checker.CostEstimate{Min: 7, Max: 11},
+			estimatedCost: cost.CostEstimate{Min: 7, Max: 11},
 			runtimeCost:   7,
 		},
 		{
 			name:          "ip family",
 			expr:          "ip('192.168.0.1').family()",
-			estimatedCost: checker.FixedCostEstimate(3),
+			estimatedCost: cost.FixedCostEstimate(3),
 			runtimeCost:   3,
 		},
 		{
 			name:          "ip unspecified",
 			expr:          "ip('192.168.0.1').isUnspecified()",
-			estimatedCost: checker.FixedCostEstimate(3),
+			estimatedCost: cost.FixedCostEstimate(3),
 			runtimeCost:   3,
 		},
 		{
 			name:          "ip isLoopback",
 			expr:          "ip('192.168.0.1').isLoopback()",
-			estimatedCost: checker.FixedCostEstimate(3),
+			estimatedCost: cost.FixedCostEstimate(3),
 			runtimeCost:   3,
 		},
 		{
 			name:          "ip isLinkLocalMulticast",
 			expr:          "ip('192.168.0.1').isLinkLocalMulticast()",
-			estimatedCost: checker.FixedCostEstimate(3),
+			estimatedCost: cost.FixedCostEstimate(3),
 			runtimeCost:   3,
 		},
 		{
 			name:          "ip isLinkLocalUnicast",
 			expr:          "ip('192.168.0.1').isLinkLocalUnicast()",
-			estimatedCost: checker.FixedCostEstimate(3),
+			estimatedCost: cost.FixedCostEstimate(3),
 			runtimeCost:   3,
 		},
 		{
 			name:          "ip isGlobalUnicast",
 			expr:          "ip('192.168.0.1').isGlobalUnicast()",
-			estimatedCost: checker.FixedCostEstimate(3),
+			estimatedCost: cost.FixedCostEstimate(3),
 			runtimeCost:   3,
 		},
 		{
 			name:          "ipv6 family",
 			expr:          "ip('2001:db8:3333:4444:5555:6666:7777:8888').family()",
-			estimatedCost: checker.FixedCostEstimate(5),
+			estimatedCost: cost.FixedCostEstimate(5),
 			runtimeCost:   5,
 		},
 		{
 			name:          "ipv6 unspecified",
 			expr:          "ip('2001:db8:3333:4444:5555:6666:7777:8888').isUnspecified()",
-			estimatedCost: checker.FixedCostEstimate(5),
+			estimatedCost: cost.FixedCostEstimate(5),
 			runtimeCost:   5,
 		},
 		{
 			name:          "ipv6 isLoopback",
 			expr:          "ip('2001:db8:3333:4444:5555:6666:7777:8888').isLoopback()",
-			estimatedCost: checker.FixedCostEstimate(5),
+			estimatedCost: cost.FixedCostEstimate(5),
 			runtimeCost:   5,
 		},
 		{
 			name:          "ipv6 isLinkLocalMulticast",
 			expr:          "ip('2001:db8:3333:4444:5555:6666:7777:8888').isLinkLocalMulticast()",
-			estimatedCost: checker.FixedCostEstimate(5),
+			estimatedCost: cost.FixedCostEstimate(5),
 			runtimeCost:   5,
 		},
 		{
 			name:          "ipv6 isLinkLocalUnicast",
 			expr:          "ip('2001:db8:3333:4444:5555:6666:7777:8888').isLinkLocalUnicast()",
-			estimatedCost: checker.FixedCostEstimate(5),
+			estimatedCost: cost.FixedCostEstimate(5),
 			runtimeCost:   5,
 		},
 		{
 			name:          "ipv6 isGlobalUnicast",
 			expr:          "ip('2001:db8:3333:4444:5555:6666:7777:8888').isGlobalUnicast()",
-			estimatedCost: checker.FixedCostEstimate(5),
+			estimatedCost: cost.FixedCostEstimate(5),
 			runtimeCost:   5,
 		},
 		{
 			name:          "cidr ip extraction",
 			expr:          "cidr('2001:db8::/32').ip()",
-			estimatedCost: checker.FixedCostEstimate(3),
+			estimatedCost: cost.FixedCostEstimate(3),
 			runtimeCost:   3,
 		},
 		{
 			name:          "cidr prefixLength",
 			expr:          "cidr('2001:db8::/32').prefixLength()",
-			estimatedCost: checker.FixedCostEstimate(3),
+			estimatedCost: cost.FixedCostEstimate(3),
 			runtimeCost:   3,
 		},
 		{
 			name:          "cidr masked",
 			expr:          "cidr('2001:db8::/32').masked()",
-			estimatedCost: checker.FixedCostEstimate(3),
+			estimatedCost: cost.FixedCostEstimate(3),
 			runtimeCost:   3,
 		},
 	}
@@ -894,7 +894,7 @@ func TestNetworkCost(t *testing.T) {
 	}
 }
 
-func testCost(t *testing.T, expr string, estimatedCost checker.CostEstimate, runtimeCost uint64) {
+func testCost(t *testing.T, expr string, estimatedCost cost.CostEstimate, runtimeCost uint64) {
 	t.Helper()
 	env, err := cel.NewEnv(Network())
 	if err != nil {
@@ -935,37 +935,37 @@ func testCost(t *testing.T, expr string, estimatedCost checker.CostEstimate, run
 
 func TestIPCost(t *testing.T) {
 	ipv4 := "ip('192.168.0.1')"
-	ipv4BaseEstimatedCost := checker.FixedCostEstimate(2)
+	ipv4BaseEstimatedCost := cost.FixedCostEstimate(2)
 	ipv4BaseRuntimeCost := uint64(2)
 
 	ipv6 := "ip('2001:db8:3333:4444:5555:6666:7777:8888')"
-	ipv6BaseEstimatedCost := checker.FixedCostEstimate(4)
+	ipv6BaseEstimatedCost := cost.FixedCostEstimate(4)
 	ipv6BaseRuntimeCost := uint64(4)
 
 	testCases := []struct {
 		ops                []string
-		expectEsimatedCost func(checker.CostEstimate) checker.CostEstimate
+		expectEsimatedCost func(cost.CostEstimate) cost.CostEstimate
 		expectRuntimeCost  func(uint64) uint64
 	}{
 		{
 			// For just parsing the IP, the cost is expected to be the base.
 			ops:                []string{""},
-			expectEsimatedCost: func(c checker.CostEstimate) checker.CostEstimate { return c },
+			expectEsimatedCost: func(c cost.CostEstimate) cost.CostEstimate { return c },
 			expectRuntimeCost:  func(c uint64) uint64 { return c },
 		},
 		{
 			ops: []string{".family()", ".isUnspecified()", ".isLoopback()", ".isLinkLocalMulticast()", ".isLinkLocalUnicast()", ".isGlobalUnicast()"},
 			// For most other operations, the cost is expected to be the base + 1.
-			expectEsimatedCost: func(c checker.CostEstimate) checker.CostEstimate {
-				return checker.CostEstimate{Min: c.Min + 1, Max: c.Max + 1}
+			expectEsimatedCost: func(c cost.CostEstimate) cost.CostEstimate {
+				return cost.CostEstimate{Min: c.Min + 1, Max: c.Max + 1}
 			},
 			expectRuntimeCost: func(c uint64) uint64 { return c + 1 },
 		},
 		{
 			ops: []string{" == ip('192.168.0.1')"},
 			// For most other operations, the cost is expected to be the base + 1.
-			expectEsimatedCost: func(c checker.CostEstimate) checker.CostEstimate {
-				return c.Add(ipv4BaseEstimatedCost).Add(checker.CostEstimate{Min: 1, Max: 2})
+			expectEsimatedCost: func(c cost.CostEstimate) cost.CostEstimate {
+				return c.Add(ipv4BaseEstimatedCost).Add(cost.CostEstimate{Min: 1, Max: 2})
 			},
 			expectRuntimeCost: func(c uint64) uint64 { return c + ipv4BaseRuntimeCost + 1 },
 		},
@@ -986,16 +986,16 @@ func TestIPCost(t *testing.T) {
 
 func TestCIDRCost(t *testing.T) {
 	ipv4 := "cidr('192.168.0.0/16')"
-	ipv4BaseEstimatedCost := checker.CostEstimate{Min: 2, Max: 2}
+	ipv4BaseEstimatedCost := cost.CostEstimate{Min: 2, Max: 2}
 	ipv4BaseRuntimeCost := uint64(2)
 
 	ipv6 := "cidr('2001:db8::/32')"
-	ipv6BaseEstimatedCost := checker.CostEstimate{Min: 2, Max: 2}
+	ipv6BaseEstimatedCost := cost.CostEstimate{Min: 2, Max: 2}
 	ipv6BaseRuntimeCost := uint64(2)
 
 	type testCase struct {
 		ops                []string
-		expectEsimatedCost func(checker.CostEstimate) checker.CostEstimate
+		expectEsimatedCost func(cost.CostEstimate) cost.CostEstimate
 		expectRuntimeCost  func(uint64) uint64
 	}
 
@@ -1003,22 +1003,22 @@ func TestCIDRCost(t *testing.T) {
 		{
 			// For just parsing the IP, the cost is expected to be the base.
 			ops:                []string{""},
-			expectEsimatedCost: func(c checker.CostEstimate) checker.CostEstimate { return c },
+			expectEsimatedCost: func(c cost.CostEstimate) cost.CostEstimate { return c },
 			expectRuntimeCost:  func(c uint64) uint64 { return c },
 		},
 		{
 			ops: []string{".ip()", ".prefixLength()", ".masked()"},
 			// For most other operations, the cost is expected to be the base + 1.
-			expectEsimatedCost: func(c checker.CostEstimate) checker.CostEstimate {
-				return checker.CostEstimate{Min: c.Min + 1, Max: c.Max + 1}
+			expectEsimatedCost: func(c cost.CostEstimate) cost.CostEstimate {
+				return cost.CostEstimate{Min: c.Min + 1, Max: c.Max + 1}
 			},
 			expectRuntimeCost: func(c uint64) uint64 { return c + 1 },
 		},
 		{
 			ops: []string{" == cidr('2001:db8::/32')"},
 			// For most other operations, the cost is expected to be the base + 1.
-			expectEsimatedCost: func(c checker.CostEstimate) checker.CostEstimate {
-				return c.Add(ipv6BaseEstimatedCost).Add(checker.CostEstimate{Min: 1, Max: 2})
+			expectEsimatedCost: func(c cost.CostEstimate) cost.CostEstimate {
+				return c.Add(ipv6BaseEstimatedCost).Add(cost.CostEstimate{Min: 1, Max: 2})
 			},
 			expectRuntimeCost: func(c uint64) uint64 { return c + ipv6BaseRuntimeCost + 1 },
 		},
@@ -1028,64 +1028,64 @@ func TestCIDRCost(t *testing.T) {
 	ipv4Cases := append(cases, []testCase{
 		{
 			ops: []string{".containsCIDR(cidr('192.0.0.0/30'))"},
-			expectEsimatedCost: func(c checker.CostEstimate) checker.CostEstimate {
-				return checker.CostEstimate{Min: c.Min + 5, Max: c.Max + 9}
+			expectEsimatedCost: func(c cost.CostEstimate) cost.CostEstimate {
+				return cost.CostEstimate{Min: c.Min + 5, Max: c.Max + 9}
 			},
 			expectRuntimeCost: func(c uint64) uint64 { return c + 5 },
 		},
 		{
 			ops: []string{".containsCIDR(cidr('192.168.0.0/16'))"},
-			expectEsimatedCost: func(c checker.CostEstimate) checker.CostEstimate {
-				return checker.CostEstimate{Min: c.Min + 5, Max: c.Max + 9}
+			expectEsimatedCost: func(c cost.CostEstimate) cost.CostEstimate {
+				return cost.CostEstimate{Min: c.Min + 5, Max: c.Max + 9}
 			},
 			expectRuntimeCost: func(c uint64) uint64 { return c + 5 },
 		},
 		{
 			ops: []string{".containsCIDR('192.0.0.0/30')"},
-			expectEsimatedCost: func(c checker.CostEstimate) checker.CostEstimate {
-				return checker.CostEstimate{Min: c.Min + 5, Max: c.Max + 9}
+			expectEsimatedCost: func(c cost.CostEstimate) cost.CostEstimate {
+				return cost.CostEstimate{Min: c.Min + 5, Max: c.Max + 9}
 			},
 			expectRuntimeCost: func(c uint64) uint64 { return c + 5 },
 		},
 		{
 			ops: []string{".containsCIDR('192.168.0.0/16')"},
-			expectEsimatedCost: func(c checker.CostEstimate) checker.CostEstimate {
-				return checker.CostEstimate{Min: c.Min + 5, Max: c.Max + 9}
+			expectEsimatedCost: func(c cost.CostEstimate) cost.CostEstimate {
+				return cost.CostEstimate{Min: c.Min + 5, Max: c.Max + 9}
 			},
 			expectRuntimeCost: func(c uint64) uint64 { return c + 5 },
 		},
 		{
 			ops: []string{".containsIP(ip('192.0.0.1'))"},
-			expectEsimatedCost: func(c checker.CostEstimate) checker.CostEstimate {
-				return checker.CostEstimate{Min: c.Min + 2, Max: c.Max + 5}
+			expectEsimatedCost: func(c cost.CostEstimate) cost.CostEstimate {
+				return cost.CostEstimate{Min: c.Min + 2, Max: c.Max + 5}
 			},
 			expectRuntimeCost: func(c uint64) uint64 { return c + 2 },
 		},
 		{
 			ops: []string{".containsIP(ip('192.169.0.1'))"},
-			expectEsimatedCost: func(c checker.CostEstimate) checker.CostEstimate {
-				return checker.CostEstimate{Min: c.Min + 3, Max: c.Max + 6}
+			expectEsimatedCost: func(c cost.CostEstimate) cost.CostEstimate {
+				return cost.CostEstimate{Min: c.Min + 3, Max: c.Max + 6}
 			},
 			expectRuntimeCost: func(c uint64) uint64 { return c + 3 },
 		},
 		{
 			ops: []string{".containsIP(ip('192.169.169.250'))"},
-			expectEsimatedCost: func(c checker.CostEstimate) checker.CostEstimate {
-				return checker.CostEstimate{Min: c.Min + 3, Max: c.Max + 6}
+			expectEsimatedCost: func(c cost.CostEstimate) cost.CostEstimate {
+				return cost.CostEstimate{Min: c.Min + 3, Max: c.Max + 6}
 			},
 			expectRuntimeCost: func(c uint64) uint64 { return c + 3 },
 		},
 		{
 			ops: []string{".containsIP('192.0.0.1')"},
-			expectEsimatedCost: func(c checker.CostEstimate) checker.CostEstimate {
-				return checker.CostEstimate{Min: c.Min + 2, Max: c.Max + 5}
+			expectEsimatedCost: func(c cost.CostEstimate) cost.CostEstimate {
+				return cost.CostEstimate{Min: c.Min + 2, Max: c.Max + 5}
 			},
 			expectRuntimeCost: func(c uint64) uint64 { return c + 2 },
 		},
 		{
 			ops: []string{".containsIP('192.169.0.1')"},
-			expectEsimatedCost: func(c checker.CostEstimate) checker.CostEstimate {
-				return checker.CostEstimate{Min: c.Min + 3, Max: c.Max + 6}
+			expectEsimatedCost: func(c cost.CostEstimate) cost.CostEstimate {
+				return cost.CostEstimate{Min: c.Min + 3, Max: c.Max + 6}
 			},
 			expectRuntimeCost: func(c uint64) uint64 { return c + 3 },
 		},
@@ -1096,64 +1096,64 @@ func TestCIDRCost(t *testing.T) {
 		{
 			ops: []string{".containsCIDR(cidr('2001:db8::/126'))"},
 			// For operations like checking if an IP is in a CIDR, the cost is expected to higher.
-			expectEsimatedCost: func(c checker.CostEstimate) checker.CostEstimate {
-				return checker.CostEstimate{Min: c.Min + 5, Max: c.Max + 9}
+			expectEsimatedCost: func(c cost.CostEstimate) cost.CostEstimate {
+				return cost.CostEstimate{Min: c.Min + 5, Max: c.Max + 9}
 			},
 			expectRuntimeCost: func(c uint64) uint64 { return c + 5 },
 		},
 		{
 			ops: []string{".containsCIDR(cidr('2001:db8::/32'))"},
 			// For operations like checking if an IP is in a CIDR, the cost is expected to higher.
-			expectEsimatedCost: func(c checker.CostEstimate) checker.CostEstimate {
-				return checker.CostEstimate{Min: c.Min + 5, Max: c.Max + 9}
+			expectEsimatedCost: func(c cost.CostEstimate) cost.CostEstimate {
+				return cost.CostEstimate{Min: c.Min + 5, Max: c.Max + 9}
 			},
 			expectRuntimeCost: func(c uint64) uint64 { return c + 5 },
 		},
 		{
 			ops: []string{".containsCIDR('2001:db8::/126')"},
 			// For operations like checking if an IP is in a CIDR, the cost is expected to higher.
-			expectEsimatedCost: func(c checker.CostEstimate) checker.CostEstimate {
-				return checker.CostEstimate{Min: c.Min + 5, Max: c.Max + 9}
+			expectEsimatedCost: func(c cost.CostEstimate) cost.CostEstimate {
+				return cost.CostEstimate{Min: c.Min + 5, Max: c.Max + 9}
 			},
 			expectRuntimeCost: func(c uint64) uint64 { return c + 5 },
 		},
 		{
 			ops: []string{".containsCIDR('2001:db8::/32')"},
 			// For operations like checking if an IP is in a CIDR, the cost is expected to higher.
-			expectEsimatedCost: func(c checker.CostEstimate) checker.CostEstimate {
-				return checker.CostEstimate{Min: c.Min + 5, Max: c.Max + 9}
+			expectEsimatedCost: func(c cost.CostEstimate) cost.CostEstimate {
+				return cost.CostEstimate{Min: c.Min + 5, Max: c.Max + 9}
 			},
 			expectRuntimeCost: func(c uint64) uint64 { return c + 5 },
 		},
 		{
 			ops: []string{".containsIP(ip('2001:db8:3333:4444:5555:6666:7777:8888'))"},
 			// For operations like checking if an IP is in a CIDR, the cost is expected to higher.
-			expectEsimatedCost: func(c checker.CostEstimate) checker.CostEstimate {
-				return checker.CostEstimate{Min: c.Min + 5, Max: c.Max + 8}
+			expectEsimatedCost: func(c cost.CostEstimate) cost.CostEstimate {
+				return cost.CostEstimate{Min: c.Min + 5, Max: c.Max + 8}
 			},
 			expectRuntimeCost: func(c uint64) uint64 { return c + 5 },
 		},
 		{
 			ops: []string{".containsIP(ip('2001:db8::1'))"},
 			// For operations like checking if an IP is in a CIDR, the cost is expected to higher.
-			expectEsimatedCost: func(c checker.CostEstimate) checker.CostEstimate {
-				return checker.CostEstimate{Min: c.Min + 3, Max: c.Max + 6}
+			expectEsimatedCost: func(c cost.CostEstimate) cost.CostEstimate {
+				return cost.CostEstimate{Min: c.Min + 3, Max: c.Max + 6}
 			},
 			expectRuntimeCost: func(c uint64) uint64 { return c + 3 },
 		},
 		{
 			ops: []string{".containsIP('2001:db8:3333:4444:5555:6666:7777:8888')"},
 			// For operations like checking if an IP is in a CIDR, the cost is expected to higher.
-			expectEsimatedCost: func(c checker.CostEstimate) checker.CostEstimate {
-				return checker.CostEstimate{Min: c.Min + 5, Max: c.Max + 8}
+			expectEsimatedCost: func(c cost.CostEstimate) cost.CostEstimate {
+				return cost.CostEstimate{Min: c.Min + 5, Max: c.Max + 8}
 			},
 			expectRuntimeCost: func(c uint64) uint64 { return c + 5 },
 		},
 		{
 			ops: []string{".containsIP('2001:db8::1')"},
 			// For operations like checking if an IP is in a CIDR, the cost is expected to higher.
-			expectEsimatedCost: func(c checker.CostEstimate) checker.CostEstimate {
-				return checker.CostEstimate{Min: c.Min + 3, Max: c.Max + 6}
+			expectEsimatedCost: func(c cost.CostEstimate) cost.CostEstimate {
+				return cost.CostEstimate{Min: c.Min + 3, Max: c.Max + 6}
 			},
 			expectRuntimeCost: func(c uint64) uint64 { return c + 3 },
 		},
