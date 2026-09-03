@@ -433,10 +433,7 @@ var testCases = []testInfo{
 		| ^
 		ERROR: <input>:1:2: Syntax error: unexpected character
 		| *@a | b
-		| .^
-		ERROR: <input>:1:5: Syntax error: unexpected single '|', expected '||'
-		| *@a | b
-		| ....^`,
+		| .^`,
 	},
 	{
 		I: `a | b`,
@@ -835,10 +832,16 @@ var testCases = []testInfo{
 		E: `ERROR: <input>:1:15: Syntax error: mismatched input '{' expecting <EOF>
 		| TestAllTypes(){}
 		| ..............^`,
+		PrattE: `ERROR: <input>:1:15: Syntax error: unexpected token after expression
+		| TestAllTypes(){}
+		| ..............^`,
 	},
 	{
 		I: `TestAllTypes{}()`,
 		E: `ERROR: <input>:1:15: Syntax error: mismatched input '(' expecting <EOF>
+		| TestAllTypes{}()
+		| ..............^`,
+		PrattE: `ERROR: <input>:1:15: Syntax error: unexpected token after expression
 		| TestAllTypes{}()
 		| ..............^`,
 	},
@@ -867,6 +870,9 @@ var testCases = []testInfo{
 		I: `1 + 2
 3 +`,
 		E: `ERROR: <input>:2:1: Syntax error: mismatched input '3' expecting <EOF>
+		| 3 +
+		| ^`,
+		PrattE: `ERROR: <input>:2:1: Syntax error: unexpected token after expression
 		| 3 +
 		| ^`,
 	},
@@ -1222,7 +1228,7 @@ var testCases = []testInfo{
 		PrattE: `ERROR: <input>:1:6: Syntax error: expected struct field name
 		| func{{a}}
 		| .....^
-		ERROR: <input>:1:9: Syntax error: mismatched input '}' expecting <EOF>
+		ERROR: <input>:1:9: Syntax error: unexpected token after expression
 		| func{{a}}
 		| ........^`,
 	},
@@ -1424,16 +1430,7 @@ ERROR: <input>:1:34: Syntax error: expected ']'
 		| ＾
 		ERROR: <input>:1:2: Syntax error: unexpected character
 		| ó ¢
-		| ．＾
-		ERROR: <input>:1:3: Syntax error: unexpected character
-		| ó ¢
-		| ．．＾
-		ERROR: <input>:2:3: Syntax error: unexpected character
-		|   ó 0 
-		| ..＾
-		ERROR: <input>:2:4: Syntax error: unexpected character
-		|   ó 0 
-		| ..．＾`,
+		| ．＾`,
 	},
 	// Macro Calls Tests
 	{
@@ -2063,10 +2060,7 @@ ERROR: <input>:1:34: Syntax error: expected ']'
 		`,
 		PrattE: `ERROR: <input>:1:12: Syntax error: unexpected single '&', expected '&&'
 		 | '3# < 10" '& tru ^^
-		 | ...........^
-		ERROR: <input>:1:18: Syntax error: unexpected character
-		 | '3# < 10" '& tru ^^
-		 | .................^`,
+		 | ...........^`,
 	},
 	{
 		I: `'\udead' == '\ufffd'`,
@@ -2343,6 +2337,146 @@ ERROR: <input>:1:34: Syntax error: expected ']'
 		P: `-_(
 			a^#2:*expr.Expr_IdentExpr#
 		)^#1:*expr.Expr_CallExpr#`,
+	},
+	{
+		I: "'''hello\nworld'''",
+		P: `"hello\nworld"^#1:*expr.Constant_StringValue#`,
+	},
+	{
+		I: "\"\"\"hello\nworld\"\"\"",
+		P: `"hello\nworld"^#1:*expr.Constant_StringValue#`,
+	},
+	{
+		I: "r\"\"\"hello\nworld\"\"\"",
+		P: `"hello\nworld"^#1:*expr.Constant_StringValue#`,
+	},
+	{
+		I: "\"\"\"hello\\\"\"\"world\"\"\"",
+		P: `"hello\"\"\"world"^#1:*expr.Constant_StringValue#`,
+	},
+	{
+		I: "'''hello\\'''world'''",
+		P: `"hello'''world"^#1:*expr.Constant_StringValue#`,
+	},
+	{
+		I: "\"\"\"hello\nworld",
+		E: `ERROR: <input>:1:3: Syntax error: token recognition error at: '"hello
+		'
+		| """hello
+		| ..^
+		ERROR: <input>:2:1: Syntax error: extraneous input 'world' expecting <EOF>
+		| world
+		| ^`,
+		PrattE: `ERROR: <input>:1:1: Syntax error: unterminated string literal
+		| """hello
+		| ^`,
+	},
+	{
+		I: "'''hello\nworld",
+		E: `ERROR: <input>:1:3: Syntax error: token recognition error at: ''hello
+		'
+		| '''hello
+		| ..^
+		ERROR: <input>:2:1: Syntax error: extraneous input 'world' expecting <EOF>
+		| world
+		| ^`,
+		PrattE: `ERROR: <input>:1:1: Syntax error: unterminated string literal
+		| '''hello
+		| ^`,
+	},
+	{
+		I: "r\"\"\"hello\nworld",
+		E: `ERROR: <input>:1:4: Syntax error: token recognition error at: '"hello
+		'
+		| r"""hello
+		| ...^
+		ERROR: <input>:2:1: Syntax error: extraneous input 'world' expecting <EOF>
+		| world
+		| ^`,
+		PrattE: `ERROR: <input>:1:1: Syntax error: unterminated string literal
+		| r"""hello
+		| ^`,
+	},
+	{
+		I: "\"hello\nworld\"",
+		E: `ERROR: <input>:1:1: Syntax error: token recognition error at: '"hello
+		'
+		| "hello
+		| ^
+		ERROR: <input>:2:6: Syntax error: token recognition error at: '"'
+		| world"
+		| .....^`,
+		PrattE: `ERROR: <input>:1:1: Syntax error: unterminated string literal
+		| "hello
+		| ^
+		ERROR: <input>:2:1: Syntax error: unexpected token after expression
+		| world"
+		| ^`,
+	},
+	{
+		I: "'hello\nworld'",
+		E: `ERROR: <input>:1:1: Syntax error: token recognition error at: ''hello
+		'
+		| 'hello
+		| ^
+		ERROR: <input>:2:6: Syntax error: token recognition error at: '''
+		| world'
+		| .....^`,
+		PrattE: `ERROR: <input>:1:1: Syntax error: unterminated string literal
+		| 'hello
+		| ^
+		ERROR: <input>:2:1: Syntax error: unexpected token after expression
+		| world'
+		| ^`,
+	},
+	{
+		I: "r\"hello\nworld\"",
+		E: `ERROR: <input>:1:2: Syntax error: token recognition error at: '"hello
+		'
+		| r"hello
+		| .^
+		ERROR: <input>:2:1: Syntax error: extraneous input 'world' expecting <EOF>
+		| world"
+		| ^
+		ERROR: <input>:2:6: Syntax error: token recognition error at: '"'
+		| world"
+		| .....^`,
+		PrattE: `ERROR: <input>:1:1: Syntax error: unterminated string literal
+		| r"hello
+		| ^
+		ERROR: <input>:2:1: Syntax error: unexpected token after expression
+		| world"
+		| ^`,
+	},
+	{
+		I: "`hello\nworld`",
+		E: "ERROR: <input>:1:1: Syntax error: token recognition error at: '`hello\n'\n" +
+			"\t\t| `hello\n" +
+			"\t\t| ^\n" +
+			"\t\tERROR: <input>:2:6: Syntax error: token recognition error at: '`'\n" +
+			"\t\t| world`\n" +
+			"\t\t| .....^",
+		PrattE: "ERROR: <input>:1:1: Syntax error: unterminated quoted identifier\n" +
+			"\t\t| `hello\n" +
+			"\t\t| ^\n" +
+			"\t\tERROR: <input>:2:1: Syntax error: unexpected token after expression\n" +
+			"\t\t| world`\n" +
+			"\t\t| ^",
+	},
+	{
+		I: "\"hello\rworld\"",
+		E: "ERROR: <input>:1:1: Syntax error: token recognition error at: '\"hello'\n" +
+			"\t\t| \"helloworld\"\n" +
+			"\t\t| ^\n" +
+			"\t\tERROR: <input>:1:13: Syntax error: token recognition error at: '\"'\n" +
+			"\t\t| \"helloworld\"\n" +
+			"\t\t| ............^",
+		PrattE: "ERROR: <input>:1:1: Syntax error: unterminated string literal\n" +
+			"\t\t| \"helloworld\"\n" +
+			"\t\t| ^\n" +
+			"\t\tERROR: <input>:1:8: Syntax error: unexpected token after expression\n" +
+			"\t\t| \"helloworld\"\n" +
+			"\t\t| .......^",
 	},
 }
 
