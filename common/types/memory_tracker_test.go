@@ -26,6 +26,16 @@ import (
 func TestMemoryTrackerTrack(t *testing.T) {
 	adapter := DefaultTypeAdapter
 
+	t.Run("nil_value", func(t *testing.T) {
+		tracker := NewMemoryTracker()
+		if got := tracker.Track(nil); got != 0 {
+			t.Errorf("Track(nil) got %d, want 0", got)
+		}
+		if got := tracker.Peak(); got != 0 {
+			t.Errorf("Peak() got %d, want 0", got)
+		}
+	})
+
 	t.Run("single_value_watermark", func(t *testing.T) {
 		tracker := NewMemoryTracker()
 		list := NewRefValList(adapter, []ref.Val{Int(1), Int(2)})
@@ -70,6 +80,30 @@ func TestMemoryTrackerTrack(t *testing.T) {
 		tracker.Track(out)
 		if got := tracker.Peak(); got != 10 {
 			t.Errorf("Peak() got %d, want 10 (100-char output at 10 chars per unit)", got)
+		}
+	})
+
+	t.Run("bytes_watermark", func(t *testing.T) {
+		tracker := NewMemoryTracker()
+		// Empty bytes: minimum size is 1
+		if got := tracker.Track(Bytes{}); got != 1 {
+			t.Errorf("Track(Bytes{}) got %d, want 1", got)
+		}
+		// 50 bytes: 50 bytes / 10 bytes per unit = 5
+		in := Bytes(make([]byte, 50))
+		if got := tracker.Track(in); got != 5 {
+			t.Errorf("Track(50 bytes) got %d, want 5", got)
+		}
+		if got := tracker.Peak(); got != 5 {
+			t.Errorf("Peak() got %d, want 5", got)
+		}
+		// 100 bytes: 100 bytes / 10 bytes per unit = 10
+		out := Bytes(make([]byte, 100))
+		if got := tracker.Track(out); got != 10 {
+			t.Errorf("Track(100 bytes) got %d, want 10", got)
+		}
+		if got := tracker.Peak(); got != 10 {
+			t.Errorf("Peak() got %d, want 10", got)
 		}
 	})
 
