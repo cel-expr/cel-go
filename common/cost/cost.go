@@ -125,7 +125,17 @@ func SafeCeil(x float64) uint64 {
 
 // SizeEstimate represents an estimated size of a variable length string, bytes, map or list.
 type SizeEstimate struct {
-	Min, Max uint64
+	// Min is the minimum estimated size (inclusive).
+	Min uint64
+
+	// Max is the maximum estimated size (inclusive).
+	Max uint64
+
+	// Key indicates the estimated size of a key, set if the size estimate is for a map.
+	Key *SizeEstimate
+
+	// Elem indicates the estimated size of a value, set if size estimate is for a map or list.
+	Elem *SizeEstimate
 }
 
 // UnknownSizeEstimate returns a size between 0 and max uint.
@@ -154,21 +164,37 @@ func AtLeastOne(size SizeEstimate) SizeEstimate {
 	return size
 }
 
+// ListSizeEstimate returns a SizeEstimate for a list with the given list length and element size.
+func ListSizeEstimate(listSize SizeEstimate, elemSize SizeEstimate) SizeEstimate {
+	listSize.Elem = &elemSize
+	return listSize
+}
+
+// MapSizeEstimate returns a SizeEstimate for a map with the given map size, key size, and value size.
+func MapSizeEstimate(mapSize SizeEstimate, keySize SizeEstimate, valSize SizeEstimate) SizeEstimate {
+	mapSize.Key = &keySize
+	mapSize.Elem = &valSize
+	return mapSize
+}
+
 // Add adds to another SizeEstimate and returns the sum.
 // If add would result in an uint64 overflow, the result is math.MaxUint64.
 func (se SizeEstimate) Add(sizeEstimate SizeEstimate) SizeEstimate {
-	return SizeEstimate{
-		SafeAdd(se.Min, sizeEstimate.Min),
-		SafeAdd(se.Max, sizeEstimate.Max),
+	res := SizeEstimate{
+		Min: SafeAdd(se.Min, sizeEstimate.Min),
+		Max: SafeAdd(se.Max, sizeEstimate.Max),
 	}
+	res.Key = mergeSizeEstimatePtr(se.Key, sizeEstimate.Key)
+	res.Elem = mergeSizeEstimatePtr(se.Elem, sizeEstimate.Elem)
+	return res
 }
 
 // Multiply multiplies by another SizeEstimate and returns the product.
 // If multiply would result in an uint64 overflow, the result is math.MaxUint64.
 func (se SizeEstimate) Multiply(sizeEstimate SizeEstimate) SizeEstimate {
 	return SizeEstimate{
-		SafeMultiply(se.Min, sizeEstimate.Min),
-		SafeMultiply(se.Max, sizeEstimate.Max),
+		Min: SafeMultiply(se.Min, sizeEstimate.Min),
+		Max: SafeMultiply(se.Max, sizeEstimate.Max),
 	}
 }
 
@@ -176,8 +202,8 @@ func (se SizeEstimate) Multiply(sizeEstimate SizeEstimate) SizeEstimate {
 // nearest integer of the result, rounded up.
 func (se SizeEstimate) MultiplyByCostFactor(costPerUnit float64) CostEstimate {
 	return CostEstimate{
-		SafeMultiplyByFactor(se.Min, costPerUnit),
-		SafeMultiplyByFactor(se.Max, costPerUnit),
+		Min: SafeMultiplyByFactor(se.Min, costPerUnit),
+		Max: SafeMultiplyByFactor(se.Max, costPerUnit),
 	}
 }
 
@@ -199,7 +225,21 @@ func (se SizeEstimate) Union(size SizeEstimate) SizeEstimate {
 	if size.Max > result.Max {
 		result.Max = size.Max
 	}
+	result.Key = mergeSizeEstimatePtr(se.Key, size.Key)
+	result.Elem = mergeSizeEstimatePtr(se.Elem, size.Elem)
 	return result
+}
+
+// mergeSizeEstimatePtr merges two optional SizeEstimate pointers using union.
+func mergeSizeEstimatePtr(a, b *SizeEstimate) *SizeEstimate {
+	if a == nil {
+		return b
+	}
+	if b == nil {
+		return a
+	}
+	u := a.Union(*b)
+	return &u
 }
 
 // AsCost converts a size estimate to an equivalent cost estimate.
@@ -289,10 +329,12 @@ func EstimateSize(estimator Estimator, node AstNode) SizeEstimate {
 	if l := node.ComputedSize(); l != nil {
 		return *l
 	}
-	if l := estimator.EstimateSize(node); l != nil {
-		return *l
+	if estimator != nil {
+		if l := estimator.EstimateSize(node); l != nil {
+			return *l
+		}
 	}
-	return SizeEstimate{Min: 0, Max: math.MaxUint64}
+	return UnknownSizeEstimate()
 }
 
 // EstimateTraversal computes cost as a function of the size of the target object and whether the call allocates memory.

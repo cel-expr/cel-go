@@ -63,6 +63,7 @@ type AstNode interface {
 	ComputedSize() *SizeEstimate
 }
 
+// astNode implements the AstNode interface.
 type astNode struct {
 	path        []string
 	t           *types.Type
@@ -70,18 +71,22 @@ type astNode struct {
 	derivedSize *SizeEstimate
 }
 
+// Path returns the field path to the node, if known.
 func (e astNode) Path() []string {
 	return e.path
 }
 
+// Type returns the type of the node.
 func (e astNode) Type() *types.Type {
 	return e.t
 }
 
+// Expr returns the underlying CEL expression.
 func (e astNode) Expr() ast.Expr {
 	return e.expr
 }
 
+// ComputedSize returns the precomputed or derived size estimate of the node.
 func (e astNode) ComputedSize() *SizeEstimate {
 	return e.derivedSize
 }
@@ -148,6 +153,7 @@ func Cost(checked *ast.AST, estimator Estimator, opts ...CostOption) (CostEstima
 	return c.cost(checked.Expr()), nil
 }
 
+// coster performs recursive cost and size calculation on checked AST expressions.
 type coster struct {
 	// exprPaths maps from Expr Id to field path.
 	exprPaths map[int64][]string
@@ -199,6 +205,7 @@ func (s *entrySizeEstimate) valSize() *SizeEstimate {
 	return &s.val
 }
 
+// union returns the union of two entrySizeEstimates.
 func (s *entrySizeEstimate) union(other *entrySizeEstimate) *entrySizeEstimate {
 	if s == nil || other == nil {
 		return nil
@@ -223,6 +230,7 @@ type localVar struct {
 // scopes is a stack of variable name to integer id stack to handle scopes created by cel.bind() like macros
 type scopes map[string][]*localVar
 
+// push adds a variable name to the scope stack with its path, size, and entrySize estimates.
 func (s scopes) push(varName string, expr ast.Expr, path []string, size *SizeEstimate, entrySize *entrySizeEstimate) {
 	s[varName] = append(s[varName], &localVar{
 		exprID:    expr.ID(),
@@ -232,11 +240,13 @@ func (s scopes) push(varName string, expr ast.Expr, path []string, size *SizeEst
 	})
 }
 
+// pop removes the most recent variable from the scope stack for the given name.
 func (s scopes) pop(varName string) {
 	varStack := s[varName]
 	s[varName] = varStack[:len(varStack)-1]
 }
 
+// peek returns the top of the stack for the given variable name.
 func (s scopes) peek(varName string) (*localVar, bool) {
 	varStack := s[varName]
 	if len(varStack) > 0 {
@@ -245,45 +255,44 @@ func (s scopes) peek(varName string) (*localVar, bool) {
 	return nil, false
 }
 
+// containerKind returns the deduced container kind for a range expression.
+func (c *coster) containerKind(rangeExpr ast.Expr, entrySize *entrySizeEstimate) types.Kind {
+	if k := entrySize.container(); k != types.UnknownKind {
+		return k
+	}
+	return c.getType(rangeExpr).Kind()
+}
+
+// pushIterKey pushes the iteration key or index variable for a comprehension onto the scope stack.
 func (c *coster) pushIterKey(varName string, rangeExpr ast.Expr) {
 	entrySize := c.computeEntrySize(rangeExpr)
 	size := entrySize.keySize()
 	path := c.getPath(rangeExpr)
-	container := entrySize.container()
-	if container == types.UnknownKind {
-		container = c.getType(rangeExpr).Kind()
-	}
 	subpath := "@keys"
-	if container == types.ListKind {
+	if c.containerKind(rangeExpr, entrySize) == types.ListKind {
 		subpath = "@indices"
 	}
 	c.localVars.push(varName, rangeExpr, append(path, subpath), size, nil)
 }
 
+// pushIterValue pushes the iteration value variable for a comprehension onto the scope stack.
 func (c *coster) pushIterValue(varName string, rangeExpr ast.Expr) {
 	entrySize := c.computeEntrySize(rangeExpr)
 	size := entrySize.valSize()
 	path := c.getPath(rangeExpr)
-	container := entrySize.container()
-	if container == types.UnknownKind {
-		container = c.getType(rangeExpr).Kind()
-	}
 	subpath := "@values"
-	if container == types.ListKind {
+	if c.containerKind(rangeExpr, entrySize) == types.ListKind {
 		subpath = "@items"
 	}
 	c.localVars.push(varName, rangeExpr, append(path, subpath), size, nil)
 }
 
+// pushIterSingle pushes a single iteration variable (items for list, keys for map) onto the scope stack.
 func (c *coster) pushIterSingle(varName string, rangeExpr ast.Expr) {
 	entrySize := c.computeEntrySize(rangeExpr)
 	size := entrySize.keySize()
 	subpath := "@keys"
-	container := entrySize.container()
-	if container == types.UnknownKind {
-		container = c.getType(rangeExpr).Kind()
-	}
-	if container == types.ListKind {
+	if c.containerKind(rangeExpr, entrySize) == types.ListKind {
 		size = entrySize.valSize()
 		subpath = "@items"
 	}
@@ -291,6 +300,7 @@ func (c *coster) pushIterSingle(varName string, rangeExpr ast.Expr) {
 	c.localVars.push(varName, rangeExpr, append(path, subpath), size, nil)
 }
 
+// pushLocalVar records a local variable binding with its path, size, and entry size estimates.
 func (c *coster) pushLocalVar(varName string, e ast.Expr) {
 	path := c.getPath(e)
 	// note: retrieve the entry size for the local variable based on the size of the binding expression
@@ -299,14 +309,17 @@ func (c *coster) pushLocalVar(varName string, e ast.Expr) {
 	c.localVars.push(varName, e, path, c.computeSize(e), entrySize)
 }
 
+// peekLocalVar looks up the top of the scope stack for a local variable name.
 func (c *coster) peekLocalVar(varName string) (*localVar, bool) {
 	return c.localVars.peek(varName)
 }
 
+// popLocalVar pops the scope stack for a local variable name.
 func (c *coster) popLocalVar(varName string) {
 	c.localVars.pop(varName)
 }
 
+// cost recursively calculates the cost estimate for an expression node.
 func (c *coster) cost(e ast.Expr) CostEstimate {
 	if e == nil {
 		return CostEstimate{}
@@ -339,6 +352,7 @@ func (c *coster) cost(e ast.Expr) CostEstimate {
 	return estimate
 }
 
+// costIdent estimates the cost of evaluating an identifier and tracks its path.
 func (c *coster) costIdent(e ast.Expr) CostEstimate {
 	identName := e.AsIdent()
 	// build and track the field path
@@ -350,6 +364,7 @@ func (c *coster) costIdent(e ast.Expr) CostEstimate {
 	return selectAndIdentCost
 }
 
+// costSelect estimates the cost of a field selection or map key access.
 func (c *coster) costSelect(e ast.Expr) CostEstimate {
 	sel := e.AsSelect()
 	var sum CostEstimate
@@ -374,6 +389,7 @@ func (c *coster) costSelect(e ast.Expr) CostEstimate {
 	return sum
 }
 
+// costCall estimates the cost of evaluating a function call expression.
 func (c *coster) costCall(e ast.Expr) CostEstimate {
 	// Dyn is just a way to disable type-checking, so return the cost of 1 with the cost of the argument
 	if dynEstimate := c.maybeUnwrapDynCall(e); dynEstimate != nil {
@@ -408,14 +424,7 @@ func (c *coster) costCall(e ast.Expr) CostEstimate {
 	for _, overload := range overloadIDs {
 		overloadCost := c.functionCost(e, call.FunctionName(), overload, targetType, argTypes, argCosts)
 		fnCost = fnCost.Union(overloadCost.CostEstimate)
-		if overloadCost.ResultSize != nil {
-			if resultSize == nil {
-				resultSize = overloadCost.ResultSize
-			} else {
-				size := resultSize.Union(*overloadCost.ResultSize)
-				resultSize = &size
-			}
-		}
+		resultSize = mergeSizeEstimatePtr(resultSize, overloadCost.ResultSize)
 		// build and track the field path for index operations
 		switch overload {
 		case overloads.IndexList:
@@ -438,6 +447,7 @@ func (c *coster) costCall(e ast.Expr) CostEstimate {
 	return sum.Add(fnCost)
 }
 
+// maybeUnwrapDynCall handles the 'dyn' call wrapper, returning an estimate if matched.
 func (c *coster) maybeUnwrapDynCall(e ast.Expr) *CostEstimate {
 	call := e.AsCall()
 	if call.FunctionName() != "dyn" {
@@ -450,6 +460,7 @@ func (c *coster) maybeUnwrapDynCall(e ast.Expr) *CostEstimate {
 	return &callCost
 }
 
+// costCreateList estimates the cost of constructing a list literal.
 func (c *coster) costCreateList(e ast.Expr) CostEstimate {
 	create := e.AsList()
 	var sum CostEstimate
@@ -466,6 +477,7 @@ func (c *coster) costCreateList(e ast.Expr) CostEstimate {
 	return sum.Add(createListBaseCost)
 }
 
+// costCreateMap estimates the cost of constructing a map literal.
 func (c *coster) costCreateMap(e ast.Expr) CostEstimate {
 	mapVal := e.AsMap()
 	var sum CostEstimate
@@ -490,6 +502,7 @@ func (c *coster) costCreateMap(e ast.Expr) CostEstimate {
 	return sum.Add(createMapBaseCost)
 }
 
+// costCreateStruct estimates the cost of constructing a struct or message literal.
 func (c *coster) costCreateStruct(e ast.Expr) CostEstimate {
 	msgVal := e.AsStruct()
 	var sum CostEstimate
@@ -500,6 +513,7 @@ func (c *coster) costCreateStruct(e ast.Expr) CostEstimate {
 	return sum.Add(createMessageBaseCost)
 }
 
+// costComprehension estimates the cost of evaluating a comprehension loop.
 func (c *coster) costComprehension(e ast.Expr) CostEstimate {
 	comp := e.AsComprehension()
 	var sum CostEstimate
@@ -549,6 +563,7 @@ func (c *coster) costComprehension(e ast.Expr) CostEstimate {
 	return sum
 }
 
+// isBind returns true if the given expression represents a cel.bind() macro structure.
 func (c *coster) isBind(e ast.Expr) bool {
 	comp := e.AsComprehension()
 	iterRange := comp.IterRange()
@@ -558,6 +573,7 @@ func (c *coster) isBind(e ast.Expr) bool {
 		!isAccumulatorVar(comp.AccuVar())
 }
 
+// costBind estimates the cost of a cel.bind() variable declaration macro.
 func (c *coster) costBind(e ast.Expr) CostEstimate {
 	comp := e.AsComprehension()
 	var sum CostEstimate
@@ -574,6 +590,7 @@ func (c *coster) costBind(e ast.Expr) CostEstimate {
 	return sum
 }
 
+// functionCost calculates the estimated call cost and result size for an overload invocation.
 func (c *coster) functionCost(e ast.Expr, function, overloadID string, target *AstNode, args []AstNode, argCosts []CostEstimate) CallEstimate {
 	argCostSum := func() CostEstimate {
 		var sum CostEstimate
@@ -725,10 +742,12 @@ func (c *coster) functionCost(e ast.Expr, function, overloadID string, target *A
 	return CallEstimate{CostEstimate: FixedCostEstimate(1).Add(argCostSum())}
 }
 
+// getType returns the deduced type of an expression ID from the checked AST.
 func (c *coster) getType(e ast.Expr) *types.Type {
 	return c.checkedAST.GetType(e.ID())
 }
 
+// getPath returns the tracked field path for an expression node, resolving through local variables if needed.
 func (c *coster) getPath(e ast.Expr) []string {
 	if e.Kind() == ast.IdentKind {
 		if v, found := c.peekLocalVar(e.AsIdent()); found {
@@ -738,6 +757,7 @@ func (c *coster) getPath(e ast.Expr) []string {
 	return c.exprPaths[e.ID()][:]
 }
 
+// addPath associates an expression ID with its path.
 func (c *coster) addPath(e ast.Expr, path []string) {
 	c.exprPaths[e.ID()] = path
 }
@@ -746,6 +766,7 @@ func isAccumulatorVar(name string) bool {
 	return name == accumulatorName || name == hiddenAccumulatorName
 }
 
+// newAstNode creates an AstNode from an expression with path, type, and computed size.
 func (c *coster) newAstNode(e ast.Expr) *astNode {
 	path := c.getPath(e)
 	if len(path) > 0 && isAccumulatorVar(path[0]) {
@@ -759,6 +780,7 @@ func (c *coster) newAstNode(e ast.Expr) *astNode {
 		derivedSize: c.computeSize(e)}
 }
 
+// setSize stores a computed size estimate for an expression ID.
 func (c *coster) setSize(e ast.Expr, size *SizeEstimate) {
 	if size == nil {
 		return
@@ -767,6 +789,7 @@ func (c *coster) setSize(e ast.Expr, size *SizeEstimate) {
 	c.computedSizes[e.ID()] = *size
 }
 
+// sizeOrUnknown extracts the size estimate from an ast.Expr or AstNode, falling back to UnknownSizeEstimate.
 func (c *coster) sizeOrUnknown(node any) SizeEstimate {
 	switch v := node.(type) {
 	case ast.Expr:
@@ -781,11 +804,13 @@ func (c *coster) sizeOrUnknown(node any) SizeEstimate {
 	return UnknownSizeEstimate()
 }
 
+// copySizeEstimates copies computed sizes and entry sizes from a source expression to a destination expression.
 func (c *coster) copySizeEstimates(dst, src ast.Expr) {
 	c.setSize(dst, c.computeSize(src))
 	c.setEntrySize(dst, c.computeEntrySize(src))
 }
 
+// computeSize resolves the size estimate for an expression, caching the result when found.
 func (c *coster) computeSize(e ast.Expr) *SizeEstimate {
 	if size, ok := c.computedSizes[e.ID()]; ok {
 		return &size
@@ -813,6 +838,7 @@ func (c *coster) computeSize(e ast.Expr) *SizeEstimate {
 	return nil
 }
 
+// setEntrySize associates an expression with its container entry size estimate.
 func (c *coster) setEntrySize(e ast.Expr, size *entrySizeEstimate) {
 	if size == nil {
 		return
@@ -820,6 +846,7 @@ func (c *coster) setEntrySize(e ast.Expr, size *entrySizeEstimate) {
 	c.computedEntrySizes[e.ID()] = *size
 }
 
+// computeEntrySize looks up or resolves the container entry size estimate for an expression.
 func (c *coster) computeEntrySize(e ast.Expr) *entrySizeEstimate {
 	if sz, found := c.computedEntrySizes[e.ID()]; found {
 		return &sz
@@ -833,6 +860,7 @@ func (c *coster) computeEntrySize(e ast.Expr) *entrySizeEstimate {
 	return nil
 }
 
+// computeExprSize computes the size estimate from literal and declared container expressions.
 func computeExprSize(expr ast.Expr) *SizeEstimate {
 	var v uint64
 	switch expr.Kind() {
@@ -863,6 +891,7 @@ func computeExprSize(expr ast.Expr) *SizeEstimate {
 	return &size
 }
 
+// computeTypeSize returns a fixed unit size estimate if the type is a constant-size scalar.
 func computeTypeSize(t *types.Type) *SizeEstimate {
 	if isScalar(t) {
 		size := FixedSizeEstimate(1)

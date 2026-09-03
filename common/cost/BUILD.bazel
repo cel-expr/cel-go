@@ -9,12 +9,16 @@ go_library(
     name = "go_default_library",
     srcs = [
         "cost.go",
+        "default_strategy.go",
         "estimator.go",
+        "model.go",
+        "strategy.go",
         "tracker.go",
     ],
     importpath = "cel.dev/cel-go/common/cost",
     deps = [
         "//common/ast:go_default_library",
+        "//common/operators:go_default_library",
         "//common/overloads:go_default_library",
         "//common/types:go_default_library",
         "//common/types/ref:go_default_library",
@@ -27,7 +31,9 @@ go_test(
     size = "small",
     srcs = [
         "cost_test.go",
+        "default_strategy_test.go",
         "estimator_test.go",
+        "model_test.go",
         "tracker_test.go",
     ],
     embed = [
@@ -36,8 +42,10 @@ go_test(
     deps = [
         "//checker:go_default_library",
         "//common:go_default_library",
+        "//common/ast:go_default_library",
         "//common/containers:go_default_library",
         "//common/decls:go_default_library",
+        "//common/operators:go_default_library",
         "//common/overloads:go_default_library",
         "//common/stdlib:go_default_library",
         "//common/types:go_default_library",
