@@ -18,8 +18,10 @@ import (
 	"fmt"
 	"math"
 
+	"cel.dev/cel-go/checker"
 	"cel.dev/cel-go/common"
 	"cel.dev/cel-go/common/ast"
+	"cel.dev/cel-go/common/cost"
 	"cel.dev/cel-go/common/decls"
 	"cel.dev/cel-go/common/env"
 	"cel.dev/cel-go/common/operators"
@@ -42,8 +44,11 @@ const (
 	optionalOfNonZeroValueFunc = "optional.ofNonZeroValue"
 	optionalUnwrapFunc         = "optional.unwrap"
 	valueFunc                  = "value"
-	unusedIterVar              = "#unused"
-	targetVar                  = "@target"
+
+	optionalHasValueValueOverload = "optional_hasValue_value"
+
+	unusedIterVar = "#unused"
+	targetVar     = "@target"
 )
 
 // Library provides a collection of EnvOption and ProgramOption values used to configure a CEL
@@ -363,6 +368,27 @@ func (*stdLibrary) ProgramOptions() []ProgramOption {
 //
 // optional.unwrap([optional.of(42), optional.none()]) == [42]
 // [optional.of(42), optional.none()].unwrapOpt() == [42]
+//
+// # HasValue with a value argument
+//
+// Introduced in version: 3
+//
+// Determine whether the optional contains a value equal to the argument, which
+// is equivalent to the expression `opt.hasValue() ? opt.value() == v : false`.
+//
+// optional.of(42).hasValue(42) // true
+// optional.of(42).hasValue(21) // false
+// optional.none().hasValue(42) // false
+//
+// The argument is compared against the value held by the optional and is never
+// unwrapped, so an optional_type(T) argument is only equal to the value of an
+// optional_type(optional_type(T)). The type-checker enforces this agreement,
+// but when the argument is dyn-typed the comparison is deferred to runtime
+// where a type mismatch evaluates to false, just as it would for `==`.
+//
+// optional.of(optional.of(42)).hasValue(optional.of(42)) // true
+// optional.of(42).hasValue(dyn(optional.of(42)))         // false
+// optional.of(42).hasValue(dyn(42))                      // true
 func OptionalTypes(opts ...OptionalTypesOption) EnvOption {
 	lib := &optionalLib{version: math.MaxUint32}
 	for _, opt := range opts {
@@ -589,14 +615,108 @@ func (lib *optionalLib) CompileOptions() []EnvOption {
 				UnaryBinding(optUnwrap))))
 	}
 
+	if lib.version >= 3 {
+		opts = append(opts, Function(hasValueFunc,
+			MemberOverload(optionalHasValueValueOverload, []*Type{optionalTypeV, paramTypeV}, BoolType,
+				OverloadExamples(
+					`optional.of(1).hasValue(1) // true`,
+					`optional.of(1).hasValue(2) // false`,
+					`optional.none().hasValue(1) // false`,
+					common.MultilineDescription(
+						`// the argument is compared against the optional's value, and is not unwrapped`,
+						`optional.of(1).hasValue(dyn(optional.of(1))) // false`,
+						`optional.of(optional.of(1)).hasValue(optional.of(1)) // true`)),
+				BinaryBinding(func(value, other ref.Val) ref.Val {
+					opt := value.(*types.Optional)
+					if !opt.HasValue() {
+						return types.False
+					}
+					return types.Equal(opt.GetValue(), other)
+				}))))
+		opts = append(opts, CostEstimatorOptions(
+			checker.OverloadCostEstimate(optionalHasValueValueOverload, estimateOptionalHasValue)))
+	}
+
 	return opts
 }
 
 // ProgramOptions implements the Library interface method.
 func (lib *optionalLib) ProgramOptions() []ProgramOption {
-	return []ProgramOption{
+	opts := []ProgramOption{
 		CustomDecoratorV2(decorateOptionalOr),
 	}
+	if lib.version >= 3 {
+		opts = append(opts, CostTrackerOptions(
+			interpreter.OverloadCostTracker(optionalHasValueValueOverload, trackOptionalHasValue)))
+	}
+	return opts
+}
+
+// estimateOptionalHasValue estimates the cost of comparing an optional's value against the input
+// argument.
+//
+// The overload is sugar for 'opt.hasValue() ? opt.value() == v : false' where the equality check
+// dominates the cost, so the estimate mirrors the O(min(m, n)) cost of an equality comparison.
+func estimateOptionalHasValue(estimator checker.CostEstimator, target *checker.AstNode, args []checker.AstNode) *checker.CallEstimate {
+	if target == nil || len(args) != 1 {
+		return nil
+	}
+	optSize := sizeOrUnknown(*target)
+	argSize := sizeOrUnknown(args[0])
+	smallestMax := optSize.Max
+	if argSize.Max < smallestMax {
+		smallestMax = argSize.Max
+	}
+	minCost := uint64(0)
+	if smallestMax > 0 {
+		// equality of 2 scalar values results in a cost of 1
+		minCost = 1
+	}
+	return &checker.CallEstimate{
+		CostEstimate: checker.CostEstimate{Min: minCost, Max: smallestMax}.
+			MultiplyByCostFactor(common.StringTraversalCostFactor),
+	}
+}
+
+// sizeOrUnknown returns the size estimate computed for the node, or an unknown size if the node
+// size could not be determined at check time.
+func sizeOrUnknown(node checker.AstNode) checker.SizeEstimate {
+	if sz := node.ComputedSize(); sz != nil {
+		return *sz
+	}
+	return checker.UnknownSizeEstimate()
+}
+
+// trackOptionalHasValue computes the runtime cost of comparing an optional's value against the
+// input argument, which is bounded by the size of the smaller of the two values.
+func trackOptionalHasValue(args []ref.Val, result ref.Val) *uint64 {
+	if len(args) != 2 {
+		return nil
+	}
+	callCost := cost.SafeMultiplyByFactor(
+		min(optionalValueSize(args[0]), optionalValueSize(args[1])), common.StringTraversalCostFactor)
+	return &callCost
+}
+
+// optionalValueSize returns the size of the value being compared, unwrapping nested optional
+// values to the value they contain, and reporting a size of 1 for values which are not sizable.
+func optionalValueSize(value ref.Val) uint64 {
+	for {
+		opt, isOpt := value.(*types.Optional)
+		if !isOpt {
+			break
+		}
+		if !opt.HasValue() {
+			return 1
+		}
+		value = opt.GetValue()
+	}
+	if sizer, isSizer := value.(traits.Sizer); isSizer {
+		if sz, isInt := sizer.Size().(types.Int); isInt {
+			return uint64(sz)
+		}
+	}
+	return 1
 }
 
 // Version returns the current version of the library.

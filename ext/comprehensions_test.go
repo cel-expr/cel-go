@@ -20,7 +20,7 @@ import (
 	"testing"
 
 	"cel.dev/cel-go/cel"
-	"cel.dev/cel-go/checker"
+	"cel.dev/cel-go/common/cost"
 	"cel.dev/cel-go/common/types"
 	"cel.dev/cel-go/interpreter"
 )
@@ -222,25 +222,25 @@ func TestTwoVarComprehensionsCost(t *testing.T) {
 		vars          []cel.EnvOption
 		in            map[string]any
 		hints         map[string]uint64
-		estimatedCost checker.CostEstimate
+		estimatedCost cost.CostEstimate
 		actualCost    uint64
 	}{
 		{
 			name:          "all list literal",
 			expr:          `[1, 2, 3, 4].all(i, v, i < 5 && v > 0)`,
-			estimatedCost: checker.CostEstimate{Min: 23, Max: 39},
+			estimatedCost: cost.CostEstimate{Min: 23, Max: 39},
 			actualCost:    39,
 		},
 		{
 			name:          "all map literal - true",
 			expr:          `{1: 1, 2: 2, 3: 3}.all(i, v, i < 5 && v > 0)`,
-			estimatedCost: checker.CostEstimate{Min: 40, Max: 52},
+			estimatedCost: cost.CostEstimate{Min: 40, Max: 52},
 			actualCost:    52,
 		},
 		{
 			name:          "all map literal - false",
 			expr:          `!{0: 0}.all(i, v, i < 5 && v > 0)`,
-			estimatedCost: checker.CostEstimate{Min: 35, Max: 39},
+			estimatedCost: cost.CostEstimate{Min: 35, Max: 39},
 			actualCost:    39,
 		},
 		{
@@ -253,7 +253,7 @@ func TestTwoVarComprehensionsCost(t *testing.T) {
 			in: map[string]any{
 				"m": map[int]int{1: 1, 2: 2},
 			},
-			estimatedCost: checker.CostEstimate{Min: 2, Max: 23},
+			estimatedCost: cost.CostEstimate{Min: 2, Max: 23},
 			actualCost:    16,
 		},
 		{
@@ -268,56 +268,56 @@ func TestTwoVarComprehensionsCost(t *testing.T) {
 			in: map[string]any{
 				"m": map[string]string{"he": "hello", "go": "goodbye"},
 			},
-			estimatedCost: checker.CostEstimate{Min: 2, Max: 23},
+			estimatedCost: cost.CostEstimate{Min: 2, Max: 23},
 			actualCost:    14,
 		},
 		{
 			name:          "transformList empty",
 			expr:          `[].transformList(i, v, v) == []`,
-			estimatedCost: checker.FixedCostEstimate(31),
+			estimatedCost: cost.FixedCostEstimate(31),
 			actualCost:    31,
 		},
 		{
 			name:          "transformList single element",
 			expr:          `[1].transformList(i, v, i) == [0]`,
-			estimatedCost: checker.FixedCostEstimate(45),
+			estimatedCost: cost.FixedCostEstimate(45),
 			actualCost:    45,
 		},
 		{
 			name:          "transformList with filter",
 			expr:          `[3, 2, 1].transformList(i, v, v > i, v) == [3, 2]`,
-			estimatedCost: checker.CostEstimate{Min: 44, Max: 80},
+			estimatedCost: cost.CostEstimate{Min: 44, Max: 80},
 			actualCost:    67,
 		},
 		{
 			name:          "transformMap empty list",
 			expr:          `[].transformMap(k, v, v + 1) == {}`,
-			estimatedCost: checker.FixedCostEstimate(71),
+			estimatedCost: cost.FixedCostEstimate(71),
 			actualCost:    71,
 		},
 		{
 			name:          "transformMap empty map",
 			expr:          `{}.transformMap(k, v, v + 1) == {}`,
-			estimatedCost: checker.FixedCostEstimate(91),
+			estimatedCost: cost.FixedCostEstimate(91),
 			actualCost:    91,
 		},
 		{
 			name:          "transformMap literal scalar map",
 			expr:          `{1: 2}.transformMap(k, v, v + 1) == {1: 3}`,
-			estimatedCost: checker.FixedCostEstimate(97),
+			estimatedCost: cost.FixedCostEstimate(97),
 			actualCost:    97,
 		},
 		{
 			name: "transformMap local bind",
 			expr: `cel.bind(m, {"hello": "hello"},
 			                m.transformMap(k, v, v + "world")) == {"hello": "helloworld"}`,
-			estimatedCost: checker.FixedCostEstimate(108),
+			estimatedCost: cost.FixedCostEstimate(108),
 			actualCost:    108,
 		},
 		{
 			name:          "transformMap filter map",
 			expr:          `{1: 2, 3: 4, 5: 6}.transformMap(k, v, k % 3 == 0, v + 1) == {3: 5}`,
-			estimatedCost: checker.CostEstimate{Min: 104, Max: 116},
+			estimatedCost: cost.CostEstimate{Min: 104, Max: 116},
 			actualCost:    106,
 		},
 		{
@@ -338,13 +338,13 @@ func TestTwoVarComprehensionsCost(t *testing.T) {
 				"m.@values":        10,
 				"m.@values.@items": 2,
 			},
-			estimatedCost: checker.CostEstimate{Min: 73, Max: 173},
+			estimatedCost: cost.CostEstimate{Min: 73, Max: 173},
 			actualCost:    98,
 		},
 		{
 			name:          "transformMapEntry literal input",
 			expr:          `{1: 2}.transformMapEntry(k, v, {v: k}) == {2: 1}`,
-			estimatedCost: checker.FixedCostEstimate(126),
+			estimatedCost: cost.FixedCostEstimate(126),
 			actualCost:    126,
 		},
 		{
@@ -364,7 +364,7 @@ func TestTwoVarComprehensionsCost(t *testing.T) {
 				"m.@keys":   16,
 				"m.@values": 10,
 			},
-			estimatedCost: checker.CostEstimate{Min: 65, Max: 405},
+			estimatedCost: cost.CostEstimate{Min: 65, Max: 405},
 			actualCost:    201,
 		},
 	}

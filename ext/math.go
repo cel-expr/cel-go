@@ -20,13 +20,11 @@ import (
 	"strings"
 
 	"cel.dev/cel-go/cel"
-	"cel.dev/cel-go/checker"
 	"cel.dev/cel-go/common/ast"
 	"cel.dev/cel-go/common/cost"
 	"cel.dev/cel-go/common/types"
 	"cel.dev/cel-go/common/types/ref"
 	"cel.dev/cel-go/common/types/traits"
-	"cel.dev/cel-go/interpreter"
 )
 
 // Math returns a cel.EnvOption to configure namespaced math helper macros and
@@ -584,13 +582,13 @@ func (lib *mathLib) CompileOptions() []cel.EnvOption {
 		)
 	}
 	if lib.version >= 3 {
-		estimators := []checker.CostOption{
-			checker.OverloadCostEstimate("math_@min_list_double", estimateMathListCost),
-			checker.OverloadCostEstimate("math_@min_list_int", estimateMathListCost),
-			checker.OverloadCostEstimate("math_@min_list_uint", estimateMathListCost),
-			checker.OverloadCostEstimate("math_@max_list_double", estimateMathListCost),
-			checker.OverloadCostEstimate("math_@max_list_int", estimateMathListCost),
-			checker.OverloadCostEstimate("math_@max_list_uint", estimateMathListCost),
+		estimators := []cost.CostOption{
+			cost.OverloadCostEstimate("math_@min_list_double", estimateMathListCost),
+			cost.OverloadCostEstimate("math_@min_list_int", estimateMathListCost),
+			cost.OverloadCostEstimate("math_@min_list_uint", estimateMathListCost),
+			cost.OverloadCostEstimate("math_@max_list_double", estimateMathListCost),
+			cost.OverloadCostEstimate("math_@max_list_int", estimateMathListCost),
+			cost.OverloadCostEstimate("math_@max_list_uint", estimateMathListCost),
 		}
 		opts = append(opts, cel.CostEstimatorOptions(estimators...))
 	}
@@ -601,13 +599,13 @@ func (lib *mathLib) CompileOptions() []cel.EnvOption {
 func (lib *mathLib) ProgramOptions() []cel.ProgramOption {
 	var opts []cel.ProgramOption
 	if lib.version >= 3 {
-		trackers := []interpreter.CostTrackerOption{
-			interpreter.OverloadCostTracker("math_@min_list_double", trackMathListCost),
-			interpreter.OverloadCostTracker("math_@min_list_int", trackMathListCost),
-			interpreter.OverloadCostTracker("math_@min_list_uint", trackMathListCost),
-			interpreter.OverloadCostTracker("math_@max_list_double", trackMathListCost),
-			interpreter.OverloadCostTracker("math_@max_list_int", trackMathListCost),
-			interpreter.OverloadCostTracker("math_@max_list_uint", trackMathListCost),
+		trackers := []cost.TrackerOption{
+			cost.OverloadTracker("math_@min_list_double", trackMathListCost),
+			cost.OverloadTracker("math_@min_list_int", trackMathListCost),
+			cost.OverloadTracker("math_@min_list_uint", trackMathListCost),
+			cost.OverloadTracker("math_@max_list_double", trackMathListCost),
+			cost.OverloadTracker("math_@max_list_int", trackMathListCost),
+			cost.OverloadTracker("math_@max_list_uint", trackMathListCost),
 		}
 		opts = append(opts, cel.CostTrackerOptions(trackers...))
 	}
@@ -971,14 +969,14 @@ func maybeSuffixError(val ref.Val, suffix string) ref.Val {
 	return val
 }
 
-func estimateMathListCost(estimator checker.CostEstimator, target *checker.AstNode, args []checker.AstNode) *checker.CallEstimate {
+func estimateMathListCost(estimator cost.Estimator, target *cost.AstNode, args []cost.AstNode) *cost.CallEstimate {
 	if len(args) != 1 {
 		return nil
 	}
 	sz := estimateSize(estimator, args[0])
-	cost := sz.MultiplyByCostFactor(1.0).Add(callCostEstimate)
-	resultSize := checker.FixedSizeEstimate(1)
-	return &checker.CallEstimate{CostEstimate: cost, ResultSize: &resultSize}
+	c := sz.MultiplyByCostFactor(1.0).Add(callCostEstimate)
+	resultSize := fixedSizeEstimate(1)
+	return callEstimate(c, &resultSize)
 }
 
 func trackMathListCost(args []ref.Val, _ ref.Val) *uint64 {

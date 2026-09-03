@@ -21,12 +21,10 @@ import (
 	"reflect"
 
 	"cel.dev/cel-go/cel"
-	"cel.dev/cel-go/checker"
 	"cel.dev/cel-go/common/ast"
 	"cel.dev/cel-go/common/cost"
 	"cel.dev/cel-go/common/types"
 	"cel.dev/cel-go/common/types/ref"
-	"cel.dev/cel-go/interpreter"
 )
 
 const (
@@ -295,27 +293,27 @@ func (*networkLib) CompileOptions() []cel.EnvOption {
 			networkFormatValidator{funcName: cidrFunc, argNum: 0, check: checkCIDR},
 		),
 		cel.CostEstimatorOptions(
-			checker.OverloadCostEstimate("string_to_cidr", estimateNetworkParseCost),
-			checker.OverloadCostEstimate("cidr_to_string", estimateNetworkNominalStringCost),
-			checker.OverloadCostEstimate("cidr_contains_cidr", estimateNetworkContainsCIDRCIDRCost),
-			checker.OverloadCostEstimate("cidr_contains_cidr_string", estimateNetworkContainsCIDRStringCost),
-			checker.OverloadCostEstimate("cidr_contains_ip_ip", estimateNetworkContainsIPIPCost),
-			checker.OverloadCostEstimate("cidr_contains_ip_string", estimateNetworkContainsIPStringCost),
-			checker.OverloadCostEstimate("ip_family", estimateNetworkNominalCost),
-			checker.OverloadCostEstimate("string_to_ip", estimateNetworkParseCost),
-			checker.OverloadCostEstimate("cidr_ip", estimateNetworkNominalOpaqueCost),
-			checker.OverloadCostEstimate("ip_to_string", estimateNetworkNominalStringCost),
-			checker.OverloadCostEstimate("ip_is_canonical", estimateIPIsCanonicalCost),
-			checker.OverloadCostEstimate("is_cidr", estimateNetworkParseBoolCost),
-			checker.OverloadCostEstimate("ip_is_global_unicast", estimateNetworkNominalCost),
-			checker.OverloadCostEstimate("is_ip", estimateNetworkParseBoolCost),
-			checker.OverloadCostEstimate("ip_is_link_local_multicast", estimateNetworkNominalCost),
-			checker.OverloadCostEstimate("ip_is_link_local_unicast", estimateNetworkNominalCost),
-			checker.OverloadCostEstimate("ip_is_loopback", estimateNetworkNominalCost),
-			checker.OverloadCostEstimate("cidr_is_mask", estimateNetworkNominalCost),
-			checker.OverloadCostEstimate("ip_is_unspecified", estimateNetworkNominalCost),
-			checker.OverloadCostEstimate("cidr_masked", estimateNetworkNominalOpaqueCost),
-			checker.OverloadCostEstimate("cidr_prefix_length", estimateNetworkNominalCost),
+			cost.OverloadCostEstimate("string_to_cidr", estimateNetworkParseCost),
+			cost.OverloadCostEstimate("cidr_to_string", estimateNetworkNominalStringCost),
+			cost.OverloadCostEstimate("cidr_contains_cidr", estimateNetworkContainsCIDRCIDRCost),
+			cost.OverloadCostEstimate("cidr_contains_cidr_string", estimateNetworkContainsCIDRStringCost),
+			cost.OverloadCostEstimate("cidr_contains_ip_ip", estimateNetworkContainsIPIPCost),
+			cost.OverloadCostEstimate("cidr_contains_ip_string", estimateNetworkContainsIPStringCost),
+			cost.OverloadCostEstimate("ip_family", estimateNetworkNominalCost),
+			cost.OverloadCostEstimate("string_to_ip", estimateNetworkParseCost),
+			cost.OverloadCostEstimate("cidr_ip", estimateNetworkNominalOpaqueCost),
+			cost.OverloadCostEstimate("ip_to_string", estimateNetworkNominalStringCost),
+			cost.OverloadCostEstimate("ip_is_canonical", estimateIPIsCanonicalCost),
+			cost.OverloadCostEstimate("is_cidr", estimateNetworkParseBoolCost),
+			cost.OverloadCostEstimate("ip_is_global_unicast", estimateNetworkNominalCost),
+			cost.OverloadCostEstimate("is_ip", estimateNetworkParseBoolCost),
+			cost.OverloadCostEstimate("ip_is_link_local_multicast", estimateNetworkNominalCost),
+			cost.OverloadCostEstimate("ip_is_link_local_unicast", estimateNetworkNominalCost),
+			cost.OverloadCostEstimate("ip_is_loopback", estimateNetworkNominalCost),
+			cost.OverloadCostEstimate("cidr_is_mask", estimateNetworkNominalCost),
+			cost.OverloadCostEstimate("ip_is_unspecified", estimateNetworkNominalCost),
+			cost.OverloadCostEstimate("cidr_masked", estimateNetworkNominalOpaqueCost),
+			cost.OverloadCostEstimate("cidr_prefix_length", estimateNetworkNominalCost),
 		),
 	}
 }
@@ -323,27 +321,27 @@ func (*networkLib) CompileOptions() []cel.EnvOption {
 func (*networkLib) ProgramOptions() []cel.ProgramOption {
 	return []cel.ProgramOption{
 		cel.CostTrackerOptions(
-			interpreter.OverloadCostTracker("string_to_cidr", trackNetworkParseCost),
-			interpreter.OverloadCostTracker("cidr_to_string", trackNetworkNominalCost),
-			interpreter.OverloadCostTracker("cidr_contains_cidr", trackNetworkContainsCIDRCIDRCost),
-			interpreter.OverloadCostTracker("cidr_contains_cidr_string", trackNetworkContainsCIDRStringCost),
-			interpreter.OverloadCostTracker("cidr_contains_ip_ip", trackNetworkContainsIPIPCost),
-			interpreter.OverloadCostTracker("cidr_contains_ip_string", trackNetworkContainsIPStringCost),
-			interpreter.OverloadCostTracker("ip_family", trackNetworkNominalCost),
-			interpreter.OverloadCostTracker("string_to_ip", trackNetworkParseCost),
-			interpreter.OverloadCostTracker("cidr_ip", trackNetworkNominalCost),
-			interpreter.OverloadCostTracker("ip_to_string", trackNetworkNominalCost),
-			interpreter.OverloadCostTracker("ip_is_canonical", trackIPIsCanonicalCost),
-			interpreter.OverloadCostTracker("is_cidr", trackNetworkParseCost),
-			interpreter.OverloadCostTracker("ip_is_global_unicast", trackNetworkNominalCost),
-			interpreter.OverloadCostTracker("is_ip", trackNetworkParseCost),
-			interpreter.OverloadCostTracker("ip_is_link_local_multicast", trackNetworkNominalCost),
-			interpreter.OverloadCostTracker("ip_is_link_local_unicast", trackNetworkNominalCost),
-			interpreter.OverloadCostTracker("ip_is_loopback", trackNetworkNominalCost),
-			interpreter.OverloadCostTracker("cidr_is_mask", trackNetworkNominalCost),
-			interpreter.OverloadCostTracker("ip_is_unspecified", trackNetworkNominalCost),
-			interpreter.OverloadCostTracker("cidr_masked", trackNetworkNominalCost),
-			interpreter.OverloadCostTracker("cidr_prefix_length", trackNetworkNominalCost),
+			cost.OverloadTracker("string_to_cidr", trackNetworkParseCost),
+			cost.OverloadTracker("cidr_to_string", trackNetworkNominalCost),
+			cost.OverloadTracker("cidr_contains_cidr", trackNetworkContainsCIDRCIDRCost),
+			cost.OverloadTracker("cidr_contains_cidr_string", trackNetworkContainsCIDRStringCost),
+			cost.OverloadTracker("cidr_contains_ip_ip", trackNetworkContainsIPIPCost),
+			cost.OverloadTracker("cidr_contains_ip_string", trackNetworkContainsIPStringCost),
+			cost.OverloadTracker("ip_family", trackNetworkNominalCost),
+			cost.OverloadTracker("string_to_ip", trackNetworkParseCost),
+			cost.OverloadTracker("cidr_ip", trackNetworkNominalCost),
+			cost.OverloadTracker("ip_to_string", trackNetworkNominalCost),
+			cost.OverloadTracker("ip_is_canonical", trackIPIsCanonicalCost),
+			cost.OverloadTracker("is_cidr", trackNetworkParseCost),
+			cost.OverloadTracker("ip_is_global_unicast", trackNetworkNominalCost),
+			cost.OverloadTracker("is_ip", trackNetworkParseCost),
+			cost.OverloadTracker("ip_is_link_local_multicast", trackNetworkNominalCost),
+			cost.OverloadTracker("ip_is_link_local_unicast", trackNetworkNominalCost),
+			cost.OverloadTracker("ip_is_loopback", trackNetworkNominalCost),
+			cost.OverloadTracker("cidr_is_mask", trackNetworkNominalCost),
+			cost.OverloadTracker("ip_is_unspecified", trackNetworkNominalCost),
+			cost.OverloadTracker("cidr_masked", trackNetworkNominalCost),
+			cost.OverloadTracker("cidr_prefix_length", trackNetworkNominalCost),
 		),
 	}
 }
@@ -685,7 +683,7 @@ func checkCIDR(e *cel.Env, call, arg ast.Expr) error {
 
 // Cost estimation functions for network extensions.
 
-func estimateNetworkParseCost(estimator checker.CostEstimator, target *checker.AstNode, args []checker.AstNode) *checker.CallEstimate {
+func estimateNetworkParseCost(estimator cost.Estimator, target *cost.AstNode, args []cost.AstNode) *cost.CallEstimate {
 	if len(args) < 1 {
 		return nil
 	}
@@ -694,7 +692,7 @@ func estimateNetworkParseCost(estimator checker.CostEstimator, target *checker.A
 	return callEstimate(sz.MultiplyByCostFactor(stringCostFactor), &resultSize)
 }
 
-func estimateNetworkParseBoolCost(estimator checker.CostEstimator, target *checker.AstNode, args []checker.AstNode) *checker.CallEstimate {
+func estimateNetworkParseBoolCost(estimator cost.Estimator, target *cost.AstNode, args []cost.AstNode) *cost.CallEstimate {
 	if len(args) < 1 {
 		return nil
 	}
@@ -702,7 +700,7 @@ func estimateNetworkParseBoolCost(estimator checker.CostEstimator, target *check
 	return callEstimate(sz.MultiplyByCostFactor(stringCostFactor), nil)
 }
 
-func estimateIPIsCanonicalCost(estimator checker.CostEstimator, target *checker.AstNode, args []checker.AstNode) *checker.CallEstimate {
+func estimateIPIsCanonicalCost(estimator cost.Estimator, target *cost.AstNode, args []cost.AstNode) *cost.CallEstimate {
 	if len(args) < 1 {
 		return nil
 	}
@@ -710,27 +708,27 @@ func estimateIPIsCanonicalCost(estimator checker.CostEstimator, target *checker.
 	return callEstimate(sz.MultiplyByCostFactor(2*stringCostFactor), nil)
 }
 
-func estimateNetworkNominalCost(estimator checker.CostEstimator, target *checker.AstNode, args []checker.AstNode) *checker.CallEstimate {
+func estimateNetworkNominalCost(estimator cost.Estimator, target *cost.AstNode, args []cost.AstNode) *cost.CallEstimate {
 	return callEstimate(callCostEstimate, nil)
 }
 
-func estimateNetworkNominalOpaqueCost(estimator checker.CostEstimator, target *checker.AstNode, args []checker.AstNode) *checker.CallEstimate {
+func estimateNetworkNominalOpaqueCost(estimator cost.Estimator, target *cost.AstNode, args []cost.AstNode) *cost.CallEstimate {
 	resultSize := rangedSizeEstimate(4, 16)
 	return callEstimate(callCostEstimate, &resultSize)
 }
 
-func estimateNetworkNominalStringCost(estimator checker.CostEstimator, target *checker.AstNode, args []checker.AstNode) *checker.CallEstimate {
+func estimateNetworkNominalStringCost(estimator cost.Estimator, target *cost.AstNode, args []cost.AstNode) *cost.CallEstimate {
 	resultSize := rangedSizeEstimate(3, 45)
 	return callEstimate(callCostEstimate, &resultSize)
 }
 
-func estimateNetworkContainsIPIPCost(estimator checker.CostEstimator, target *checker.AstNode, args []checker.AstNode) *checker.CallEstimate {
+func estimateNetworkContainsIPIPCost(estimator cost.Estimator, target *cost.AstNode, args []cost.AstNode) *cost.CallEstimate {
 	sz := rangedSizeEstimate(4, 16)
 	ipCompCost := sz.Add(sz).MultiplyByCostFactor(stringCostFactor)
 	return callEstimate(ipCompCost, nil)
 }
 
-func estimateNetworkContainsIPStringCost(estimator checker.CostEstimator, target *checker.AstNode, args []checker.AstNode) *checker.CallEstimate {
+func estimateNetworkContainsIPStringCost(estimator cost.Estimator, target *cost.AstNode, args []cost.AstNode) *cost.CallEstimate {
 	if len(args) < 1 {
 		return nil
 	}
@@ -741,7 +739,7 @@ func estimateNetworkContainsIPStringCost(estimator checker.CostEstimator, target
 	return callEstimate(ipCompCost, nil)
 }
 
-func estimateNetworkContainsCIDRCIDRCost(estimator checker.CostEstimator, target *checker.AstNode, args []checker.AstNode) *checker.CallEstimate {
+func estimateNetworkContainsCIDRCIDRCost(estimator cost.Estimator, target *cost.AstNode, args []cost.AstNode) *cost.CallEstimate {
 	sz := rangedSizeEstimate(4, 16)
 	ipCompCost := sz.Add(sz).MultiplyByCostFactor(stringCostFactor)
 	ipCompCost = ipCompCost.Add(sz.MultiplyByCostFactor(stringCostFactor))
@@ -750,7 +748,7 @@ func estimateNetworkContainsCIDRCIDRCost(estimator checker.CostEstimator, target
 	return callEstimate(ipCompCost, nil)
 }
 
-func estimateNetworkContainsCIDRStringCost(estimator checker.CostEstimator, target *checker.AstNode, args []checker.AstNode) *checker.CallEstimate {
+func estimateNetworkContainsCIDRStringCost(estimator cost.Estimator, target *cost.AstNode, args []cost.AstNode) *cost.CallEstimate {
 	if len(args) < 1 {
 		return nil
 	}

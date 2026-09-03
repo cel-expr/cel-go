@@ -29,6 +29,7 @@ type options struct {
 	enableVariadicOperatorASTs       bool
 	enableIdentEscapeSyntax          bool
 	enableHiddenAccumulatorName      bool
+	enablePrattParser                bool
 }
 
 // Option configures the behavior of the parser.
@@ -171,6 +172,14 @@ func EnableHiddenAccumulatorName(enabled bool) Option {
 func EnableVariadicOperatorASTs(varArgASTs bool) Option {
 	return func(opts *options) error {
 		opts.enableVariadicOperatorASTs = varArgASTs
+		return nil
+	}
+}
+
+// EnablePrattParser enables the Pratt parser implementation instead of the ANTLR parser.
+func EnablePrattParser(enablePrattParser bool) Option {
+	return func(opts *options) error {
+		opts.enablePrattParser = enablePrattParser
 		return nil
 	}
 }

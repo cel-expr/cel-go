@@ -16,14 +16,12 @@ package ext
 
 import (
 	"cel.dev/cel-go/cel"
-	"cel.dev/cel-go/checker"
 	"cel.dev/cel-go/common/ast"
 	"cel.dev/cel-go/common/cost"
 	"cel.dev/cel-go/common/operators"
 	"cel.dev/cel-go/common/types"
 	"cel.dev/cel-go/common/types/ref"
 	"cel.dev/cel-go/common/types/traits"
-	"cel.dev/cel-go/interpreter"
 )
 
 // Sets returns a cel.EnvOption to configure namespaced set relationship
@@ -118,10 +116,10 @@ func (setsLib) CompileOptions() []cel.EnvOption {
 			cel.Overload("list_sets_intersects_list", []*cel.Type{listType, listType}, cel.BoolType,
 				cel.BinaryBinding(setsIntersects))),
 		cel.CostEstimatorOptions(
-			checker.OverloadCostEstimate("list_sets_contains_list", estimateSetsCost(1)),
-			checker.OverloadCostEstimate("list_sets_intersects_list", estimateSetsCost(1)),
+			cost.OverloadCostEstimate("list_sets_contains_list", estimateSetsCost(1)),
+			cost.OverloadCostEstimate("list_sets_intersects_list", estimateSetsCost(1)),
 			// equivalence requires potentially two m*n comparisons to ensure each list is contained by the other
-			checker.OverloadCostEstimate("list_sets_equivalent_list", estimateSetsCost(2)),
+			cost.OverloadCostEstimate("list_sets_equivalent_list", estimateSetsCost(2)),
 		),
 	}
 }
@@ -130,9 +128,9 @@ func (setsLib) CompileOptions() []cel.EnvOption {
 func (setsLib) ProgramOptions() []cel.ProgramOption {
 	return []cel.ProgramOption{
 		cel.CostTrackerOptions(
-			interpreter.OverloadCostTracker("list_sets_contains_list", trackSetsCost(1)),
-			interpreter.OverloadCostTracker("list_sets_intersects_list", trackSetsCost(1)),
-			interpreter.OverloadCostTracker("list_sets_equivalent_list", trackSetsCost(2)),
+			cost.OverloadTracker("list_sets_contains_list", trackSetsCost(1)),
+			cost.OverloadTracker("list_sets_intersects_list", trackSetsCost(1)),
+			cost.OverloadTracker("list_sets_equivalent_list", trackSetsCost(2)),
 		),
 	}
 }
@@ -233,8 +231,8 @@ func setsEquivalent(listA, listB ref.Val) ref.Val {
 	return setsContains(listB, listA)
 }
 
-func estimateSetsCost(costFactor float64) checker.FunctionEstimator {
-	return func(estimator checker.CostEstimator, target *checker.AstNode, args []checker.AstNode) *checker.CallEstimate {
+func estimateSetsCost(costFactor float64) cost.FunctionEstimator {
+	return func(estimator cost.Estimator, target *cost.AstNode, args []cost.AstNode) *cost.CallEstimate {
 		if len(args) != 2 {
 			return nil
 		}
@@ -245,7 +243,7 @@ func estimateSetsCost(costFactor float64) checker.FunctionEstimator {
 	}
 }
 
-func trackSetsCost(costFactor float64) interpreter.FunctionTracker {
+func trackSetsCost(costFactor float64) cost.FunctionTracker {
 	return func(args []ref.Val, _ ref.Val) *uint64 {
 		lhsSize := actualSize(args[0])
 		rhsSize := actualSize(args[1])

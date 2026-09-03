@@ -22,7 +22,7 @@ import (
 	"unicode/utf8"
 
 	"cel.dev/cel-go/cel"
-	"cel.dev/cel-go/checker"
+	"cel.dev/cel-go/common/cost"
 	"cel.dev/cel-go/common/types"
 	"cel.dev/cel-go/common/types/ref"
 )
@@ -512,110 +512,110 @@ func TestQuoteUnquote(t *testing.T) {
 		expectedErr           string
 		expectedOutput        string
 		expectedRuntimeCost   uint64
-		expectedEstimatedCost checker.CostEstimate
+		expectedEstimatedCost cost.CostEstimate
 		disableQuote          bool
 		disableCELEval        bool
 	}{
 		{
 			name:                  "remove quotes only",
 			testStr:               "this is a test",
-			expectedEstimatedCost: checker.FixedCostEstimate(2),
+			expectedEstimatedCost: cost.FixedCostEstimate(2),
 			expectedRuntimeCost:   2,
 		},
 		{
 			name:                  "mid-string newline",
 			testStr:               "first\nsecond",
-			expectedEstimatedCost: checker.FixedCostEstimate(2),
+			expectedEstimatedCost: cost.FixedCostEstimate(2),
 			expectedRuntimeCost:   2,
 		},
 		{
 			name:                  "bell",
 			testStr:               "bell\a",
-			expectedEstimatedCost: checker.FixedCostEstimate(1),
+			expectedEstimatedCost: cost.FixedCostEstimate(1),
 			expectedRuntimeCost:   1,
 		},
 		{
 			name:                  "backspace",
 			testStr:               "\bbackspace",
-			expectedEstimatedCost: checker.FixedCostEstimate(1),
+			expectedEstimatedCost: cost.FixedCostEstimate(1),
 			expectedRuntimeCost:   1,
 		},
 		{
 			name:                  "form feed",
 			testStr:               "\fform feed",
-			expectedEstimatedCost: checker.FixedCostEstimate(1),
+			expectedEstimatedCost: cost.FixedCostEstimate(1),
 			expectedRuntimeCost:   1,
 		},
 		{
 			name:                  "carriage return",
 			testStr:               "carriage \r return",
-			expectedEstimatedCost: checker.FixedCostEstimate(2),
+			expectedEstimatedCost: cost.FixedCostEstimate(2),
 			expectedRuntimeCost:   2,
 		},
 		{
 			name:                  "horizontal tab",
 			testStr:               "horizontal \ttab",
-			expectedEstimatedCost: checker.FixedCostEstimate(2),
+			expectedEstimatedCost: cost.FixedCostEstimate(2),
 			expectedRuntimeCost:   2,
 		},
 		{
 			name:                  "vertical tab",
 			testStr:               "vertical \v tab",
-			expectedEstimatedCost: checker.FixedCostEstimate(2),
+			expectedEstimatedCost: cost.FixedCostEstimate(2),
 			expectedRuntimeCost:   2,
 		},
 		{
 			name:                  "double slash",
 			testStr:               "double \\\\ slash",
-			expectedEstimatedCost: checker.FixedCostEstimate(2),
+			expectedEstimatedCost: cost.FixedCostEstimate(2),
 			expectedRuntimeCost:   2,
 		},
 		{
 			name:                  "two escape sequences",
 			testStr:               "two escape sequences \a\n",
-			expectedEstimatedCost: checker.FixedCostEstimate(3),
+			expectedEstimatedCost: cost.FixedCostEstimate(3),
 			expectedRuntimeCost:   3,
 		},
 		{
 			name:                  "ends with slash",
 			testStr:               "ends with \\",
-			expectedEstimatedCost: checker.FixedCostEstimate(2),
+			expectedEstimatedCost: cost.FixedCostEstimate(2),
 			expectedRuntimeCost:   2,
 		},
 		{
 			name:                  "starts with slash",
 			testStr:               "\\ starts with",
-			expectedEstimatedCost: checker.FixedCostEstimate(2),
+			expectedEstimatedCost: cost.FixedCostEstimate(2),
 			expectedRuntimeCost:   2,
 		},
 		{
 			name:                  "printable unicode",
 			testStr:               "printable unicode😀",
-			expectedEstimatedCost: checker.FixedCostEstimate(2),
+			expectedEstimatedCost: cost.FixedCostEstimate(2),
 			expectedRuntimeCost:   2,
 		},
 		{
 			name:                  "mid-string quote",
 			testStr:               "mid-string \" quote",
-			expectedEstimatedCost: checker.FixedCostEstimate(2),
+			expectedEstimatedCost: cost.FixedCostEstimate(2),
 			expectedRuntimeCost:   2,
 		},
 		{
 			name:                  "single-quote with double quote",
 			testStr:               `single-quote with "double quote"`,
-			expectedEstimatedCost: checker.FixedCostEstimate(4),
+			expectedEstimatedCost: cost.FixedCostEstimate(4),
 			expectedRuntimeCost:   4,
 		},
 		{
 			name:                  "CEL-only escape sequences",
 			testStr:               "\\? and \\`",
-			expectedEstimatedCost: checker.FixedCostEstimate(1),
+			expectedEstimatedCost: cost.FixedCostEstimate(1),
 			expectedRuntimeCost:   1,
 		},
 		{
 			name:                  "test cost",
 			testStr:               "this is a very very very long string used to ensure that cost tracking works",
-			expectedEstimatedCost: checker.FixedCostEstimate(8),
+			expectedEstimatedCost: cost.FixedCostEstimate(8),
 			expectedRuntimeCost:   8,
 		},
 		{
@@ -687,15 +687,15 @@ func (e *noopCostEstimator) CallCost(function, overloadID string, args []ref.Val
 	return nil
 }
 
-func (e *noopCostEstimator) EstimateCallCost(function, overloadID string, target *checker.AstNode, args []checker.AstNode) *checker.CallEstimate {
+func (e *noopCostEstimator) EstimateCallCost(function, overloadID string, target *cost.AstNode, args []cost.AstNode) *cost.CallEstimate {
 	return nil
 }
 
-func (e *noopCostEstimator) EstimateSize(element checker.AstNode) *checker.SizeEstimate {
+func (e *noopCostEstimator) EstimateSize(element cost.AstNode) *cost.SizeEstimate {
 	return nil
 }
 
-func evalWithCEL(input string, expectedRuntimeCost uint64, expectedEstimatedCost checker.CostEstimate, t *testing.T) string {
+func evalWithCEL(input string, expectedRuntimeCost uint64, expectedEstimatedCost cost.CostEstimate, t *testing.T) string {
 	env, err := cel.NewEnv(Strings())
 	if err != nil {
 		t.Fatalf("cel.NewEnv() failed: %v", err)
@@ -854,79 +854,79 @@ func TestStringCostTracking(t *testing.T) {
 	tests := []struct {
 		name          string
 		expr          string
-		estimatedCost checker.CostEstimate
+		estimatedCost cost.CostEstimate
 		actualCost    uint64
 	}{
 		{
 			name:          "charAt",
 			expr:          `"hello world".charAt(0)`,
-			estimatedCost: checker.FixedCostEstimate(4),
+			estimatedCost: cost.FixedCostEstimate(4),
 			actualCost:    4,
 		},
 		{
 			name:          "indexOf",
 			expr:          `"hello world".indexOf("world")`,
-			estimatedCost: checker.FixedCostEstimate(7),
+			estimatedCost: cost.FixedCostEstimate(7),
 			actualCost:    7,
 		},
 		{
 			name:          "lastIndexOf",
 			expr:          `"hello world".lastIndexOf("o")`,
-			estimatedCost: checker.FixedCostEstimate(3),
+			estimatedCost: cost.FixedCostEstimate(3),
 			actualCost:    3,
 		},
 		{
 			name:          "lowerAscii",
 			expr:          `"HELLO".lowerAscii()`,
-			estimatedCost: checker.FixedCostEstimate(7),
+			estimatedCost: cost.FixedCostEstimate(7),
 			actualCost:    7,
 		},
 		{
 			name:          "upperAscii",
 			expr:          `"hello".upperAscii()`,
-			estimatedCost: checker.FixedCostEstimate(7),
+			estimatedCost: cost.FixedCostEstimate(7),
 			actualCost:    7,
 		},
 		{
 			name:          "replace",
 			expr:          `"hello world".replace("world", "CEL")`,
-			estimatedCost: checker.CostEstimate{Min: 11, Max: 55},
+			estimatedCost: cost.CostEstimate{Min: 11, Max: 55},
 			actualCost:    16,
 		},
 		{
 			name:          "replace_exponential_growth",
 			expr:          `"A".replace("", "AAAAAAAAAA").replace("", "AAAAAAAAAA")`,
-			estimatedCost: checker.CostEstimate{Min: 6, Max: 281},
+			estimatedCost: cost.CostEstimate{Min: 6, Max: 281},
 			actualCost:    268,
 		},
 		{
 			name:          "split",
 			expr:          `"a,b,c,d,e".split(",")`,
-			estimatedCost: checker.CostEstimate{Min: 12, Max: 21},
+			estimatedCost: cost.CostEstimate{Min: 12, Max: 21},
 			actualCost:    17,
 		},
 		{
 			name:          "substring",
 			expr:          `"hello world".substring(0, 5)`,
-			estimatedCost: checker.FixedCostEstimate(8),
+			estimatedCost: cost.FixedCostEstimate(8),
 			actualCost:    8,
 		},
 		{
 			name:          "join",
 			expr:          `["a", "b", "c", "d", "e"].join("-")`,
-			estimatedCost: checker.CostEstimate{Min: 12, Max: 23},
+			estimatedCost: cost.CostEstimate{Min: 12, Max: 23},
 			actualCost:    21,
 		},
 		{
 			name:          "trim",
 			expr:          `"  hello  ".trim()`,
-			estimatedCost: checker.CostEstimate{Min: 2, Max: 11},
+			estimatedCost: cost.CostEstimate{Min: 2, Max: 11},
 			actualCost:    7,
 		},
 		{
 			name:          "reverse",
 			expr:          `"hello".reverse()`,
-			estimatedCost: checker.FixedCostEstimate(7),
+			estimatedCost: cost.FixedCostEstimate(7),
 			actualCost:    7,
 		},
 	}

@@ -17,6 +17,7 @@ package cel
 import (
 	"errors"
 	"fmt"
+	"reflect"
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protodesc"
@@ -328,6 +329,22 @@ func Abbrevs(qualifiedNames ...string) EnvOption {
 	}
 }
 
+// NativeTypeDesc describes a native Go struct type for registration with CEL.
+type NativeTypeDesc = types.NativeTypeDesc
+
+// NativeTypeOption is a functional option for configuring handling of native types.
+type NativeTypeOption = types.NativeTypeOption
+
+var (
+	// NativeTypeAlias configures a custom CEL type name (alias) for a native type descriptor.
+	NativeTypeAlias = types.NativeTypeAlias
+)
+
+// NativeTypeFor constructs a NativeTypeDesc for a Go struct type T with the given options.
+func NativeTypeFor[T any](opts ...NativeTypeOption) *NativeTypeDesc {
+	return types.NativeTypeFor[T](opts...)
+}
+
 // protoTypeRegistry is an internal-only interface containing the minimum methods required to support
 // custom types. It is a subset of methods from ref.TypeRegistry.
 type protoTypeRegistry interface {
@@ -335,11 +352,16 @@ type protoTypeRegistry interface {
 	RegisterType(...ref.Type) error
 }
 
+type nativeTypeRegistry interface {
+	RegisterNativeType(reflect.Type, ...types.NativeTypeOption) error
+	RegisterNativeTypeDesc(*types.NativeTypeDesc) error
+}
+
 // Types adds one or more type declarations to the environment, allowing for construction of
 // type-literals whose definitions are included in the common expression built-in set.
 //
-// The input types may either be instances of `proto.Message` or `ref.Type`. Any other type
-// provided to this option will result in an error.
+// The input types may either be instances of `proto.Message`, `ref.Type`, `reflect.Type`, or `*NativeTypeDesc`.
+// Any other type provided to this option will result in an error.
 //
 // Well-known protobuf types within the `google.protobuf.*` package are included in the standard
 // environment by default.
@@ -363,6 +385,24 @@ func Types(addTypes ...any) EnvOption {
 				}
 			case ref.Type:
 				err := reg.RegisterType(v)
+				if err != nil {
+					return nil, err
+				}
+			case reflect.Type:
+				nreg, isNReg := e.provider.(nativeTypeRegistry)
+				if !isNReg {
+					return nil, fmt.Errorf("native types not supported by provider: %T", e.provider)
+				}
+				err := nreg.RegisterNativeType(v)
+				if err != nil {
+					return nil, err
+				}
+			case *types.NativeTypeDesc:
+				nreg, isNReg := e.provider.(nativeTypeRegistry)
+				if !isNReg {
+					return nil, fmt.Errorf("native types not supported by provider: %T", e.provider)
+				}
+				err := nreg.RegisterNativeTypeDesc(v)
 				if err != nil {
 					return nil, err
 				}
@@ -729,6 +769,10 @@ const (
 	//
 	// Deprecated: use ext.StringsValidateFormatCalls() as this option is now a no-op.
 	OptCheckStringFormat EvalOption = 1 << iota
+
+	// OptTrackMemory enables the runtime peak memory tracking and returns the peak watermark within
+	// evalDetails via func PeakMemory()
+	OptTrackMemory EvalOption = 1 << iota
 )
 
 // EvalOptions sets one or more evaluation options which may affect the evaluation or Result.
@@ -814,6 +858,36 @@ func CostTracking(costEstimator interpreter.ActualCostEstimator) ProgramOption {
 	return func(p *prog) (*prog, error) {
 		p.callCostEstimator = costEstimator
 		p.evalOpts |= OptTrackCost
+		return p, nil
+	}
+}
+
+// MemoryTracking enables peak memory tracking during evaluation with an optional set of
+// types.MemoryTrackerOption values to configure the tracker's size calculator, sample
+// interval, and limit behaviors.
+//
+// Peak memory is measured in aggregate element counts as computed by a types.SizeCalculator
+// and is observed at the points where values materialize during evaluation: resolved
+// attributes, call results, constructed aggregates, and comprehension results. The peak
+// watermark is available via the EvalDetails.PeakMemory() method.
+func MemoryTracking(memOpts ...types.MemoryTrackerOption) ProgramOption {
+	return func(p *prog) (*prog, error) {
+		p.memoryOptions = append(p.memoryOptions, memOpts...)
+		p.evalOpts |= OptTrackMemory
+		return p, nil
+	}
+}
+
+// MemoryLimit enables memory tracking and configures program evaluation to exit early with a
+// "memory limit exceeded" error if the peak tracked memory exceeds the limit.
+//
+// The MemoryLimit is a metric that corresponds to the aggregate element counts of the values
+// observed during evaluation. It is indicative of memory usage, not CPU usage; see CostLimit
+// for bounding compute.
+func MemoryLimit(memLimit uint32) ProgramOption {
+	return func(p *prog) (*prog, error) {
+		p.memoryLimit = &memLimit
+		p.evalOpts |= OptTrackMemory
 		return p, nil
 	}
 }
@@ -953,6 +1027,11 @@ func ContextProtoVars(ctx proto.Message, opts ...types.RegistryOption) (Activati
 
 // EnableMacroCallTracking ensures that call expressions which are replaced by macros
 // are tracked in the `SourceInfo` of parsed and checked expressions.
+//
+// This is required for Env.ResidualAst to succeed when the residual Ast contains an
+// unresolved comprehension macro (all, exists, exists_one, filter, map): without it,
+// ResidualAst cannot re-serialize the macro's expanded internal representation back
+// into CEL source syntax and returns an error instead of the residual expression.
 func EnableMacroCallTracking() EnvOption {
 	return features(featureEnableMacroCallTracking, true)
 }

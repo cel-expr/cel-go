@@ -45,7 +45,24 @@ base64-encoded.
 Examples:
 
     base64.decode('aGVsbG8=')  // return b'hello'
-    base64.decode('aGVsbG8')   // error
+    base64.decode('aGVsbG8')   // return b'hello'
+
+### Base64.DecodeUrl
+
+**Introduced in version 2**
+
+Decodes base64url-encoded string to bytes.
+
+This function will return an error if the string input is not
+base64url-encoded.
+
+    base64.decodeUrl(<string>) -> <bytes>
+
+Examples:
+
+    base64.decodeUrl('aGVsbG8=')  // return b'hello'
+    base64.decodeUrl('aGVsbG8')   // return b'hello'
+    base64.decodeUrl('____')      // return b'\xff\xff\xff'
 
 ### Base64.Encode
 
@@ -58,6 +75,20 @@ Encodes bytes to a base64-encoded string.
 Example:
 
     base64.encode(b'hello') // return 'aGVsbG8='
+
+### Base64.EncodeUrl
+
+**Introduced in version 2**
+
+Encodes bytes to a base64url-encoded string.
+
+    base64.encodeUrl(<bytes>)  -> <string>
+
+Examples:
+
+    base64.encodeUrl(b'hello')        // return 'aGVsbG8='
+    base64.encodeUrl(b'\xff\xff\xff') // return '____'
+
 
 ### JSON.Encode
 
@@ -427,6 +458,201 @@ Example:
 
     proto.hasExt(msg, google.expr.proto2.test.int32_ext) // returns true || false
 
+## Optionals
+
+Optionals introduce the `optional(T)` type: a value which either holds a value
+of type `T`, or holds no value at all. Optionals make it possible to express
+whether a value is present without resorting to a sentinel value, and to
+recover from an absent field, map key, or list index without an error.
+
+Unlike the other extensions described here, optionals are not part of the `ext`
+package. They are enabled with the `cel.OptionalTypes()` environment option:
+
+    cel.NewEnv(cel.OptionalTypes())
+
+The set of available functions may be limited to a particular version of the
+library with `cel.OptionalTypes(cel.OptionalTypesVersion(<version>))`. Where a
+function below does not state the version in which it was introduced, it has
+been present since the library was first created.
+
+The `first()` and `last()` list functions are also introduced by this library
+and are documented in the [Lists](#lists) section.
+
+### Optional Syntax
+
+Enabling the library also enables optional syntax in the parser. Field
+selection and indexing may be made optional with `.?` and `[?...]`, which yield
+`optional.none()` rather than an error when the field, key, or index is absent.
+Optional field selection is viral: every selection after the first is also
+optional.
+
+    msg.?field                // optional.of(msg.field), else optional.none()
+    msg.?field.?nested_field  // optional.none() if either field is absent
+
+Examples:
+
+    {'key': 'value'}[?'key'] == optional.of('value')
+    {'key': 'value'}[?'missing'] == optional.none()
+    [1, 2, 3][?0] == optional.of(1)
+    [1, 2, 3][?3] == optional.none()
+
+Map and message fields, as well as list elements, may also be set optionally,
+in which case the entry is only included when the optional holds a value.
+
+    {?'key': optional.of('value')} == {'key': 'value'}
+    {?'key': optional.none()} == {}
+    [?optional.of(1), ?optional.none()] == [1]
+
+### Optional.Of
+
+Creates an optional with the given value, where any value is considered valid.
+
+    optional.of(<T>) -> <optional(T)>
+
+Examples:
+
+    optional.of(1).value() == 1
+    optional.of('').hasValue() == true
+
+### Optional.OfNonZeroValue
+
+Creates an optional with the given value if the value is not a zero or empty
+value, and `optional.none()` otherwise.
+
+    optional.ofNonZeroValue(<T>) -> <optional(T)>
+
+Examples:
+
+    optional.ofNonZeroValue('hello').value() == 'hello'
+    optional.ofNonZeroValue('') == optional.none()
+    optional.ofNonZeroValue([]) == optional.none()
+    optional.ofNonZeroValue(0) == optional.none()
+
+### Optional.None
+
+The singleton value representing an optional without a value.
+
+    optional.none() -> <optional(T)>
+
+Examples:
+
+    optional.none().hasValue() == false
+
+### Value
+
+Returns the value held by the optional. Dereferencing an optional which holds
+no value is an error.
+
+    <optional(T)>.value() -> <T>
+
+Examples:
+
+    optional.of(1).value() == 1
+    optional.none().value()  // error: optional.none() dereference
+
+### HasValue
+
+Determines whether the optional holds a value, and when called with an
+argument, whether the value it holds is equal to that argument.
+
+    <optional(T)>.hasValue() -> <bool>
+    <optional(T)>.hasValue(<T>) -> <bool>
+
+The overload which tests equality was **introduced in the OptionalTypes library
+version 3**. It is syntactic sugar for
+`opt.hasValue() ? opt.value() == v : false`, so an optional which holds no
+value is never equal to a value and the result is `false` regardless of the
+argument.
+
+Examples:
+
+    optional.of(1).hasValue() == true
+    optional.ofNonZeroValue({}).hasValue() == false
+
+    optional.of(1).hasValue(1) == true
+    optional.of(1).hasValue(2) == false
+    optional.none().hasValue(1) == false
+    {'key': 'value'}[?'key'].hasValue('value') == true
+
+The argument is compared against the value held by the optional and is never
+unwrapped, so an `optional(T)` argument is only equal to the value of an
+`optional(optional(T))`. The type-checker enforces this agreement; a `dyn`
+typed argument defers the comparison to runtime, where a type mismatch is
+simply unequal, just as it would be for `==`.
+
+    optional.of(optional.of(1)).hasValue(optional.of(1)) == true
+    optional.of(1).hasValue(dyn(optional.of(1))) == false
+
+### Or
+
+Returns the optional on the left-hand side if it holds a value, and the
+optional on the right-hand side otherwise. The call is short-circuiting: only
+as many links in an `or` chain are evaluated as are needed to produce a value.
+
+    <optional(T)>.or(<optional(T)>) -> <optional(T)>
+
+Examples:
+
+    optional.of(1).or(optional.of(2)).value() == 1
+    optional.none().or(optional.of(1)).value() == 1
+
+### OrValue
+
+Returns the value held by the optional on the left-hand side, or the
+alternative value on the right-hand side. Like `or`, the call is
+short-circuiting.
+
+    <optional(T)>.orValue(<T>) -> <T>
+
+Examples:
+
+    optional.of(1).orValue(2) == 1
+    optional.none().orValue('none') == 'none'
+
+### OptMap
+
+Applies a transformation to the optional's value if it holds one, and wraps the
+result in an optional. An optional which holds no value is returned unchanged.
+
+    <optional(T)>.optMap(<varName>, <expr>) -> <optional(U)>
+
+Examples:
+
+    optional.of(2).optMap(i, i * 2).value() == 4
+    optional.none().optMap(i, i * 2) == optional.none()
+
+### OptFlatMap
+
+**Introduced in the OptionalTypes library version 1**
+
+Applies a transformation to the optional's value if it holds one, and returns
+the result. Unlike `optMap`, the transformation must itself produce an
+optional, which makes it possible to express results that may be empty in ways
+`optMap` cannot.
+
+    <optional(T)>.optFlatMap(<varName>, <expr>) -> <optional(U)>
+
+Examples:
+
+    {'key': {'sub': 'value'}}.?key.optFlatMap(k, k.?sub).value() == 'value'
+    {'key': {}}.?key.optFlatMap(k, k.?sub) == optional.none()
+
+### Optional.Unwrap / UnwrapOpt
+
+**Introduced in the OptionalTypes library version 2**
+
+Returns a list of the values in the input list which hold a value, dropping
+those which do not. The function may be called globally or with postfix
+notation.
+
+    optional.unwrap(<list(optional(T))>) -> <list(T)>
+    <list(optional(T))>.unwrapOpt() -> <list(T)>
+
+Examples:
+
+    optional.unwrap([optional.of(1), optional.none(), optional.of(2)]) == [1, 2]
+    [optional.of(1), optional.none()].unwrapOpt() == [1]
+
 ## Lists
 
 Extended functions for list manipulation. As a general note, all indices are
@@ -464,6 +690,78 @@ Examples:
     [1,2,[],[],[3,4]].flatten() // return [1, 2, 3, 4]
     [1,[2,[3,[4]]]].flatten(2) // return [1, 2, 3, [4]]
     [1,[2,[3,[4]]]].flatten(-1) // error
+
+### HasAll
+
+**Introduced in version 5**
+
+Returns whether every element of the argument list is contained within the
+target list, i.e. whether the target is a superset of the argument. Standard
+CEL equality is used to determine whether two elements are equal, and neither
+list is required to contain unique elements. An empty argument list always
+returns true.
+
+	<list(T)>.hasAll(<list(T)>) -> <bool>
+
+Examples:
+
+    [1, 2, 3].hasAll([]) // return true
+    [1, 2, 3, 4].hasAll([2, 3]) // return true
+    [1, 2.0, 3u].hasAll([1.0, 2u, 3]) // return true
+    [1, 2, 3].hasAll([2, 4]) // return false
+
+### HasAny
+
+**Introduced in version 5**
+
+Returns whether the target list has at least one element which is equal to an
+element of the argument list. If either list is empty, the result is false.
+
+	<list(T)>.hasAny(<list(T)>) -> <bool>
+
+Examples:
+
+    [1, 2, 3].hasAny([3, 4]) // return true
+    [[1], [2, 3]].hasAny([[1, 2], [2, 3.0]]) // return true
+    [1, 2].hasAny([3, 4]) // return false
+    [1].hasAny([]) // return false
+
+### HasExactly
+
+**Introduced in version 5**
+
+Returns whether the target and argument lists are set equivalent, i.e. every
+element of the target list is equal to an element of the argument list and vice
+versa. The lists may differ in size since neither is guaranteed to hold unique
+elements, so size does not factor into the computation.
+
+	<list(T)>.hasExactly(<list(T)>) -> <bool>
+
+Examples:
+
+    [].hasExactly([]) // return true
+    [1].hasExactly([1, 1]) // return true
+    [1].hasExactly([1u, 1.0]) // return true
+    [1, 2, 3].hasExactly([3u, 2.0, 1]) // return true
+    [1, 2].hasExactly([1, 2, 3]) // return false
+
+### HasOnly
+
+**Introduced in version 5**
+
+Returns whether every element of the target list is contained within the
+argument list, i.e. whether the target is a subset of the argument. An empty
+target list always returns true.
+
+	<list(T)>.hasOnly(<list(T)>) -> <bool>
+
+Examples:
+
+    [].hasOnly([1, 2]) // return true
+    [1, 1, 2].hasOnly([1, 2, 3]) // return true
+    [1, 2.0, 3u].hasOnly([1.0, 2u, 3]) // return true
+    [1, 4].hasOnly([1, 2, 3]) // return false
+    [1].hasOnly([]) // return false
 
 ### Range
 

@@ -27,6 +27,9 @@ func TestRegexProgramSize(t *testing.T) {
 		{pattern: "a", minSize: 1},
 		{pattern: "el*", minSize: 3},
 		{pattern: "(a|b)*[0-9]+", minSize: 5},
+		{pattern: "a{3}", minSize: 3},
+		{pattern: "(a|b){2,4}", minSize: 4},
+		{pattern: "[0-9a-f]{8}-[0-9a-f]{4}", minSize: 12},
 		{pattern: "(", hasError: true},
 	}
 
@@ -58,6 +61,8 @@ func TestCompileRegexWithLimit(t *testing.T) {
 		{pattern: "el*", limit: 0},
 		{pattern: "el*", limit: -1},
 		{pattern: "(a|b)*[0-9]+", limit: 5, hasError: true},
+		{pattern: "a{3}", limit: 10},
+		{pattern: "[0-9a-f]{8}", limit: 5, hasError: true},
 		{pattern: "(", limit: 10, hasError: true},
 	}
 

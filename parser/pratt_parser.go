@@ -16,7 +16,6 @@ package parser
 
 import (
 	"fmt"
-	"math"
 	"strconv"
 	"strings"
 
@@ -86,7 +85,7 @@ func getBinaryOpInfo(kind tokenKind) binaryOpInfo {
 	}
 }
 
-type prattParser struct {
+type prattParserWorker struct {
 	content                    runes.Buffer
 	length                     int32
 	helper                     *parserHelper
@@ -109,53 +108,13 @@ type prattParser struct {
 	enableIdentEscapeSyntax    bool
 }
 
-// PrattParser encapsulates the context necessary to perform Pratt parsing for different expressions.
-type PrattParser struct {
+// prattParser encapsulates the context necessary to perform Pratt parsing for different expressions.
+type prattParser struct {
 	options
 }
 
-// NewPrattParser builds and returns a new PrattParser using the provided options.
-func NewPrattParser(opts ...Option) (*PrattParser, error) {
-	p := &PrattParser{}
-	p.enableHiddenAccumulatorName = true
-	p.enableIdentEscapeSyntax = true
-	for _, opt := range opts {
-		if err := opt(&p.options); err != nil {
-			return nil, err
-		}
-	}
-	if p.errorReportingLimit == 0 {
-		p.errorReportingLimit = 100
-	}
-	if p.maxRecursionDepth == 0 {
-		p.maxRecursionDepth = 250
-	}
-	if p.maxRecursionDepth == -1 {
-		p.maxRecursionDepth = math.MaxInt
-	}
-	if p.errorRecoveryLimit == 0 {
-		p.errorRecoveryLimit = 30
-	}
-	if p.errorRecoveryLimit == -1 {
-		p.errorRecoveryLimit = math.MaxInt
-	}
-	if p.expressionSizeCodePointLimit == 0 {
-		p.expressionSizeCodePointLimit = 100_000
-	}
-	if p.expressionSizeCodePointLimit == -1 {
-		p.expressionSizeCodePointLimit = math.MaxInt
-	}
-	if p.maxExpressionNodeCount == 0 {
-		p.maxExpressionNodeCount = 100_000
-	}
-	if p.maxExpressionNodeCount == -1 {
-		p.maxExpressionNodeCount = math.MaxInt
-	}
-	return p, nil
-}
-
 // Parse parses the expression represented by source using the Pratt parser and returns the result.
-func (p *PrattParser) Parse(source common.Source) (*ast.AST, *common.Errors) {
+func (p *prattParser) Parse(source common.Source) (*ast.AST, *common.Errors) {
 	errs := common.NewErrors(source)
 	buf, ok := source.(runes.Buffer)
 	if !ok {
@@ -172,7 +131,7 @@ func (p *PrattParser) Parse(source common.Source) (*ast.AST, *common.Errors) {
 		accu = HiddenAccumulatorName
 	}
 	fac := ast.NewExprFactoryWithAccumulator(accu)
-	pratt := &prattParser{
+	pratt := &prattParserWorker{
 		content:                    buf,
 		length:                     int32(buf.Len()),
 		helper:                     newParserHelper(source, fac),
@@ -197,16 +156,16 @@ func (p *PrattParser) Parse(source common.Source) (*ast.AST, *common.Errors) {
 	return ast.NewAST(out, pratt.helper.getSourceInfo()), errs
 }
 
-func (p *prattParser) initTokenStream() {
+func (p *prattParserWorker) initTokenStream() {
 	p.currTok = token{kind: tokError, start: 0, end: 0}
 	p.peekTok = p.nextSignificantToken(true)
 }
 
-func (p *prattParser) isRecoveryLimitExceeded() bool {
+func (p *prattParserWorker) isRecoveryLimitExceeded() bool {
 	return p.errorCount > p.errorRecoveryLimit
 }
 
-func (p *prattParser) nextSignificantToken(reportError bool) token {
+func (p *prattParserWorker) nextSignificantToken(reportError bool) token {
 	if p.isRecoveryLimitExceeded() {
 		return token{kind: tokEnd, start: p.length, end: p.length}
 	}
@@ -225,7 +184,7 @@ func (p *prattParser) nextSignificantToken(reportError bool) token {
 	}
 }
 
-func (p *prattParser) nextToken() token {
+func (p *prattParserWorker) nextToken() token {
 	p.currTok = p.peekTok
 	if p.isRecoveryLimitExceeded() {
 		p.peekTok = token{kind: tokEnd, start: p.length, end: p.length}
@@ -237,18 +196,18 @@ func (p *prattParser) nextToken() token {
 	return p.currTok
 }
 
-func (p *prattParser) tokenText(tok token) string {
+func (p *prattParserWorker) tokenText(tok token) string {
 	if tok.start >= 0 && tok.end >= tok.start && tok.end <= p.length {
 		return p.content.Slice(int(tok.start), int(tok.end))
 	}
 	return ""
 }
 
-func (p *prattParser) nextID(tok token) int64 {
+func (p *prattParserWorker) nextID(tok token) int64 {
 	return p.helper.idFromOffsets(tok.start, tok.end)
 }
 
-func (p *prattParser) expect(kind tokenKind, msg string) bool {
+func (p *prattParserWorker) expect(kind tokenKind, msg string) bool {
 	if p.peekTok.kind == kind {
 		p.nextToken()
 		return true
@@ -271,7 +230,7 @@ func (p *prattParser) expect(kind tokenKind, msg string) bool {
 	return false
 }
 
-func (p *prattParser) synchronizeOnDelimiter() {
+func (p *prattParserWorker) synchronizeOnDelimiter() {
 	if p.isRecoveryLimitExceeded() {
 		p.peekTok = token{kind: tokEnd, start: p.length, end: p.length}
 		return
@@ -287,8 +246,8 @@ func (p *prattParser) synchronizeOnDelimiter() {
 	}
 }
 
-func (p *prattParser) reportError(ctx any, format string, args ...any) ast.Expr {
-	if p.errorCount > p.errorRecoveryLimit {
+func (p *prattParserWorker) reportError(ctx any, format string, args ...any) ast.Expr {
+	if p.isRecoveryLimitExceeded() {
 		return p.helper.newExpr(common.NoLocation)
 	}
 	p.errorCount++
@@ -302,39 +261,37 @@ func (p *prattParser) reportError(ctx any, format string, args ...any) ast.Expr 
 	default:
 		location = p.helper.getLocation(err.ID())
 	}
-	if p.errorCount == p.errorRecoveryLimit+1 {
-		p.errors.syntaxError(location, fmt.Sprintf("error recovery attempt limit exceeded: %d", p.errorRecoveryLimit))
-		p.peekTok = token{kind: tokEnd, start: p.length, end: p.length}
-		return err
-	}
 	if p.errorCount <= p.errorReportingLimit {
 		p.errors.reportErrorAtID(err.ID(), location, format, args...)
+	}
+	if p.isRecoveryLimitExceeded() {
+		p.peekTok = token{kind: tokEnd, start: p.length, end: p.length}
 	}
 	return err
 }
 
-func (p *prattParser) newLogicManager(function string, term ast.Expr) *logicManager {
+func (p *prattParserWorker) newLogicManager(function string, term ast.Expr) *logicManager {
 	if p.enableVariadicOperatorASTs {
 		return newVariadicLogicManager(p.exprFactory, function, term)
 	}
 	return newBalancingLogicManager(p.exprFactory, function, term)
 }
 
-func (p *prattParser) globalCallOrMacro(exprID int64, function string, args ...ast.Expr) ast.Expr {
+func (p *prattParserWorker) globalCallOrMacro(exprID int64, function string, args ...ast.Expr) ast.Expr {
 	if expr, found := p.expandMacro(exprID, function, nil, args...); found {
 		return expr
 	}
 	return p.helper.newGlobalCall(exprID, function, args...)
 }
 
-func (p *prattParser) receiverCallOrMacro(exprID int64, function string, target ast.Expr, args ...ast.Expr) ast.Expr {
+func (p *prattParserWorker) receiverCallOrMacro(exprID int64, function string, target ast.Expr, args ...ast.Expr) ast.Expr {
 	if expr, found := p.expandMacro(exprID, function, target, args...); found {
 		return expr
 	}
 	return p.helper.newReceiverCall(exprID, function, target, args...)
 }
 
-func (p *prattParser) expandMacro(exprID int64, function string, target ast.Expr, args ...ast.Expr) (ast.Expr, bool) {
+func (p *prattParserWorker) expandMacro(exprID int64, function string, target ast.Expr, args ...ast.Expr) (ast.Expr, bool) {
 	if len(p.macros) == 0 {
 		return nil, false
 	}
@@ -378,7 +335,7 @@ func (p *prattParser) expandMacro(exprID int64, function string, target ast.Expr
 	return expr, true
 }
 
-func (p *prattParser) normalizeIdent(tok token, allowQuoted bool) string {
+func (p *prattParserWorker) normalizeIdent(tok token, allowQuoted bool) string {
 	text := p.tokenText(tok)
 	if len(text) == 0 {
 		return ""
@@ -389,7 +346,7 @@ func (p *prattParser) normalizeIdent(tok token, allowQuoted bool) string {
 			return ""
 		}
 		if !p.enableIdentEscapeSyntax {
-			p.reportError(tok, "unsupported syntax '`'")
+			p.reportError(tok, "unsupported syntax: '`'")
 		}
 		if len(text) < 2 || text[len(text)-1] != '`' {
 			p.reportError(tok, "unterminated quoted identifier")
@@ -413,18 +370,23 @@ func (p *prattParser) normalizeIdent(tok token, allowQuoted bool) string {
 	return text
 }
 
-func (p *prattParser) parse() ast.Expr {
+func (p *prattParserWorker) parse() ast.Expr {
 	expr := p.parseExpr()
 	if p.recursionLimitExceeded || p.isRecoveryLimitExceeded() {
 		return expr
 	}
-	if p.peekTok.kind != tokEnd && p.peekTok.kind != tokError {
-		p.reportError(p.peekTok, "Syntax error: mismatched input '%s' expecting <EOF>", p.tokenText(p.peekTok))
+	if p.peekTok.kind != tokEnd {
+		if p.peekTok.kind != tokError {
+			p.reportError(p.peekTok, "Syntax error: mismatched input '%s' expecting <EOF>", p.tokenText(p.peekTok))
+		}
+		for p.peekTok.kind != tokEnd && !p.isRecoveryLimitExceeded() {
+			p.nextToken()
+		}
 	}
 	return expr
 }
 
-func (p *prattParser) parseExpr() ast.Expr {
+func (p *prattParserWorker) parseExpr() ast.Expr {
 	if p.recursionLimitExceeded || p.isRecoveryLimitExceeded() {
 		return p.helper.newExpr(common.NoLocation)
 	}
@@ -439,7 +401,7 @@ func (p *prattParser) parseExpr() ast.Expr {
 	return expr
 }
 
-func (p *prattParser) parseBinaryAndTernary(minPrec int) ast.Expr {
+func (p *prattParserWorker) parseBinaryAndTernary(minPrec int) ast.Expr {
 	lhs := p.parseSelectorChain()
 	for {
 		tok := p.peekTok.kind
@@ -466,7 +428,7 @@ func (p *prattParser) parseBinaryAndTernary(minPrec int) ast.Expr {
 	return lhs
 }
 
-func (p *prattParser) parseTernary(lhs ast.Expr) ast.Expr {
+func (p *prattParserWorker) parseTernary(lhs ast.Expr) ast.Expr {
 	qTok := p.nextToken()
 	opID := p.nextID(qTok)
 	trueExpr := p.parseBinaryAndTernary(1)
@@ -477,23 +439,23 @@ func (p *prattParser) parseTernary(lhs ast.Expr) ast.Expr {
 	return p.helper.newGlobalCall(opID, operators.Conditional, lhs, trueExpr, falseExpr)
 }
 
-func (p *prattParser) parseLogicalChain(lhs ast.Expr, opInfo binaryOpInfo) ast.Expr {
+func (p *prattParserWorker) parseLogicalChain(lhs ast.Expr, opInfo binaryOpInfo) ast.Expr {
 	l := p.newLogicManager(opInfo.name, lhs)
 	for p.peekTok.kind == opInfo.kind {
 		opTok := p.nextToken()
-		opID := p.nextID(opTok)
 		rhs := p.parseBinaryAndTernary(opInfo.precedence + 1)
+		opID := p.nextID(opTok)
 		l.addTerm(opID, rhs)
 	}
 	return l.toExpr()
 }
 
-func (p *prattParser) parseSelectorChain() ast.Expr {
+func (p *prattParserWorker) parseSelectorChain() ast.Expr {
 	lhs := p.parseUnary()
 	return p.parseSelectorChainTail(lhs)
 }
 
-func (p *prattParser) parseSelectorChainTail(lhs ast.Expr) ast.Expr {
+func (p *prattParserWorker) parseSelectorChainTail(lhs ast.Expr) ast.Expr {
 	for {
 		switch p.peekTok.kind {
 		case tokDot:
@@ -548,8 +510,13 @@ func (p *prattParser) parseSelectorChainTail(lhs ast.Expr) ast.Expr {
 			}
 			lhs = p.helper.newGlobalCall(opID, opName, lhs, index)
 		case tokLeftBrace:
-			if structName, ok := p.extractStructName(lhs); ok {
-				lhs = p.parseStruct(lhs.ID(), structName)
+			if rng, found := p.helper.sourceInfo.GetOffsetRange(lhs.ID()); found {
+				if structName, ok := p.extractStructName(lhs); ok {
+					objID := p.helper.id(rng)
+					lhs = p.parseStruct(objID, structName)
+				} else {
+					return lhs
+				}
 			} else {
 				return lhs
 			}
@@ -559,7 +526,7 @@ func (p *prattParser) parseSelectorChainTail(lhs ast.Expr) ast.Expr {
 	}
 }
 
-func (p *prattParser) extractStructName(expr ast.Expr) (string, bool) {
+func (p *prattParserWorker) extractStructName(expr ast.Expr) (string, bool) {
 	if expr == nil || expr.Kind() == ast.LiteralKind {
 		return "", false
 	}
@@ -583,7 +550,7 @@ func (p *prattParser) extractStructName(expr ast.Expr) (string, bool) {
 	return "", false
 }
 
-func (p *prattParser) parseStruct(objID int64, structName string) ast.Expr {
+func (p *prattParserWorker) parseStruct(objID int64, structName string) ast.Expr {
 	p.nextToken() // consumes {
 	var fields []ast.EntryExpr
 	for p.peekTok.kind != tokRightBrace && p.peekTok.kind != tokEnd {
@@ -619,7 +586,7 @@ func (p *prattParser) parseStruct(objID int64, structName string) ast.Expr {
 	return p.helper.newObject(objID, structName, fields...)
 }
 
-func (p *prattParser) parseUnary() ast.Expr {
+func (p *prattParserWorker) parseUnary() ast.Expr {
 	tok := p.peekTok.kind
 	if tok == tokExclamation || tok == tokMinus {
 		return p.parseUnaryOps()
@@ -627,7 +594,7 @@ func (p *prattParser) parseUnary() ast.Expr {
 	return p.parsePrimary()
 }
 
-func (p *prattParser) parseUnaryOps() ast.Expr {
+func (p *prattParserWorker) parseUnaryOps() ast.Expr {
 	op := p.nextToken()
 	if p.peekTok.kind == tokExclamation || p.peekTok.kind == tokMinus {
 		return p.parseUnaryOpsChain(op)
@@ -651,7 +618,7 @@ func (p *prattParser) parseUnaryOps() ast.Expr {
 	return p.globalCallOrMacro(opID, opName, operand)
 }
 
-func (p *prattParser) parseUnaryOpsChain(firstOp token) ast.Expr {
+func (p *prattParserWorker) parseUnaryOpsChain(firstOp token) ast.Expr {
 	type unaryOpInfo struct {
 		kind tokenKind
 		id   int64
@@ -691,7 +658,7 @@ func (p *prattParser) parseUnaryOpsChain(firstOp token) ast.Expr {
 	return operand
 }
 
-func (p *prattParser) countGroupingParentheses() int {
+func (p *prattParserWorker) countGroupingParentheses() int {
 	if p.peekTok.kind != tokLeftParen {
 		return 0
 	}
@@ -740,7 +707,7 @@ func (p *prattParser) countGroupingParentheses() int {
 	return 1
 }
 
-func (p *prattParser) parsePrimary() ast.Expr {
+func (p *prattParserWorker) parsePrimary() ast.Expr {
 	switch p.peekTok.kind {
 	case tokLeftParen:
 		groupingCount := p.countGroupingParentheses()
@@ -789,7 +756,7 @@ func (p *prattParser) parsePrimary() ast.Expr {
 	}
 }
 
-func (p *prattParser) parseList() ast.Expr {
+func (p *prattParserWorker) parseList() ast.Expr {
 	openTok := p.nextToken()
 	listID := p.nextID(openTok)
 	var elems []ast.Expr
@@ -821,7 +788,7 @@ func (p *prattParser) parseList() ast.Expr {
 	return p.helper.newList(listID, elems, optionals...)
 }
 
-func (p *prattParser) parseMap() ast.Expr {
+func (p *prattParserWorker) parseMap() ast.Expr {
 	openTok := p.nextToken()
 	mapID := p.nextID(openTok)
 	var entries []ast.EntryExpr
@@ -855,7 +822,7 @@ func (p *prattParser) parseMap() ast.Expr {
 	return p.helper.newMap(mapID, entries...)
 }
 
-func (p *prattParser) parseIdentOrCall() ast.Expr {
+func (p *prattParserWorker) parseIdentOrCall() ast.Expr {
 	leadingDot := false
 	firstTok := p.peekTok
 	if p.peekTok.kind == tokDot {
@@ -888,7 +855,7 @@ func (p *prattParser) parseIdentOrCall() ast.Expr {
 	return p.helper.newIdent(id, name)
 }
 
-func (p *prattParser) parseArguments(closeTok tokenKind) []ast.Expr {
+func (p *prattParserWorker) parseArguments(closeTok tokenKind) []ast.Expr {
 	var args []ast.Expr
 	if p.peekTok.kind != closeTok && p.peekTok.kind != tokEnd {
 		for {
@@ -896,6 +863,7 @@ func (p *prattParser) parseArguments(closeTok tokenKind) []ast.Expr {
 			if p.peekTok.kind == tokComma {
 				p.nextToken()
 				if p.peekTok.kind == closeTok {
+					p.reportError(p.peekTok, "unexpected token")
 					break
 				}
 				continue
@@ -907,7 +875,7 @@ func (p *prattParser) parseArguments(closeTok tokenKind) []ast.Expr {
 	return args
 }
 
-func (p *prattParser) parseIntLiteral() ast.Expr {
+func (p *prattParserWorker) parseIntLiteral() ast.Expr {
 	tok := p.nextToken()
 	id := p.nextID(tok)
 	text := p.tokenText(tok)
@@ -923,7 +891,7 @@ func (p *prattParser) parseIntLiteral() ast.Expr {
 	return p.helper.newLiteralInt(id, val)
 }
 
-func (p *prattParser) parseNegativeIntLiteral(opID int64) ast.Expr {
+func (p *prattParserWorker) parseNegativeIntLiteral(opID int64) ast.Expr {
 	tok := p.nextToken()
 	text := p.tokenText(tok)
 	base := 10
@@ -938,7 +906,7 @@ func (p *prattParser) parseNegativeIntLiteral(opID int64) ast.Expr {
 	return p.helper.newLiteralInt(opID, val)
 }
 
-func (p *prattParser) parseUintLiteral() ast.Expr {
+func (p *prattParserWorker) parseUintLiteral() ast.Expr {
 	tok := p.nextToken()
 	id := p.nextID(tok)
 	text := p.tokenText(tok)
@@ -955,7 +923,7 @@ func (p *prattParser) parseUintLiteral() ast.Expr {
 	return p.helper.newLiteralUint(id, val)
 }
 
-func (p *prattParser) parseDoubleLiteral() ast.Expr {
+func (p *prattParserWorker) parseDoubleLiteral() ast.Expr {
 	tok := p.nextToken()
 	id := p.nextID(tok)
 	text := p.tokenText(tok)
@@ -966,7 +934,7 @@ func (p *prattParser) parseDoubleLiteral() ast.Expr {
 	return p.helper.newLiteralDouble(id, val)
 }
 
-func (p *prattParser) parseNegativeDoubleLiteral(opID int64) ast.Expr {
+func (p *prattParserWorker) parseNegativeDoubleLiteral(opID int64) ast.Expr {
 	tok := p.nextToken()
 	text := p.tokenText(tok)
 	val, err := strconv.ParseFloat(text, 64)
@@ -976,7 +944,7 @@ func (p *prattParser) parseNegativeDoubleLiteral(opID int64) ast.Expr {
 	return p.helper.newLiteralDouble(opID, -val)
 }
 
-func (p *prattParser) parseStringLiteral() ast.Expr {
+func (p *prattParserWorker) parseStringLiteral() ast.Expr {
 	tok := p.nextToken()
 	id := p.nextID(tok)
 	text := p.tokenText(tok)
@@ -987,7 +955,7 @@ func (p *prattParser) parseStringLiteral() ast.Expr {
 	return p.helper.newLiteralString(id, unescaped)
 }
 
-func (p *prattParser) parseBytesLiteral() ast.Expr {
+func (p *prattParserWorker) parseBytesLiteral() ast.Expr {
 	tok := p.nextToken()
 	id := p.nextID(tok)
 	text := p.tokenText(tok)

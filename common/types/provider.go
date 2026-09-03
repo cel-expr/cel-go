@@ -387,6 +387,9 @@ func (p *Registry) FindIdent(identName string) (ref.Val, bool) {
 	if t, found := p.revTypeMap[identName]; found {
 		return t, true
 	}
+	if t, found := p.revTypeMap[sanitizeStructTypeName(identName)]; found {
+		return t, true
+	}
 	if enumVal, found := p.pbdb.DescribeEnum(identName); found {
 		return Int(enumVal.Value()), true
 	}
@@ -496,7 +499,8 @@ func (p *Registry) RegisterMessage(message proto.Message) error {
 // to CEL, even when they're not based on protobuf types.
 func (p *Registry) RegisterType(types ...ref.Type) error {
 	for _, t := range types {
-		existing, found := p.revTypeMap[t.TypeName()]
+		typeName := sanitizeStructTypeName(t.TypeName())
+		existing, found := p.revTypeMap[typeName]
 		celType := maybeForeignType(t)
 		if found {
 			if !existing.IsEquivalentType(celType) {
@@ -511,7 +515,6 @@ func (p *Registry) RegisterType(types ...ref.Type) error {
 		}
 
 		p.ensureMutable()
-		typeName := t.TypeName()
 		p.revTypeMap[typeName] = celType
 		if st, ok := t.(StructTypeDescriptor); ok {
 			// Conflicts are gated above so if we see a struct here, it's safe to register.
@@ -530,8 +533,14 @@ func (p *Registry) RegisterType(types ...ref.Type) error {
 }
 
 // RegisterNativeType creates nativeType instances for the given reflect.Type and registers them.
-func (p *Registry) RegisterNativeType(refType reflect.Type) error {
-	result, err := newNativeTypes(refType, p.nativeOptions.fieldNameHandler)
+func (p *Registry) RegisterNativeType(refType reflect.Type, opts ...NativeTypeOption) error {
+	nativeOpts := p.nativeOptions
+	for _, opt := range opts {
+		if err := opt(&nativeOpts); err != nil {
+			return err
+		}
+	}
+	result, err := newNativeTypes(refType, nativeOpts)
 	if err != nil {
 		return err
 	}
@@ -541,6 +550,14 @@ func (p *Registry) RegisterNativeType(refType reflect.Type) error {
 		}
 	}
 	return nil
+}
+
+// RegisterNativeTypeDesc creates nativeType instances for a NativeTypeDesc and registers them.
+func (p *Registry) RegisterNativeTypeDesc(desc *NativeTypeDesc) error {
+	if desc == nil {
+		return nil
+	}
+	return p.RegisterNativeType(desc.ReflectType(), desc.Options()...)
 }
 
 func (p *Registry) findStructDescriptorByReflectType(rt reflect.Type) (StructTypeDescriptor, bool) {
@@ -855,13 +872,15 @@ func registerTypeItem(r *Registry, t any) error {
 		return r.RegisterNativeType(v)
 	case reflect.Value:
 		return r.RegisterNativeType(v.Type())
+	case *NativeTypeDesc:
+		return r.RegisterNativeTypeDesc(v)
 	case NativeTypeOption:
 		return v(&r.nativeOptions)
 	case RegistryOption:
 		_, err := v(r)
 		return err
 	default:
-		return fmt.Errorf("unsupported type: %v (%T) must be reflect.Type or reflect.Value", t, t)
+		return fmt.Errorf("unsupported type: %v (%T) must be reflect.Type, reflect.Value, or NativeTypeDesc", t, t)
 	}
 }
 
