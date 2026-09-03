@@ -162,13 +162,13 @@ func (lib *encoderLib) CompileOptions() []cel.EnvOption {
 				cel.Overload("base64_decode_url_string", []*cel.Type{cel.StringType}, cel.BytesType,
 					cel.UnaryBinding(func(str ref.Val) ref.Val {
 						s := str.(types.String)
-						return bytesOrError(base64DecodeUrlString(string(s)))
+						return bytesOrError(base64DecodeURLString(string(s)))
 					}))),
 			cel.Function("base64.encodeUrl",
 				cel.Overload("base64_encode_url_bytes", []*cel.Type{cel.BytesType}, cel.StringType,
 					cel.UnaryBinding(func(bytes ref.Val) ref.Val {
 						b := bytes.(types.Bytes)
-						return stringOrError(base64EncodeUrlBytes([]byte(b)))
+						return stringOrError(base64EncodeURLBytes([]byte(b)))
 					}))),
 		)
 	}
@@ -206,7 +206,7 @@ func base64DecodeString(str string) ([]byte, error) {
 	return nil, err
 }
 
-func base64DecodeUrlString(str string) ([]byte, error) {
+func base64DecodeURLString(str string) ([]byte, error) {
 	b, err := base64.URLEncoding.DecodeString(str)
 	if err == nil {
 		return b, nil
@@ -221,7 +221,7 @@ func base64EncodeBytes(bytes []byte) (string, error) {
 	return base64.StdEncoding.EncodeToString(bytes), nil
 }
 
-func base64EncodeUrlBytes(bytes []byte) (string, error) {
+func base64EncodeURLBytes(bytes []byte) (string, error) {
 	return base64.URLEncoding.EncodeToString(bytes), nil
 }
 

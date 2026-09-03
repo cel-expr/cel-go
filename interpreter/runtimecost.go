@@ -113,35 +113,6 @@ type costTrackerFactory struct {
 	factory func() (*CostTracker, error)
 }
 
-// InitState produces a CostTracker and bundles it into an Activation in a way which is not visible
-// to expression evaluation.
-func (ct *costTrackerFactory) InitState(frame *ExecutionFrame) (any, error) {
-	if frame.ctx != nil && frame.ctx.costs != nil {
-		return frame.ctx.costs, nil
-	}
-	tracker, err := ct.factory()
-	if err != nil {
-		return nil, err
-	}
-	if frame.ctx == nil {
-		frame.ctx = evalContextPool.Get().(*evalContext)
-	}
-	frame.ctx.costs = tracker
-	return tracker, nil
-}
-
-// GetState extracts the CostTracker from the Activation.
-func (ct *costTrackerFactory) GetState(frame *ExecutionFrame) any {
-	if frame == nil || frame.ctx == nil {
-		return nil
-	}
-	return frame.ctx.costs
-}
-
-// Observe implements the StatefulObserver interface.
-func (ct *costTrackerFactory) Observe(vars Activation, id int64, programStep any, val ref.Val) {
-}
-
 type costTrackingInterpretable struct {
 	InterpretableV2
 	factory func() (*CostTracker, error)
@@ -160,10 +131,4 @@ func (c *costTrackingInterpretable) Exec(frame *ExecutionFrame) ref.Val {
 
 func (c *costTrackingInterpretable) Eval(ctx Activation) ref.Val {
 	return c.Exec(AsFrame(ctx))
-}
-
-// actualSize returns the size of the value for all traits.Sizer values, a fixed size for all proto-based
-// objects, and a size of 1 for all other value types.
-func actualSize(value ref.Val) uint64 {
-	return cost.ActualSize(value)
 }

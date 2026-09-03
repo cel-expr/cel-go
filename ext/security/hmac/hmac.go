@@ -18,8 +18,8 @@ package hmac
 import (
 	"crypto"
 	"crypto/hmac"
-	_ "crypto/sha256"
-	_ "crypto/sha512"
+	_ "crypto/sha256" // Ensure SHA256 hash algorithm is linked.
+	_ "crypto/sha512" // Ensure SHA512 hash algorithm is linked.
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
