@@ -42,25 +42,26 @@ func EquivReferences(aRefs, bRefs map[int64]*ReferenceInfo) EquivOption {
 	}
 }
 
-// EquivIgnoreNames configures whether identifier and field names should be ignored during equivalence comparison.
-func EquivIgnoreNames(enabled ...bool) EquivOption {
+// EquivIgnoreIdentifiers configures whether comprehension variable names (accuVar, iterVar, iterVar2)
+// should be ignored during equivalence comparison.
+func EquivIgnoreIdentifiers(enabled ...bool) EquivOption {
 	return func(opts *equivOptions) {
 		if len(enabled) == 0 {
-			opts.ignoreNames = true
+			opts.ignoreIdentifiers = true
 			return
 		}
-		opts.ignoreNames = enabled[0]
+		opts.ignoreIdentifiers = enabled[0]
 	}
 }
 
 type equivOptions struct {
-	aTypes      map[int64]*types.Type
-	bTypes      map[int64]*types.Type
-	aRefs       map[int64]*ReferenceInfo
-	bRefs       map[int64]*ReferenceInfo
-	checkTypes  bool
-	checkRefs   bool
-	ignoreNames bool
+	aTypes            map[int64]*types.Type
+	bTypes            map[int64]*types.Type
+	aRefs             map[int64]*ReferenceInfo
+	bRefs             map[int64]*ReferenceInfo
+	checkTypes        bool
+	checkRefs         bool
+	ignoreIdentifiers bool
 }
 
 // EquivAST determines whether two ASTs are structurally equivalent.
@@ -116,6 +117,50 @@ func (a *AST) Equiv(other *AST, opts ...EquivOption) bool {
 
 type equivState struct {
 	*equivOptions
+	ignored1 []string
+	ignored2 []string
+}
+
+func (s *equivState) pushIgnored(comp1, comp2 ComprehensionExpr) int {
+	prev := len(s.ignored1)
+	if comp1.IterVar() != "" {
+		s.ignored1 = append(s.ignored1, comp1.IterVar())
+	}
+	if comp1.HasIterVar2() {
+		s.ignored1 = append(s.ignored1, comp1.IterVar2())
+	}
+	if comp1.AccuVar() != "" {
+		s.ignored1 = append(s.ignored1, comp1.AccuVar())
+	}
+
+	if comp2.IterVar() != "" {
+		s.ignored2 = append(s.ignored2, comp2.IterVar())
+	}
+	if comp2.HasIterVar2() {
+		s.ignored2 = append(s.ignored2, comp2.IterVar2())
+	}
+	if comp2.AccuVar() != "" {
+		s.ignored2 = append(s.ignored2, comp2.AccuVar())
+	}
+	return prev
+}
+
+func (s *equivState) popIgnored(prev int) {
+	s.ignored1 = s.ignored1[:prev]
+	s.ignored2 = s.ignored2[:prev]
+}
+
+func (s *equivState) isIgnored(name1, name2 string) bool {
+	return hasIgnored(s.ignored1, name1) && hasIgnored(s.ignored2, name2)
+}
+
+func hasIgnored(stack []string, name string) bool {
+	for i := len(stack) - 1; i >= 0; i-- {
+		if stack[i] == name {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *equivState) exprEquiv(e1, e2 Expr) bool {
@@ -132,10 +177,12 @@ func (s *equivState) exprEquiv(e1, e2 Expr) bool {
 	case UnspecifiedExprKind:
 		return true
 	case IdentKind:
-		if !s.ignoreNames && e1.AsIdent() != e2.AsIdent() {
-			return false
+		name1 := e1.AsIdent()
+		name2 := e2.AsIdent()
+		if s.ignoreIdentifiers && s.isIgnored(name1, name2) {
+			return true
 		}
-		return true
+		return name1 == name2
 	case LiteralKind:
 		return equivLiteral(e1.AsLiteral(), e2.AsLiteral())
 	case SelectKind:
@@ -144,7 +191,7 @@ func (s *equivState) exprEquiv(e1, e2 Expr) bool {
 		if s1.IsTestOnly() != s2.IsTestOnly() {
 			return false
 		}
-		if !s.ignoreNames && s1.FieldName() != s2.FieldName() {
+		if s1.FieldName() != s2.FieldName() {
 			return false
 		}
 		return s.exprEquiv(s1.Operand(), s2.Operand())
@@ -228,16 +275,22 @@ func (s *equivState) exprEquiv(e1, e2 Expr) bool {
 		if comp1.HasIterVar2() != comp2.HasIterVar2() {
 			return false
 		}
-		if !s.ignoreNames {
+		if !s.ignoreIdentifiers {
 			if comp1.IterVar() != comp2.IterVar() ||
 				comp1.IterVar2() != comp2.IterVar2() ||
 				comp1.AccuVar() != comp2.AccuVar() {
 				return false
 			}
 		}
-		return s.exprEquiv(comp1.IterRange(), comp2.IterRange()) &&
-			s.exprEquiv(comp1.AccuInit(), comp2.AccuInit()) &&
-			s.exprEquiv(comp1.LoopCondition(), comp2.LoopCondition()) &&
+		if !s.exprEquiv(comp1.IterRange(), comp2.IterRange()) ||
+			!s.exprEquiv(comp1.AccuInit(), comp2.AccuInit()) {
+			return false
+		}
+		if s.ignoreIdentifiers {
+			prev := s.pushIgnored(comp1, comp2)
+			defer s.popIgnored(prev)
+		}
+		return s.exprEquiv(comp1.LoopCondition(), comp2.LoopCondition()) &&
 			s.exprEquiv(comp1.LoopStep(), comp2.LoopStep()) &&
 			s.exprEquiv(comp1.Result(), comp2.Result())
 	default:
@@ -269,7 +322,7 @@ func (s *equivState) entryExprEquiv(e1, e2 EntryExpr) bool {
 		if sf1.IsOptional() != sf2.IsOptional() {
 			return false
 		}
-		if !s.ignoreNames && sf1.Name() != sf2.Name() {
+		if sf1.Name() != sf2.Name() {
 			return false
 		}
 		return s.exprEquiv(sf1.Value(), sf2.Value())
@@ -311,7 +364,7 @@ func (s *equivState) refEquiv(r1, r2 *ReferenceInfo) bool {
 	if r1 == nil || r2 == nil {
 		return r1 == r2
 	}
-	if !s.ignoreNames && r1.Name != r2.Name {
+	if (!s.ignoreIdentifiers || !s.isIgnored(r1.Name, r2.Name)) && r1.Name != r2.Name {
 		return false
 	}
 	if len(r1.OverloadIDs) != len(r2.OverloadIDs) {

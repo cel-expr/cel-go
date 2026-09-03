@@ -283,36 +283,36 @@ func TestEquivWithOptions(t *testing.T) {
 	}
 }
 
-func TestEquivIgnoreNames(t *testing.T) {
+func TestEquivIgnoreIdentifiers(t *testing.T) {
 	fac := ast.NewExprFactory()
 
-	// Identifiers with different names
+	// Identifiers outside comprehensions with different names are NOT equivalent even with EquivIgnoreIdentifiers
 	identA := fac.NewIdent(1, "a")
 	identB := fac.NewIdent(2, "b")
 	if ast.EquivExpr(identA, identB) {
 		t.Errorf("ast.EquivExpr(identA, identB) = true, want false")
 	}
-	if !ast.EquivExpr(identA, identB, ast.EquivIgnoreNames()) {
-		t.Errorf("ast.EquivExpr(identA, identB, EquivIgnoreNames()) = false, want true")
+	if ast.EquivExpr(identA, identB, ast.EquivIgnoreIdentifiers()) {
+		t.Errorf("ast.EquivExpr(identA, identB, EquivIgnoreIdentifiers()) = true, want false")
 	}
-	if !ast.EquivExpr(identA, identB, ast.EquivIgnoreNames(true)) {
-		t.Errorf("ast.EquivExpr(identA, identB, EquivIgnoreNames(true)) = false, want true")
+	if ast.EquivExpr(identA, identB, ast.EquivIgnoreIdentifiers(true)) {
+		t.Errorf("ast.EquivExpr(identA, identB, EquivIgnoreIdentifiers(true)) = true, want false")
 	}
-	if ast.EquivExpr(identA, identB, ast.EquivIgnoreNames(false)) {
-		t.Errorf("ast.EquivExpr(identA, identB, EquivIgnoreNames(false)) = true, want false")
+	if ast.EquivExpr(identA, identB, ast.EquivIgnoreIdentifiers(false)) {
+		t.Errorf("ast.EquivExpr(identA, identB, EquivIgnoreIdentifiers(false)) = true, want false")
 	}
 
-	// Select expressions with different field names
+	// Select expressions with different field names are not equivalent even when ignoring identifiers
 	selA := fac.NewSelect(1, identA, "fieldA")
 	selB := fac.NewSelect(2, identA, "fieldB")
 	if ast.EquivExpr(selA, selB) {
 		t.Errorf("ast.EquivExpr(selA, selB) = true, want false")
 	}
-	if !ast.EquivExpr(selA, selB, ast.EquivIgnoreNames()) {
-		t.Errorf("ast.EquivExpr(selA, selB, EquivIgnoreNames()) = false, want true")
+	if ast.EquivExpr(selA, selB, ast.EquivIgnoreIdentifiers()) {
+		t.Errorf("ast.EquivExpr(selA, selB, EquivIgnoreIdentifiers()) = true, want false")
 	}
 
-	// Struct fields with different names
+	// Struct fields with different names are not equivalent even when ignoring identifiers
 	structA := fac.NewStruct(1, "MyStruct", []ast.EntryExpr{
 		fac.NewStructField(2, "fieldA", fac.NewLiteral(3, types.Int(1)), false),
 	})
@@ -322,11 +322,11 @@ func TestEquivIgnoreNames(t *testing.T) {
 	if ast.EquivExpr(structA, structB) {
 		t.Errorf("ast.EquivExpr(structA, structB) = true, want false")
 	}
-	if !ast.EquivExpr(structA, structB, ast.EquivIgnoreNames()) {
-		t.Errorf("ast.EquivExpr(structA, structB, EquivIgnoreNames()) = false, want true")
+	if ast.EquivExpr(structA, structB, ast.EquivIgnoreIdentifiers()) {
+		t.Errorf("ast.EquivExpr(structA, structB, EquivIgnoreIdentifiers()) = true, want false")
 	}
 
-	// Comprehension variables with different names
+	// Comprehension variables with different names ARE equivalent with EquivIgnoreIdentifiers
 	compA := fac.NewComprehension(1,
 		fac.NewList(2, []ast.Expr{}, []int32{}),
 		"i", "__result__",
@@ -346,15 +346,63 @@ func TestEquivIgnoreNames(t *testing.T) {
 	if ast.EquivExpr(compA, compB) {
 		t.Errorf("ast.EquivExpr(compA, compB) = true, want false")
 	}
-	if !ast.EquivExpr(compA, compB, ast.EquivIgnoreNames()) {
-		t.Errorf("ast.EquivExpr(compA, compB, EquivIgnoreNames()) = false, want true")
+	if !ast.EquivExpr(compA, compB, ast.EquivIgnoreIdentifiers()) {
+		t.Errorf("ast.EquivExpr(compA, compB, EquivIgnoreIdentifiers()) = false, want true")
+	}
+	if !ast.EquivExpr(compA, compB, ast.EquivIgnoreIdentifiers(true)) {
+		t.Errorf("ast.EquivExpr(compA, compB, EquivIgnoreIdentifiers(true)) = false, want true")
+	}
+	if ast.EquivExpr(compA, compB, ast.EquivIgnoreIdentifiers(false)) {
+		t.Errorf("ast.EquivExpr(compA, compB, EquivIgnoreIdentifiers(false)) = true, want false")
 	}
 
-	// References with different names
-	refsA := map[int64]*ast.ReferenceInfo{1: ast.NewIdentReference("a", nil)}
-	refsB := map[int64]*ast.ReferenceInfo{2: ast.NewIdentReference("b", nil)}
-	if !ast.EquivExpr(identA, identB, ast.EquivReferences(refsA, refsB), ast.EquivIgnoreNames()) {
-		t.Errorf("ast.EquivExpr with different ref names + EquivIgnoreNames() = false, want true")
+	// Comprehension with different free/external variables are NOT equivalent
+	compExtA := fac.NewComprehension(1,
+		fac.NewList(2, []ast.Expr{}, []int32{}),
+		"i", "__result__",
+		fac.NewLiteral(3, types.False),
+		fac.NewLiteral(4, types.True),
+		fac.NewCall(5, "_+_", fac.NewIdent(6, "i"), fac.NewIdent(7, "externalA")),
+		fac.NewIdent(8, "__result__"),
+	)
+	compExtB := fac.NewComprehension(10,
+		fac.NewList(20, []ast.Expr{}, []int32{}),
+		"x", "@result",
+		fac.NewLiteral(30, types.False),
+		fac.NewLiteral(40, types.True),
+		fac.NewCall(50, "_+_", fac.NewIdent(60, "x"), fac.NewIdent(70, "externalB")),
+		fac.NewIdent(80, "@result"),
+	)
+	if ast.EquivExpr(compExtA, compExtB, ast.EquivIgnoreIdentifiers()) {
+		t.Errorf("ast.EquivExpr with different external vars = true, want false")
+	}
+
+	// Two-variable comprehensions with different variable names
+	compTwoVarA := fac.NewComprehensionTwoVar(1,
+		fac.NewList(2, []ast.Expr{}, []int32{}),
+		"k1", "v1", "@result",
+		fac.NewLiteral(3, types.Int(0)),
+		fac.NewLiteral(4, types.True),
+		fac.NewCall(5, "_+_", fac.NewIdent(6, "k1"), fac.NewIdent(7, "v1")),
+		fac.NewIdent(8, "@result"),
+	)
+	compTwoVarB := fac.NewComprehensionTwoVar(10,
+		fac.NewList(20, []ast.Expr{}, []int32{}),
+		"k2", "v2", "__result__",
+		fac.NewLiteral(30, types.Int(0)),
+		fac.NewLiteral(40, types.True),
+		fac.NewCall(50, "_+_", fac.NewIdent(60, "k2"), fac.NewIdent(70, "v2")),
+		fac.NewIdent(80, "__result__"),
+	)
+	if !ast.EquivExpr(compTwoVarA, compTwoVarB, ast.EquivIgnoreIdentifiers()) {
+		t.Errorf("ast.EquivExpr(compTwoVarA, compTwoVarB, EquivIgnoreIdentifiers()) = false, want true")
+	}
+
+	// References within comprehension with different names
+	refsA := map[int64]*ast.ReferenceInfo{5: ast.NewIdentReference("i", nil)}
+	refsB := map[int64]*ast.ReferenceInfo{50: ast.NewIdentReference("x", nil)}
+	if !ast.EquivExpr(compA, compB, ast.EquivReferences(refsA, refsB), ast.EquivIgnoreIdentifiers()) {
+		t.Errorf("ast.EquivExpr with scoped ref names + EquivIgnoreIdentifiers() = false, want true")
 	}
 }
 
@@ -582,6 +630,7 @@ func (c *customEntryExpr) Kind() ast.EntryExprKind {
 func TestEquivBranchCoverage(t *testing.T) {
 	fac := ast.NewExprFactory()
 	identX := fac.NewIdent(1, "x")
+	identX2 := fac.NewIdent(2, "x")
 	identY := fac.NewIdent(2, "y")
 
 	t.Run("select presence test mismatch", func(t *testing.T) {
@@ -724,17 +773,17 @@ func TestEquivBranchCoverage(t *testing.T) {
 		// Both types nil in map
 		tNil1 := map[int64]*types.Type{1: nil}
 		tNil2 := map[int64]*types.Type{2: nil}
-		if !ast.EquivExpr(identX, identY, ast.EquivTypes(tNil1, tNil2), ast.EquivIgnoreNames()) {
+		if !ast.EquivExpr(identX, identX2, ast.EquivTypes(tNil1, tNil2), ast.EquivIgnoreIdentifiers()) {
 			t.Errorf("ast.EquivExpr with both types nil in map = false, want true")
 		}
 
 		// One type nil, other non-nil in map
 		tInt1 := map[int64]*types.Type{1: types.IntType}
 		tInt2 := map[int64]*types.Type{2: types.IntType}
-		if ast.EquivExpr(identX, identY, ast.EquivTypes(tNil1, tInt2), ast.EquivIgnoreNames()) {
+		if ast.EquivExpr(identX, identX2, ast.EquivTypes(tNil1, tInt2), ast.EquivIgnoreIdentifiers()) {
 			t.Errorf("ast.EquivExpr with one type nil = true, want false")
 		}
-		if ast.EquivExpr(identX, identY, ast.EquivTypes(tInt1, tNil2), ast.EquivIgnoreNames()) {
+		if ast.EquivExpr(identX, identX2, ast.EquivTypes(tInt1, tNil2), ast.EquivIgnoreIdentifiers()) {
 			t.Errorf("ast.EquivExpr with one type nil (inverted) = true, want false")
 		}
 	})
@@ -744,25 +793,25 @@ func TestEquivBranchCoverage(t *testing.T) {
 		rValid1 := map[int64]*ast.ReferenceInfo{1: ast.NewIdentReference("x", nil)}
 		rValid2 := map[int64]*ast.ReferenceInfo{2: ast.NewIdentReference("x", nil)}
 		rEmpty := map[int64]*ast.ReferenceInfo{}
-		if ast.EquivExpr(identX, identY, ast.EquivReferences(rValid1, rEmpty)) {
+		if ast.EquivExpr(identX, identX2, ast.EquivReferences(rValid1, rEmpty)) {
 			t.Errorf("ast.EquivExpr with ref presence mismatch = true, want false")
 		}
-		if ast.EquivExpr(identX, identY, ast.EquivReferences(rEmpty, rValid2)) {
+		if ast.EquivExpr(identX, identX2, ast.EquivReferences(rEmpty, rValid2)) {
 			t.Errorf("ast.EquivExpr with ref presence mismatch (inverted) = true, want false")
 		}
 
 		// Both nil ReferenceInfo in map
 		rNil1 := map[int64]*ast.ReferenceInfo{1: nil}
 		rNil2 := map[int64]*ast.ReferenceInfo{2: nil}
-		if !ast.EquivExpr(identX, identY, ast.EquivReferences(rNil1, rNil2), ast.EquivIgnoreNames()) {
+		if !ast.EquivExpr(identX, identX2, ast.EquivReferences(rNil1, rNil2), ast.EquivIgnoreIdentifiers()) {
 			t.Errorf("ast.EquivExpr with both nil ReferenceInfo = false, want true")
 		}
 
 		// One nil, other non-nil ReferenceInfo
-		if ast.EquivExpr(identX, identY, ast.EquivReferences(rNil1, rValid2), ast.EquivIgnoreNames()) {
+		if ast.EquivExpr(identX, identX2, ast.EquivReferences(rNil1, rValid2), ast.EquivIgnoreIdentifiers()) {
 			t.Errorf("ast.EquivExpr with one nil ReferenceInfo = true, want false")
 		}
-		if ast.EquivExpr(identX, identY, ast.EquivReferences(rValid1, rNil2), ast.EquivIgnoreNames()) {
+		if ast.EquivExpr(identX, identX2, ast.EquivReferences(rValid1, rNil2), ast.EquivIgnoreIdentifiers()) {
 			t.Errorf("ast.EquivExpr with one nil ReferenceInfo (inverted) = true, want false")
 		}
 
@@ -773,16 +822,16 @@ func TestEquivBranchCoverage(t *testing.T) {
 		rIdent1 := map[int64]*ast.ReferenceInfo{1: ast.NewIdentReference("x", nil)}
 		rIdent2 := map[int64]*ast.ReferenceInfo{2: ast.NewIdentReference("x", nil)}
 
-		if !ast.EquivExpr(identX, identY, ast.EquivReferences(rConst1, rConst2), ast.EquivIgnoreNames()) {
+		if !ast.EquivExpr(identX, identX2, ast.EquivReferences(rConst1, rConst2), ast.EquivIgnoreIdentifiers()) {
 			t.Errorf("ast.EquivExpr with matching const refs = false, want true")
 		}
-		if ast.EquivExpr(identX, identY, ast.EquivReferences(rConst1, rConst3), ast.EquivIgnoreNames()) {
+		if ast.EquivExpr(identX, identX2, ast.EquivReferences(rConst1, rConst3), ast.EquivIgnoreIdentifiers()) {
 			t.Errorf("ast.EquivExpr with different const refs = true, want false")
 		}
-		if ast.EquivExpr(identX, identY, ast.EquivReferences(rConst1, rIdent2), ast.EquivIgnoreNames()) {
+		if ast.EquivExpr(identX, identX2, ast.EquivReferences(rConst1, rIdent2), ast.EquivIgnoreIdentifiers()) {
 			t.Errorf("ast.EquivExpr with const vs ident ref = true, want false")
 		}
-		if ast.EquivExpr(identX, identY, ast.EquivReferences(rIdent1, rConst2), ast.EquivIgnoreNames()) {
+		if ast.EquivExpr(identX, identX2, ast.EquivReferences(rIdent1, rConst2), ast.EquivIgnoreIdentifiers()) {
 			t.Errorf("ast.EquivExpr with ident vs const ref = true, want false")
 		}
 	})
@@ -828,4 +877,3 @@ func TestEquivBranchCoverage(t *testing.T) {
 		}
 	})
 }
-
