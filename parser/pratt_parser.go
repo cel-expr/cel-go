@@ -175,7 +175,7 @@ func (p *prattParserWorker) nextSignificantToken(reportError bool) token {
 			continue
 		}
 		if tok.kind == tokError && reportError {
-			p.reportError(tok, "%s", p.lexer.GetError().message)
+			p.reportSyntaxError(tok, "%s", p.lexer.GetError().message)
 			if p.isRecoveryLimitExceeded() {
 				return token{kind: tokEnd, start: p.length, end: p.length}
 			}
@@ -222,9 +222,9 @@ func (p *prattParserWorker) expect(kind tokenKind, msg string) bool {
 			if p.peekTok.kind == tokEnd {
 				formattedTok = "<EOF>"
 			}
-			msg = fmt.Sprintf("Syntax error: mismatched input %s expecting '%s'", formattedTok, kind.String())
+			msg = fmt.Sprintf("mismatched input %s expecting '%s'", formattedTok, kind.String())
 		}
-		p.reportError(p.peekTok, "%s", msg)
+		p.reportSyntaxError(p.peekTok, "%s", msg)
 	}
 	p.synchronizeOnDelimiter()
 	return false
@@ -268,6 +268,10 @@ func (p *prattParserWorker) reportError(ctx any, format string, args ...any) ast
 		p.peekTok = token{kind: tokEnd, start: p.length, end: p.length}
 	}
 	return err
+}
+
+func (p *prattParserWorker) reportSyntaxError(ctx any, format string, args ...any) ast.Expr {
+	return p.reportError(ctx, "Syntax error: "+format, args...)
 }
 
 func (p *prattParserWorker) newLogicManager(function string, term ast.Expr) *logicManager {
@@ -377,7 +381,7 @@ func (p *prattParserWorker) parse() ast.Expr {
 	}
 	if p.peekTok.kind != tokEnd {
 		if p.peekTok.kind != tokError {
-			p.reportError(p.peekTok, "Syntax error: mismatched input '%s' expecting <EOF>", p.tokenText(p.peekTok))
+			p.reportSyntaxError(p.peekTok, "mismatched input '%s' expecting <EOF>", p.tokenText(p.peekTok))
 		}
 		for p.peekTok.kind != tokEnd && !p.isRecoveryLimitExceeded() {
 			p.nextToken()
@@ -471,7 +475,7 @@ func (p *prattParserWorker) parseSelectorChainTail(lhs ast.Expr) ast.Expr {
 			fieldTok := p.nextToken()
 			if fieldTok.kind != tokIdent && fieldTok.kind != tokReservedWord {
 				if fieldTok.kind != tokError {
-					p.reportError(fieldTok, "expected identifier after '.'")
+					p.reportSyntaxError(fieldTok, "expected identifier after '.'")
 				}
 				p.synchronizeOnDelimiter()
 				return lhs
@@ -564,7 +568,7 @@ func (p *prattParserWorker) parseStruct(objID int64, structName string) ast.Expr
 		}
 		fieldTok := p.nextToken()
 		if fieldTok.kind != tokIdent && fieldTok.kind != tokReservedWord {
-			p.reportError(fieldTok, "expected struct field name")
+			p.reportSyntaxError(fieldTok, "expected struct field name")
 			p.synchronizeOnDelimiter()
 			break
 		}
@@ -589,71 +593,63 @@ func (p *prattParserWorker) parseStruct(objID int64, structName string) ast.Expr
 func (p *prattParserWorker) parseUnary() ast.Expr {
 	tok := p.peekTok.kind
 	if tok == tokExclamation || tok == tokMinus {
-		return p.parseUnaryOps()
+		return p.parseUnaryOpsChain(p.nextToken())
 	}
 	return p.parsePrimary()
 }
 
-func (p *prattParserWorker) parseUnaryOps() ast.Expr {
-	op := p.nextToken()
-	if p.peekTok.kind == tokExclamation || p.peekTok.kind == tokMinus {
-		return p.parseUnaryOpsChain(op)
-	}
-
-	if op.kind == tokMinus {
-		if p.peekTok.kind == tokInt {
-			return p.parseNegativeIntLiteral(p.nextID(op))
-		}
-		if p.peekTok.kind == tokFloat {
-			return p.parseNegativeDoubleLiteral(p.nextID(op))
-		}
-	}
-
-	opID := p.nextID(op)
-	operand := p.parseSelectorChain()
-	opName := operators.LogicalNot
-	if op.kind == tokMinus {
-		opName = operators.Negate
-	}
-	return p.globalCallOrMacro(opID, opName, operand)
-}
-
 func (p *prattParserWorker) parseUnaryOpsChain(firstOp token) ast.Expr {
-	type unaryOpInfo struct {
-		kind tokenKind
-		id   int64
+	type unaryOp struct {
+		token token
+		id    int64
 	}
-	ops := []unaryOpInfo{{kind: firstOp.kind, id: p.nextID(firstOp)}}
-
+	ops := []unaryOp{{token: firstOp}}
 	for p.peekTok.kind == tokExclamation || p.peekTok.kind == tokMinus {
-		op := p.nextToken()
-		ops = append(ops, unaryOpInfo{kind: op.kind, id: p.nextID(op)})
+		ops = append(ops, unaryOp{token: p.nextToken()})
+	}
+
+	hasSolitaryTrailingMinus := len(ops) > 0 &&
+		ops[len(ops)-1].token.kind == tokMinus &&
+		(len(ops) == 1 || ops[len(ops)-2].token.kind != tokMinus)
+
+	write := 0
+	for read := 0; read < len(ops); {
+		next := read
+		for next < len(ops) && ops[next].token.kind == ops[read].token.kind {
+			next++
+		}
+		if (next-read)%2 != 0 {
+			ops[write] = ops[read]
+			write++
+		}
+		read = next
+	}
+	ops = ops[:write]
+
+	for i := range ops {
+		ops[i].id = p.nextID(ops[i].token)
 	}
 
 	var operand ast.Expr
-	if len(ops) > 0 && ops[len(ops)-1].kind == tokMinus {
-		switch p.peekTok.kind {
-		case tokInt:
-			lastOp := ops[len(ops)-1]
-			ops = ops[:len(ops)-1]
+	if hasSolitaryTrailingMinus && (p.peekTok.kind == tokInt || p.peekTok.kind == tokFloat) {
+		lastOp := ops[len(ops)-1]
+		ops = ops[:len(ops)-1]
+		if p.peekTok.kind == tokInt {
 			operand = p.parseNegativeIntLiteral(lastOp.id)
-		case tokFloat:
-			lastOp := ops[len(ops)-1]
-			ops = ops[:len(ops)-1]
+		} else {
 			operand = p.parseNegativeDoubleLiteral(lastOp.id)
-		default:
-			operand = p.parseSelectorChain()
 		}
+		operand = p.parseSelectorChainTail(operand)
 	} else {
 		operand = p.parseSelectorChain()
 	}
 
 	for i := len(ops) - 1; i >= 0; i-- {
 		opName := operators.LogicalNot
-		if ops[i].kind == tokMinus {
+		if ops[i].token.kind == tokMinus {
 			opName = operators.Negate
 		}
-		operand = p.helper.newGlobalCall(ops[i].id, opName, operand)
+		operand = p.globalCallOrMacro(ops[i].id, opName, operand)
 	}
 	return operand
 }
@@ -747,9 +743,9 @@ func (p *prattParserWorker) parsePrimary() ast.Expr {
 		badTok := p.nextToken()
 		if badTok.kind != tokError {
 			if badTok.kind == tokEnd {
-				p.reportError(badTok, "Syntax error: mismatched input '<EOF>' expecting expression")
+				p.reportSyntaxError(badTok, "mismatched input '<EOF>' expecting expression")
 			} else {
-				p.reportError(badTok, "unexpected token")
+				p.reportSyntaxError(badTok, "unexpected token")
 			}
 		}
 		return p.helper.newExpr(badTok)
@@ -801,12 +797,13 @@ func (p *prattParserWorker) parseMap() ast.Expr {
 				p.reportError(q, "unsupported syntax '?'")
 			}
 		}
+		entryID := p.helper.allocID()
 		key := p.parseExpr()
 		colonTok := p.peekTok
 		if !p.expect(tokColon, "expected ':' in map entry") {
 			break
 		}
-		entryID := p.nextID(colonTok)
+		p.helper.setTokenLocation(entryID, colonTok)
 		val := p.parseExpr()
 		entries = append(entries, p.helper.newMapEntry(entryID, key, val, optional))
 		if p.peekTok.kind == tokComma {
@@ -832,7 +829,7 @@ func (p *prattParserWorker) parseIdentOrCall() ast.Expr {
 	idTok := p.nextToken()
 	if idTok.kind != tokIdent && idTok.kind != tokReservedWord {
 		if idTok.kind != tokError {
-			p.reportError(idTok, "expected identifier")
+			p.reportSyntaxError(idTok, "expected identifier")
 		}
 		return p.helper.newExpr(idTok)
 	}
@@ -846,12 +843,17 @@ func (p *prattParserWorker) parseIdentOrCall() ast.Expr {
 	if leadingDot {
 		name = "." + idText
 	}
-	id := p.nextID(firstTok)
 	if p.peekTok.kind == tokLeftParen {
-		p.nextToken()
+		lparen := p.nextToken()
+		callID := p.nextID(lparen)
 		args := p.parseArguments(tokRightParen)
-		return p.globalCallOrMacro(id, name, args...)
+		return p.globalCallOrMacro(callID, name, args...)
 	}
+	targetTok := idTok
+	if leadingDot {
+		targetTok = firstTok
+	}
+	id := p.nextID(targetTok)
 	return p.helper.newIdent(id, name)
 }
 
@@ -863,7 +865,7 @@ func (p *prattParserWorker) parseArguments(closeTok tokenKind) []ast.Expr {
 			if p.peekTok.kind == tokComma {
 				p.nextToken()
 				if p.peekTok.kind == closeTok {
-					p.reportError(p.peekTok, "unexpected token")
+					p.reportSyntaxError(p.peekTok, "unexpected token")
 					break
 				}
 				continue
@@ -886,7 +888,7 @@ func (p *prattParserWorker) parseIntLiteral() ast.Expr {
 	}
 	val, err := strconv.ParseInt(text, base, 64)
 	if err != nil {
-		return p.reportError(tok, "invalid int literal")
+		return p.reportSyntaxError(tok, "invalid int literal")
 	}
 	return p.helper.newLiteralInt(id, val)
 }
@@ -901,7 +903,7 @@ func (p *prattParserWorker) parseNegativeIntLiteral(opID int64) ast.Expr {
 	}
 	val, err := strconv.ParseInt("-"+text, base, 64)
 	if err != nil {
-		return p.reportError(tok, "invalid int literal")
+		return p.reportSyntaxError(tok, "invalid int literal")
 	}
 	return p.helper.newLiteralInt(opID, val)
 }
@@ -918,7 +920,7 @@ func (p *prattParserWorker) parseUintLiteral() ast.Expr {
 	}
 	val, err := strconv.ParseUint(text, base, 64)
 	if err != nil {
-		return p.reportError(tok, "invalid uint literal")
+		return p.reportSyntaxError(tok, "invalid uint literal")
 	}
 	return p.helper.newLiteralUint(id, val)
 }
@@ -929,7 +931,7 @@ func (p *prattParserWorker) parseDoubleLiteral() ast.Expr {
 	text := p.tokenText(tok)
 	val, err := strconv.ParseFloat(text, 64)
 	if err != nil {
-		return p.reportError(tok, "invalid double literal")
+		return p.reportSyntaxError(tok, "invalid double literal")
 	}
 	return p.helper.newLiteralDouble(id, val)
 }
@@ -939,7 +941,7 @@ func (p *prattParserWorker) parseNegativeDoubleLiteral(opID int64) ast.Expr {
 	text := p.tokenText(tok)
 	val, err := strconv.ParseFloat(text, 64)
 	if err != nil {
-		return p.reportError(tok, "invalid double literal")
+		return p.reportSyntaxError(tok, "invalid double literal")
 	}
 	return p.helper.newLiteralDouble(opID, -val)
 }

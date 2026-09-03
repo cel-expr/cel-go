@@ -199,6 +199,21 @@ func (p *parserHelper) idFromOffsets(start, stop int32) int64 {
 	return id
 }
 
+func (p *parserHelper) allocID() int64 {
+	id := p.nextID
+	p.nextID++
+	return id
+}
+
+func (p *parserHelper) setTokenLocation(id int64, tok token) {
+	if tok.start >= 0 {
+		p.sourceInfo.SetOffsetRange(id, ast.OffsetRange{
+			Start: p.computeOffset(tok.start),
+			Stop:  p.computeOffset(tok.end),
+		})
+	}
+}
+
 func (p *parserHelper) deleteID(id int64) {
 	p.sourceInfo.ClearOffsetRange(id)
 	if id == p.nextID-1 {

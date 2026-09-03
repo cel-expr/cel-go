@@ -325,10 +325,6 @@ var testCases = []testInfo{
 			a^#3:*expr.Expr_IdentExpr#:b^#4:*expr.Expr_IdentExpr#^#2:*expr.Expr_CreateStruct_Entry#,
 			c^#6:*expr.Expr_IdentExpr#:d^#7:*expr.Expr_IdentExpr#^#5:*expr.Expr_CreateStruct_Entry#
 		}^#1:*expr.Expr_StructExpr#`,
-		PrattP: `{
-			a^#2:*expr.Expr_IdentExpr#:b^#4:*expr.Expr_IdentExpr#^#3:*expr.Expr_CreateStruct_Entry#,
-			c^#5:*expr.Expr_IdentExpr#:d^#7:*expr.Expr_IdentExpr#^#6:*expr.Expr_CreateStruct_Entry#
-		}^#1:*expr.Expr_StructExpr#`,
 	},
 	{
 		I: `[]`,
@@ -396,16 +392,25 @@ var testCases = []testInfo{
 		E: `ERROR: <input>:1:1: invalid int literal
 		| 0xFFFFFFFFFFFFFFFFF
 		| ^`,
+		PrattE: `ERROR: <input>:1:1: Syntax error: invalid int literal
+		| 0xFFFFFFFFFFFFFFFFF
+		| ^`,
 	},
 	{
 		I: `0xFFFFFFFFFFFFFFFFFu`,
 		E: `ERROR: <input>:1:1: invalid uint literal
 		| 0xFFFFFFFFFFFFFFFFFu
 		| ^`,
+		PrattE: `ERROR: <input>:1:1: Syntax error: invalid uint literal
+		| 0xFFFFFFFFFFFFFFFFFu
+		| ^`,
 	},
 	{
 		I: `1.99e90000009`,
 		E: `ERROR: <input>:1:1: invalid double literal
+		| 1.99e90000009
+		| ^`,
+		PrattE: `ERROR: <input>:1:1: Syntax error: invalid double literal
 		| 1.99e90000009
 		| ^`,
 	},
@@ -423,13 +428,13 @@ var testCases = []testInfo{
 		ERROR: <input>:1:7: Syntax error: extraneous input 'b' expecting <EOF>
 		| *@a | b
 		| ......^`,
-		PrattE: `ERROR: <input>:1:1: unexpected token
+		PrattE: `ERROR: <input>:1:1: Syntax error: unexpected token
 		| *@a | b
 		| ^
-		ERROR: <input>:1:2: unexpected character
+		ERROR: <input>:1:2: Syntax error: unexpected character
 		| *@a | b
 		| .^
-		ERROR: <input>:1:5: unexpected single '|', expected '||'
+		ERROR: <input>:1:5: Syntax error: unexpected single '|', expected '||'
 		| *@a | b
 		| ....^`,
 	},
@@ -441,7 +446,7 @@ var testCases = []testInfo{
 		ERROR: <input>:1:5: Syntax error: extraneous input 'b' expecting <EOF>
 		| a | b
 		| ....^`,
-		PrattE: `ERROR: <input>:1:3: unexpected single '|', expected '||'
+		PrattE: `ERROR: <input>:1:3: Syntax error: unexpected single '|', expected '||'
 		| a | b
 		| ..^`,
 	},
@@ -750,20 +755,12 @@ var testCases = []testInfo{
 			foo^#3:*expr.Expr_IdentExpr#:5^#4:*expr.Constant_Int64Value#^#2:*expr.Expr_CreateStruct_Entry#,
 			bar^#6:*expr.Expr_IdentExpr#:"xyz"^#7:*expr.Constant_StringValue#^#5:*expr.Expr_CreateStruct_Entry#
 		}^#1:*expr.Expr_StructExpr#`,
-		PrattP: `{
-			foo^#2:*expr.Expr_IdentExpr#:5^#4:*expr.Constant_Int64Value#^#3:*expr.Expr_CreateStruct_Entry#,
-			bar^#5:*expr.Expr_IdentExpr#:"xyz"^#7:*expr.Constant_StringValue#^#6:*expr.Expr_CreateStruct_Entry#
-		}^#1:*expr.Expr_StructExpr#`,
 	},
 	{
 		I: `{foo: 5, bar: "xyz", }`,
 		P: `{
 			foo^#3:*expr.Expr_IdentExpr#:5^#4:*expr.Constant_Int64Value#^#2:*expr.Expr_CreateStruct_Entry#,
 			bar^#6:*expr.Expr_IdentExpr#:"xyz"^#7:*expr.Constant_StringValue#^#5:*expr.Expr_CreateStruct_Entry#
-		}^#1:*expr.Expr_StructExpr#`,
-		PrattP: `{
-			foo^#2:*expr.Expr_IdentExpr#:5^#4:*expr.Constant_Int64Value#^#3:*expr.Expr_CreateStruct_Entry#,
-			bar^#5:*expr.Expr_IdentExpr#:"xyz"^#7:*expr.Constant_StringValue#^#6:*expr.Expr_CreateStruct_Entry#
 		}^#1:*expr.Expr_StructExpr#`,
 	},
 	{
@@ -797,7 +794,7 @@ var testCases = []testInfo{
 		E: `ERROR: <input>:1:2: Syntax error: mismatched input '<EOF>' expecting {'[', '{', '}', '(', '.', ',', '-', '!', '?', 'true', 'false', 'null', NUM_FLOAT, NUM_INT, NUM_UINT, STRING, BYTES, IDENTIFIER}
 		 | {
 		 | .^`,
-		PrattE: `ERROR: <input>:1:2: expected '}'
+		PrattE: `ERROR: <input>:1:2: Syntax error: expected '}'
 		 | {
 		 | .^`,
 	},
@@ -824,10 +821,6 @@ var testCases = []testInfo{
 		P: `{
 			1^#3:*expr.Constant_Int64Value#:2u^#4:*expr.Constant_Uint64Value#^#2:*expr.Expr_CreateStruct_Entry#,
 			2^#6:*expr.Constant_Int64Value#:3u^#7:*expr.Constant_Uint64Value#^#5:*expr.Expr_CreateStruct_Entry#
-		}^#1:*expr.Expr_StructExpr#`,
-		PrattP: `{
-			1^#2:*expr.Constant_Int64Value#:2u^#4:*expr.Constant_Uint64Value#^#3:*expr.Expr_CreateStruct_Entry#,
-			2^#5:*expr.Constant_Int64Value#:3u^#7:*expr.Constant_Uint64Value#^#6:*expr.Expr_CreateStruct_Entry#
 		}^#1:*expr.Expr_StructExpr#`,
 	},
 	{
@@ -866,7 +859,7 @@ var testCases = []testInfo{
 		ERROR: <input>:1:6: Syntax error: mismatched input '<EOF>' expecting {'[', '{', '(', '.', '-', '!', 'true', 'false', 'null', NUM_FLOAT, NUM_INT, NUM_UINT, STRING, BYTES, IDENTIFIER}
 		| 1 + $
 		| .....^`,
-		PrattE: `ERROR: <input>:1:5: unexpected character
+		PrattE: `ERROR: <input>:1:5: Syntax error: unexpected character
 		| 1 + $
 		| ....^`,
 	},
@@ -968,7 +961,7 @@ var testCases = []testInfo{
 		ERROR: <input>:1:6: Syntax error: mismatched input '<EOF>' expecting {'[', '{', '(', '.', '-', '!', 'true', 'false', 'null', NUM_FLOAT, NUM_INT, NUM_UINT, STRING, BYTES, IDENTIFIER}
 		| 1 + +
 		| .....^`,
-		PrattE: `ERROR: <input>:1:5: unexpected token
+		PrattE: `ERROR: <input>:1:5: Syntax error: unexpected token
 		| 1 + +
 		| ....^`,
 	},
@@ -985,7 +978,7 @@ var testCases = []testInfo{
 		E: `ERROR: <input>:1:10: Syntax error: no viable alternative at input '."a"'
 		| {"a": 1}."a"
 		| .........^`,
-		PrattE: `ERROR: <input>:1:10: expected identifier after '.'
+		PrattE: `ERROR: <input>:1:10: Syntax error: expected identifier after '.'
 		| {"a": 1}."a"
 		| .........^`,
 	},
@@ -1070,10 +1063,10 @@ var testCases = []testInfo{
 		ERROR: <input>:2:11: Syntax error: no viable alternative at input '.'
 		|    && in.😁
 		| .........．^`,
-		PrattE: `ERROR: <input>:2:7: unexpected token
+		PrattE: `ERROR: <input>:2:7: Syntax error: unexpected token
 		|    && in.😁
 		| ......^
-		ERROR: <input>:2:10: unexpected character
+		ERROR: <input>:2:10: Syntax error: unexpected character
 		|    && in.😁
 		| .........＾`,
 	},
@@ -1139,7 +1132,7 @@ var testCases = []testInfo{
         ERROR: <input>:1:3: Syntax error: mismatched input '<EOF>' expecting {'[', '{', '(', '.', '-', '!', 'true', 'false', 'null', NUM_FLOAT, NUM_INT, NUM_UINT, STRING, BYTES, IDENTIFIER}
 		| in
 		| ..^`,
-		PrattE: `ERROR: <input>:1:1: unexpected token
+		PrattE: `ERROR: <input>:1:1: Syntax error: unexpected token
 		| in
 		| ^`,
 	},
@@ -1226,7 +1219,7 @@ var testCases = []testInfo{
 	    ERROR: <input>:1:9: Syntax error: extraneous input '}' expecting <EOF>
 		| func{{a}}
 		| ........^`,
-		PrattE: `ERROR: <input>:1:6: expected struct field name
+		PrattE: `ERROR: <input>:1:6: Syntax error: expected struct field name
 		| func{{a}}
 		| .....^
 		ERROR: <input>:1:9: Syntax error: mismatched input '}' expecting <EOF>
@@ -1241,7 +1234,7 @@ var testCases = []testInfo{
 	    ERROR: <input>:1:7: Syntax error: mismatched input '}' expecting ':'
 		| msg{:a}
 		| ......^`,
-		PrattE: `ERROR: <input>:1:5: expected struct field name
+		PrattE: `ERROR: <input>:1:5: Syntax error: expected struct field name
 		| msg{:a}
 		| ....^`,
 	},
@@ -1250,7 +1243,7 @@ var testCases = []testInfo{
 		E: `ERROR: <input>:1:3: Syntax error: mismatched input '}' expecting ':'
 		| {a}
 		| ..^`,
-		PrattE: `ERROR: <input>:1:3: expected ':' in map entry
+		PrattE: `ERROR: <input>:1:3: Syntax error: expected ':' in map entry
 		| {a}
 		| ..^`,
 	},
@@ -1262,10 +1255,10 @@ var testCases = []testInfo{
 	    ERROR: <input>:1:4: Syntax error: mismatched input '}' expecting ':'
 		| {:a}
 		| ...^`,
-		PrattE: `ERROR: <input>:1:2: unexpected token
+		PrattE: `ERROR: <input>:1:2: Syntax error: unexpected token
 		| {:a}
 		| .^
-		ERROR: <input>:1:3: expected ':' in map entry
+		ERROR: <input>:1:3: Syntax error: expected ':' in map entry
 		| {:a}
 		| ..^`,
 	},
@@ -1274,7 +1267,7 @@ var testCases = []testInfo{
 		E: `ERROR: <input>:1:8: Syntax error: mismatched input '}' expecting ':'
 		| ind[a{b}]
 		| .......^`,
-		PrattE: `ERROR: <input>:1:8: expected ':' in struct field
+		PrattE: `ERROR: <input>:1:8: Syntax error: expected ':' in struct field
 		| ind[a{b}]
 		| .......^`,
 	},
@@ -1298,7 +1291,7 @@ var testCases = []testInfo{
 	    ERROR: <input>:1:2: Syntax error: mismatched input '<EOF>' expecting {'[', '{', '(', '.', '-', '!', 'true', 'false', 'null', NUM_FLOAT, NUM_INT, NUM_UINT, STRING, BYTES, IDENTIFIER}
 		| ?
 		| .^`,
-		PrattE: `ERROR: <input>:1:1: unexpected token
+		PrattE: `ERROR: <input>:1:1: Syntax error: unexpected token
 		| ?
 		| ^`,
 	},
@@ -1313,10 +1306,10 @@ var testCases = []testInfo{
 	    ERROR: <input>:1:12: Syntax error: error recovery attempt limit exceeded: 4
 		| a ? b ((?))
 		| ...........^`,
-		PrattE: `ERROR: <input>:1:9: unexpected token
+		PrattE: `ERROR: <input>:1:9: Syntax error: unexpected token
 		| a ? b ((?))
 		| ........^
-		ERROR: <input>:1:12: expected ':' in conditional expression
+		ERROR: <input>:1:12: Syntax error: expected ':' in conditional expression
 		| a ? b ((?))
 		| ...........^`,
 	},
@@ -1326,7 +1319,7 @@ var testCases = []testInfo{
 			]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]`,
 		E: "ERROR: <input>:-1:0: expression recursion limit exceeded: 32",
 		PrattE: `ERROR: <input>:-1:0: expression recursion limit exceeded: 32
-ERROR: <input>:1:34: expected ']'
+ERROR: <input>:1:34: Syntax error: expected ']'
  | [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[
  | .................................^`,
 	},
@@ -1378,22 +1371,23 @@ ERROR: <input>:1:34: expected ']'
         ERROR: <input>:14:23: Syntax error: extraneous input '/' expecting {'[', '{', '(', '.', '-', '!', 'true', 'false', 'null', NUM_FLOAT, NUM_INT, NUM_UINT, STRING, BYTES, IDENTIFIER}
         |   --1--1---1--1--1--0-/1--1--1--1--0--2--1--1--0--1--1--1--1--0--1--1--1--3-[-1--1
         | ......................^`,
-		PrattE: `ERROR: <input>:3:33: unexpected token
+		PrattE: `ERROR: <input>:3:33: Syntax error: unexpected token
         |   --3-[-1--1--1--1---1--1--1--0-/1--1--1--1--0--2--1--1--0--1--1--1--1--0--1--1--1
         | ................................^
-        ERROR: <input>:3:34: expected ']'
+        ERROR: <input>:3:34: Syntax error: expected ']'
         |   --3-[-1--1--1--1---1--1--1--0-/1--1--1--1--0--2--1--1--0--1--1--1--1--0--1--1--1
         | .................................^
-        ERROR: <input>:11:17: unexpected character
+        ERROR: <input>:11:17: Syntax error: unexpected character
         |   --1--1---1--1-À1--0--1--1--1--1--0--2--1--1--0--1--1--1--1--0--1--1--1--3-[-1--1
         | ................＾
-        ERROR: <input>:34:49: expected ']'
+        ERROR: <input>:34:49: Syntax error: expected ']'
         |   --1---1--1--1--0--1--1--1--1--0--3--1--1--0--1
         | ................................................^
-        ERROR: <input>:34:49: expected ']'
+        ERROR: <input>:34:49: Syntax error: expected ']'
         |   --1---1--1--1--0--1--1--1--1--0--3--1--1--0--1
         | ................................................^`,
-	}, {
+	},
+	{
 		I: `ó ¢
 		ó 0 
 		0"""\""\"""\""\"""\""\"""\""\"""\"\"""\""\"""\""\"""\""\"""\"!\"""\""\"""\""\"`,
@@ -1425,19 +1419,19 @@ ERROR: <input>:1:34: expected ']'
 		ERROR: <input>:3:11: Syntax error: token recognition error at: '\'
 		|   0"""\""\"""\""\"""\""\"""\""\"""\"\"""\""\"""\""\"""\""\"""\"!\"""\""\"""\""\"
 		| ..........^`,
-		PrattE: `ERROR: <input>:1:1: unexpected character
+		PrattE: `ERROR: <input>:1:1: Syntax error: unexpected character
 		| ó ¢
 		| ＾
-		ERROR: <input>:1:2: unexpected character
+		ERROR: <input>:1:2: Syntax error: unexpected character
 		| ó ¢
 		| ．＾
-		ERROR: <input>:1:3: unexpected character
+		ERROR: <input>:1:3: Syntax error: unexpected character
 		| ó ¢
 		| ．．＾
-		ERROR: <input>:2:3: unexpected character
+		ERROR: <input>:2:3: Syntax error: unexpected character
 		|   ó 0 
 		| ..＾
-		ERROR: <input>:2:4: unexpected character
+		ERROR: <input>:2:4: Syntax error: unexpected character
 		|   ó 0 
 		| ..．＾`,
 	},
@@ -1792,7 +1786,7 @@ ERROR: <input>:1:34: expected ']'
 		E: `ERROR: <input>:1:6: Syntax error: mismatched input 'true' expecting IDENTIFIER
 		| self.true == 1
 		| .....^`,
-		PrattE: `ERROR: <input>:1:6: expected identifier after '.'
+		PrattE: `ERROR: <input>:1:6: Syntax error: expected identifier after '.'
 		| self.true == 1
 		| .....^`,
 	},
@@ -1846,9 +1840,6 @@ ERROR: <input>:1:34: expected ']'
 		Opts: []Option{EnableOptionalSyntax(true)},
 		P: `{
 			?"key"^#3:*expr.Constant_StringValue#:value^#4:*expr.Expr_IdentExpr#^#2:*expr.Expr_CreateStruct_Entry#
-		  }^#1:*expr.Expr_StructExpr#`,
-		PrattP: `{
-			?"key"^#2:*expr.Constant_StringValue#:value^#4:*expr.Expr_IdentExpr#^#3:*expr.Expr_CreateStruct_Entry#
 		  }^#1:*expr.Expr_StructExpr#`,
 	},
 	{
@@ -2036,10 +2027,10 @@ ERROR: <input>:1:34: expected ']'
 		PrattE: `ERROR: <input>:1:3: unsupported syntax '?'
 		 | x{?.
 		 | ..^
-		ERROR: <input>:1:4: expected struct field name
+		ERROR: <input>:1:4: Syntax error: expected struct field name
 		 | x{?.
 		 | ...^
-		ERROR: <input>:1:5: expected '}'
+		ERROR: <input>:1:5: Syntax error: expected '}'
 		 | x{?.
 		 | ....^`,
 	},
@@ -2049,10 +2040,10 @@ ERROR: <input>:1:34: expected ']'
 		ERROR: <input>:1:3: Syntax error: mismatched input '.' expecting {'}', ',', '?', IDENTIFIER, ESC_IDENTIFIER}
 		 | x{.
 		 | ..^`,
-		PrattE: `ERROR: <input>:1:3: expected struct field name
+		PrattE: `ERROR: <input>:1:3: Syntax error: expected struct field name
 		 | x{.
 		 | ..^
-		ERROR: <input>:1:4: expected '}'
+		ERROR: <input>:1:4: Syntax error: expected '}'
 		 | x{.
 		 | ...^`,
 	},
@@ -2070,10 +2061,10 @@ ERROR: <input>:1:34: expected ']'
 		 | '3# < 10" '& tru ^^
 		 | ..................^
 		`,
-		PrattE: `ERROR: <input>:1:12: unexpected single '&', expected '&&'
+		PrattE: `ERROR: <input>:1:12: Syntax error: unexpected single '&', expected '&&'
 		 | '3# < 10" '& tru ^^
 		 | ...........^
-		ERROR: <input>:1:18: unexpected character
+		ERROR: <input>:1:18: Syntax error: unexpected character
 		 | '3# < 10" '& tru ^^
 		 | .................^`,
 	},
@@ -2287,9 +2278,71 @@ ERROR: <input>:1:34: expected ']'
 		E: `ERROR: <input>:1:9: Syntax error: mismatched input ')' expecting {'[', '{', '(', '.', '-', '!', 'true', 'false', 'null', NUM_FLOAT, NUM_INT, NUM_UINT, STRING, BYTES, IDENTIFIER}
 		| foo(a,b,)
 		| ........^`,
-		PrattE: `ERROR: <input>:1:9: unexpected token
+		PrattE: `ERROR: <input>:1:9: Syntax error: unexpected token
 		| foo(a,b,)
 		| ........^`,
+	},
+	{
+		I: `-.2.V`,
+		P: `-0.2^#1:*expr.Constant_DoubleValue#.V^#2:*expr.Expr_SelectExpr#`,
+	},
+	{
+		I: `!-.2.V`,
+		P: `!_(
+			-0.2^#2:*expr.Constant_DoubleValue#.V^#3:*expr.Expr_SelectExpr#
+		)^#1:*expr.Expr_CallExpr#`,
+	},
+	{
+		I: `!-2.V`,
+		P: `!_(
+			-2^#2:*expr.Constant_Int64Value#.V^#3:*expr.Expr_SelectExpr#
+		)^#1:*expr.Expr_CallExpr#`,
+	},
+	{
+		I: `!-.2[0]`,
+		P: `!_(
+			_[_](
+				-0.2^#2:*expr.Constant_DoubleValue#,
+				0^#4:*expr.Constant_Int64Value#
+			)^#3:*expr.Expr_CallExpr#
+		)^#1:*expr.Expr_CallExpr#`,
+	},
+	{
+		I: `-x.foo[0]`,
+		P: `-_(
+			_[_](
+				x^#2:*expr.Expr_IdentExpr#.foo^#3:*expr.Expr_SelectExpr#,
+				0^#5:*expr.Constant_Int64Value#
+			)^#4:*expr.Expr_CallExpr#
+		)^#1:*expr.Expr_CallExpr#`,
+	},
+	{
+		I: `-x[0].foo`,
+		P: `-_(
+			_[_](
+				x^#2:*expr.Expr_IdentExpr#,
+				0^#4:*expr.Constant_Int64Value#
+			)^#3:*expr.Expr_CallExpr#.foo^#5:*expr.Expr_SelectExpr#
+		)^#1:*expr.Expr_CallExpr#`,
+	},
+	{
+		I: `!x[0].foo`,
+		P: `!_(
+			_[_](
+				x^#2:*expr.Expr_IdentExpr#,
+				0^#4:*expr.Constant_Int64Value#
+			)^#3:*expr.Expr_CallExpr#.foo^#5:*expr.Expr_SelectExpr#
+		)^#1:*expr.Expr_CallExpr#`,
+	},
+	{
+		I: `- -1`,
+		P: `1^#1:*expr.Constant_Int64Value#`,
+	},
+	{
+		I: `---a`,
+		P: `-_(
+			a^#2:*expr.Expr_IdentExpr#
+		)^#1:*expr.Expr_CallExpr#`,
 	},
 }
 
