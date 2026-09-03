@@ -1,6 +1,8 @@
 name: repl-session
 container: cel.expr.conformance
 extensions:
+    - name: optional
+      version: latest
     - name: cel.lib.ext.encoders
       version: latest
     - name: cel.lib.ext.sets
@@ -16,8 +18,6 @@ extensions:
     - name: cel.lib.ext.comprev2
       version: latest
     - name: cel.lib.ext.strings
-      version: latest
-    - name: optional
       version: latest
 variables:
     - name: pb3

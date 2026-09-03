@@ -748,6 +748,13 @@ func TestProcess(t *testing.T) {
 					cmd: "option",
 					args: []string{
 						"--extension",
+						"optional",
+					},
+				},
+				&simpleCmd{
+					cmd: "option",
+					args: []string{
+						"--extension",
 						"encoders",
 					},
 				},
