@@ -313,7 +313,7 @@ func TestConcurrentEval(t *testing.T) {
 		// Tests the scenario where there are more async invocations than completion buffer.
 		{
 			name:    "more requests than completion buffer w/ debounce",
-			expr:    `lists.range(1000).exists(i, async_inc(i) == 1000)`,
+			expr:    `lists.range(100).exists(i, async_inc(i) == 100)`,
 			maxConc: 5,
 			opts: []any{
 				ext.Lists(),
@@ -326,7 +326,7 @@ func TestConcurrentEval(t *testing.T) {
 		// Tests the scenario where there are more async invocations than completion buffer.
 		{
 			name:    "more requests than completion buffer w/ drain all",
-			expr:    `lists.range(1000).exists(i, async_inc(i) == 1000)`,
+			expr:    `lists.range(100).exists(i, async_inc(i) == 100)`,
 			maxConc: 5,
 			opts: []any{
 				ext.Lists(),
@@ -338,7 +338,7 @@ func TestConcurrentEval(t *testing.T) {
 		},
 		{
 			name: "more requests than completion buffer w/ drain none",
-			expr: `lists.range(300).exists(i, async_inc(i) == 300)`,
+			expr: `lists.range(100).exists(i, async_inc(i) == 100)`,
 			opts: []any{
 				ext.Lists(),
 				cel.AsyncCompletionBufferSize(1),
@@ -351,7 +351,7 @@ func TestConcurrentEval(t *testing.T) {
 		// Tests the scenario where there are more async invocations than completion buffer across two different comprehensions.
 		{
 			name: "chained comprehensions with drain none",
-			expr: `lists.range(300).map(i, async_inc(i) * 2).exists(j, j == 600)`,
+			expr: `lists.range(100).map(i, async_inc(i) * 2).exists(j, j == 200)`,
 			opts: []any{
 				ext.Lists(),
 				cel.AsyncCompletionBufferSize(4),

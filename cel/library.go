@@ -18,7 +18,6 @@ import (
 	"fmt"
 	"math"
 
-	"cel.dev/cel-go/checker"
 	"cel.dev/cel-go/common"
 	"cel.dev/cel-go/common/ast"
 	"cel.dev/cel-go/common/cost"
@@ -634,7 +633,7 @@ func (lib *optionalLib) CompileOptions() []EnvOption {
 					return types.Equal(opt.GetValue(), other)
 				}))))
 		opts = append(opts, CostEstimatorOptions(
-			checker.OverloadCostEstimate(optionalHasValueValueOverload, estimateOptionalHasValue)))
+			cost.OverloadCostEstimate(optionalHasValueValueOverload, estimateOptionalHasValue)))
 	}
 
 	return opts
@@ -647,7 +646,7 @@ func (lib *optionalLib) ProgramOptions() []ProgramOption {
 	}
 	if lib.version >= 3 {
 		opts = append(opts, CostTrackerOptions(
-			interpreter.OverloadCostTracker(optionalHasValueValueOverload, trackOptionalHasValue)))
+			cost.OverloadTracker(optionalHasValueValueOverload, trackOptionalHasValue)))
 	}
 	return opts
 }
@@ -657,7 +656,7 @@ func (lib *optionalLib) ProgramOptions() []ProgramOption {
 //
 // The overload is sugar for 'opt.hasValue() ? opt.value() == v : false' where the equality check
 // dominates the cost, so the estimate mirrors the O(min(m, n)) cost of an equality comparison.
-func estimateOptionalHasValue(estimator checker.CostEstimator, target *checker.AstNode, args []checker.AstNode) *checker.CallEstimate {
+func estimateOptionalHasValue(estimator cost.Estimator, target *cost.AstNode, args []cost.AstNode) *cost.CallEstimate {
 	if target == nil || len(args) != 1 {
 		return nil
 	}
@@ -672,19 +671,19 @@ func estimateOptionalHasValue(estimator checker.CostEstimator, target *checker.A
 		// equality of 2 scalar values results in a cost of 1
 		minCost = 1
 	}
-	return &checker.CallEstimate{
-		CostEstimate: checker.CostEstimate{Min: minCost, Max: smallestMax}.
+	return &cost.CallEstimate{
+		CostEstimate: cost.CostEstimate{Min: minCost, Max: smallestMax}.
 			MultiplyByCostFactor(common.StringTraversalCostFactor),
 	}
 }
 
 // sizeOrUnknown returns the size estimate computed for the node, or an unknown size if the node
 // size could not be determined at check time.
-func sizeOrUnknown(node checker.AstNode) checker.SizeEstimate {
+func sizeOrUnknown(node cost.AstNode) cost.SizeEstimate {
 	if sz := node.ComputedSize(); sz != nil {
 		return *sz
 	}
-	return checker.UnknownSizeEstimate()
+	return cost.UnknownSizeEstimate()
 }
 
 // trackOptionalHasValue computes the runtime cost of comparing an optional's value against the

@@ -28,7 +28,6 @@ go_library(
     visibility = ["//visibility:public"],
     deps = [
         "//cel:go_default_library",
-        "//checker:go_default_library",
         "//common:go_default_library",
         "//common/ast:go_default_library",
         "//common/cost:go_default_library",
@@ -75,7 +74,6 @@ go_test(
     ],
     deps = [
         "//cel:go_default_library",
-        "//checker:go_default_library",
         "//common:go_default_library",
         "//common/env:go_default_library",
         "//common/types:go_default_library",

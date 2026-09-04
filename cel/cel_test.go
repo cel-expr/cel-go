@@ -32,8 +32,8 @@ import (
 	"google.golang.org/protobuf/reflect/protodesc"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
-	"cel.dev/cel-go/checker"
 	celast "cel.dev/cel-go/common/ast"
+	"cel.dev/cel-go/common/cost"
 	"cel.dev/cel-go/common/env"
 	"cel.dev/cel-go/common/operators"
 	"cel.dev/cel-go/common/overloads"
@@ -202,7 +202,7 @@ func TestEval(t *testing.T) {
 	env, err := NewEnv(
 		Variable("input", ListType(IntType)),
 		CostEstimatorOptions(
-			checker.OverloadCostEstimate(overloads.TimestampToYear, estimateTimestampToYear),
+			cost.OverloadCostEstimate(overloads.TimestampToYear, estimateTimestampToYear),
 		),
 	)
 	if err != nil {
@@ -228,7 +228,7 @@ func TestEval(t *testing.T) {
 			prgOpts := []ProgramOption{
 				CostTracking(testRuntimeCostEstimator{}),
 				CostTrackerOptions(
-					interpreter.OverloadCostTracker(overloads.TimestampToYear, trackTimestampToYear),
+					cost.OverloadTracker(overloads.TimestampToYear, trackTimestampToYear),
 				),
 				EvalOptions(OptOptimize, OptTrackCost),
 				InterruptCheckFrequency(100),
@@ -1948,13 +1948,13 @@ func TestCustomInterpreterDecoratorV2(t *testing.T) {
 // TestEstimateCostAndRuntimeCost sanity checks that the cost systems are usable from the program API.
 func TestEstimateCostAndRuntimeCost(t *testing.T) {
 	intList := ListType(IntType)
-	zeroCost := checker.CostEstimate{}
+	zeroCost := cost.CostEstimate{}
 	cases := []struct {
 		name  string
 		expr  string
 		decls []EnvOption
 		hints map[string]uint64
-		want  checker.CostEstimate
+		want  cost.CostEstimate
 		in    any
 	}{
 		{
@@ -1967,7 +1967,7 @@ func TestEstimateCostAndRuntimeCost(t *testing.T) {
 			name:  "identity",
 			expr:  `input`,
 			decls: []EnvOption{Variable("input", intList)},
-			want:  checker.CostEstimate{Min: 1, Max: 1},
+			want:  cost.CostEstimate{Min: 1, Max: 1},
 			in:    map[string]any{"input": []int{1, 2}},
 		},
 		{
@@ -1978,7 +1978,7 @@ func TestEstimateCostAndRuntimeCost(t *testing.T) {
 				Variable("str2", StringType),
 			},
 			hints: map[string]uint64{"str1": 10, "str2": 10},
-			want:  checker.CostEstimate{Min: 2, Max: 6},
+			want:  cost.CostEstimate{Min: 2, Max: 6},
 			in:    map[string]any{"str1": "val1111111", "str2": "val2222222"},
 		},
 	}
@@ -1992,7 +1992,7 @@ func TestEstimateCostAndRuntimeCost(t *testing.T) {
 			}
 			envOpts := []EnvOption{
 				CostEstimatorOptions(
-					checker.OverloadCostEstimate(overloads.TimestampToYear, estimateTimestampToYear),
+					cost.OverloadCostEstimate(overloads.TimestampToYear, estimateTimestampToYear),
 				),
 			}
 			envOpts = append(envOpts, tc.decls...)
@@ -2003,10 +2003,10 @@ func TestEstimateCostAndRuntimeCost(t *testing.T) {
 			}
 			est, err := env.EstimateCost(ast, testCostEstimator{hints: tc.hints})
 			if err != nil {
-				t.Fatalf("Env.EstimateCost(ast *Ast, estimator checker.CostEstimator) failed to estimate cost: %s\n", err)
+				t.Fatalf("Env.EstimateCost(ast *Ast, estimator cost.Estimator) failed to estimate cost: %s\n", err)
 			}
 			if est.Min != tc.want.Min || est.Max != tc.want.Max {
-				t.Fatalf("Env.EstimateCost(ast *Ast, estimator checker.CostEstimator) failed to return the right cost interval. Got [%v, %v], wanted [%v, %v]",
+				t.Fatalf("Env.EstimateCost(ast *Ast, estimator cost.Estimator) failed to return the right cost interval. Got [%v, %v], wanted [%v, %v]",
 					est.Min, est.Max, tc.want.Min, tc.want.Max)
 			}
 
@@ -2018,7 +2018,7 @@ func TestEstimateCostAndRuntimeCost(t *testing.T) {
 			program, err := env.Program(checkedAst,
 				CostTracking(testRuntimeCostEstimator{}),
 				CostTrackerOptions(
-					interpreter.OverloadCostTracker(overloads.TimestampToYear, trackTimestampToYear),
+					cost.OverloadTracker(overloads.TimestampToYear, trackTimestampToYear),
 				),
 			)
 			if err != nil {
@@ -2079,7 +2079,7 @@ func TestCostLimit(t *testing.T) {
 			t.Parallel()
 			envOpts := []EnvOption{
 				CostEstimatorOptions(
-					checker.OverloadCostEstimate(overloads.TimestampToYear, estimateTimestampToYear),
+					cost.OverloadCostEstimate(overloads.TimestampToYear, estimateTimestampToYear),
 				),
 			}
 			envOpts = append(envOpts, tc.decls...)
@@ -2090,7 +2090,7 @@ func TestCostLimit(t *testing.T) {
 			}
 			est, err := env.EstimateCost(ast, testCostEstimator{hints: map[string]uint64{}})
 			if err != nil {
-				t.Fatalf("Env.EstimateCost(ast *Ast, estimator checker.CostEstimator) failed to estimate cost: %s\n", err)
+				t.Fatalf("Env.EstimateCost(ast *Ast, estimator cost.Estimator) failed to estimate cost: %s\n", err)
 			}
 
 			checkedAst, iss := env.Check(ast)
@@ -2101,7 +2101,7 @@ func TestCostLimit(t *testing.T) {
 			program, err := env.Program(checkedAst,
 				CostTracking(testRuntimeCostEstimator{}),
 				CostTrackerOptions(
-					interpreter.OverloadCostTracker(overloads.TimestampToYear, trackTimestampToYear),
+					cost.OverloadTracker(overloads.TimestampToYear, trackTimestampToYear),
 				),
 				CostLimit(tc.costLimit),
 			)
@@ -4019,7 +4019,7 @@ func TestOptionalHasValueCost(t *testing.T) {
 		expr       string
 		hints      map[string]uint64
 		in         map[string]any
-		wantEst    checker.CostEstimate
+		wantEst    cost.CostEstimate
 		wantActual uint64
 	}{
 		{
@@ -4029,7 +4029,7 @@ func TestOptionalHasValueCost(t *testing.T) {
 				"optStr": types.OptionalOf(types.String("val1111111")),
 				"str":    "val2222222",
 			},
-			wantEst:    checker.CostEstimate{Min: 3, Max: 3},
+			wantEst:    cost.CostEstimate{Min: 3, Max: 3},
 			wantActual: 3,
 		},
 		{
@@ -4039,7 +4039,7 @@ func TestOptionalHasValueCost(t *testing.T) {
 				"optStr": types.OptionalOf(types.String(longStr)),
 				"str":    longStr,
 			},
-			wantEst:    checker.CostEstimate{Min: 3, Max: 1002},
+			wantEst:    cost.CostEstimate{Min: 3, Max: 1002},
 			wantActual: 1002,
 		},
 		{
@@ -4050,7 +4050,7 @@ func TestOptionalHasValueCost(t *testing.T) {
 				"optStr": types.OptionalOf(types.String(longStr)),
 				"str":    "val2222222",
 			},
-			wantEst:    checker.CostEstimate{Min: 3, Max: 3},
+			wantEst:    cost.CostEstimate{Min: 3, Max: 3},
 			wantActual: 3,
 		},
 		{
@@ -4062,7 +4062,7 @@ func TestOptionalHasValueCost(t *testing.T) {
 				"optOptStr": types.OptionalOf(types.OptionalOf(types.String(longStr))),
 				"optStr":    types.OptionalOf(types.String(longStr)),
 			},
-			wantEst:    checker.CostEstimate{Min: 3, Max: 1002},
+			wantEst:    cost.CostEstimate{Min: 3, Max: 1002},
 			wantActual: 1002,
 		},
 		{
@@ -4073,7 +4073,7 @@ func TestOptionalHasValueCost(t *testing.T) {
 				"optStr": types.OptionalNone,
 				"str":    longStr,
 			},
-			wantEst:    checker.CostEstimate{Min: 3, Max: 1002},
+			wantEst:    cost.CostEstimate{Min: 3, Max: 1002},
 			wantActual: 3,
 		},
 	}
@@ -4629,19 +4629,19 @@ type testCostEstimator struct {
 	hints map[string]uint64
 }
 
-func (tc testCostEstimator) EstimateSize(element checker.AstNode) *checker.SizeEstimate {
+func (tc testCostEstimator) EstimateSize(element cost.AstNode) *cost.SizeEstimate {
 	if l, ok := tc.hints[strings.Join(element.Path(), ".")]; ok {
-		return &checker.SizeEstimate{Min: 0, Max: l}
+		return &cost.SizeEstimate{Min: 0, Max: l}
 	}
 	return nil
 }
 
-func (tc testCostEstimator) EstimateCallCost(function, overloadID string, target *checker.AstNode, args []checker.AstNode) *checker.CallEstimate {
+func (tc testCostEstimator) EstimateCallCost(function, overloadID string, target *cost.AstNode, args []cost.AstNode) *cost.CallEstimate {
 	return nil
 }
 
-func estimateTimestampToYear(estimator checker.CostEstimator, target *checker.AstNode, args []checker.AstNode) *checker.CallEstimate {
-	return &checker.CallEstimate{CostEstimate: checker.CostEstimate{Min: 7, Max: 7}}
+func estimateTimestampToYear(estimator cost.Estimator, target *cost.AstNode, args []cost.AstNode) *cost.CallEstimate {
+	return &cost.CallEstimate{CostEstimate: cost.CostEstimate{Min: 7, Max: 7}}
 }
 
 type testRuntimeCostEstimator struct{}

@@ -26,8 +26,8 @@ import (
 	"google.golang.org/protobuf/types/dynamicpb"
 
 	"cel.dev/cel-go/cel/async"
-	"cel.dev/cel-go/checker"
 	"cel.dev/cel-go/common/containers"
+	"cel.dev/cel-go/common/cost"
 	"cel.dev/cel-go/common/decls"
 	"cel.dev/cel-go/common/env"
 	"cel.dev/cel-go/common/functions"
@@ -836,7 +836,7 @@ func ConcurrentDrainStrategy(strategy async.DrainStrategy) ProgramOption {
 }
 
 // CostEstimatorOptions configure type-check time options for estimating expression cost.
-func CostEstimatorOptions(costOpts ...checker.CostOption) EnvOption {
+func CostEstimatorOptions(costOpts ...cost.CostOption) EnvOption {
 	return func(e *Env) (*Env, error) {
 		e.costOptions = append(e.costOptions, costOpts...)
 		return e, nil
@@ -846,7 +846,7 @@ func CostEstimatorOptions(costOpts ...checker.CostOption) EnvOption {
 // CostTrackerOptions configures a set of options for cost-tracking.
 //
 // Note, CostTrackerOptions is a no-op unless CostTracking is also enabled.
-func CostTrackerOptions(costOpts ...interpreter.CostTrackerOption) ProgramOption {
+func CostTrackerOptions(costOpts ...cost.TrackerOption) ProgramOption {
 	return func(p *prog) (*prog, error) {
 		p.costOptions = append(p.costOptions, costOpts...)
 		return p, nil
@@ -854,7 +854,7 @@ func CostTrackerOptions(costOpts ...interpreter.CostTrackerOption) ProgramOption
 }
 
 // CostTracking enables cost tracking and registers a ActualCostEstimator that can optionally provide a runtime cost estimate for any function calls.
-func CostTracking(costEstimator interpreter.ActualCostEstimator) ProgramOption {
+func CostTracking(costEstimator cost.ActualCostEstimator) ProgramOption {
 	return func(p *prog) (*prog, error) {
 		p.callCostEstimator = costEstimator
 		p.evalOpts |= OptTrackCost

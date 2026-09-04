@@ -22,7 +22,6 @@ import (
 	"cel.dev/cel-go/cel"
 	"cel.dev/cel-go/common/cost"
 	"cel.dev/cel-go/common/types"
-	"cel.dev/cel-go/interpreter"
 )
 
 func TestTwoVarComprehensions(t *testing.T) {
@@ -601,7 +600,7 @@ func TestTwoVarComprehensionsResidualAST(t *testing.T) {
 		name     string
 		in       map[string]any
 		varOpts  []cel.EnvOption
-		unks     []*interpreter.AttributePattern
+		unks     []*cel.AttributePatternType
 		expr     string
 		residual string
 	}{
@@ -614,7 +613,7 @@ func TestTwoVarComprehensionsResidualAST(t *testing.T) {
 			in: map[string]any{
 				"x": []any{0, uint(1)},
 			},
-			unks:     []*interpreter.AttributePattern{cel.AttributePattern("y")},
+			unks:     []*cel.AttributePatternType{cel.AttributePattern("y")},
 			expr:     `x.transformMapEntry(i, v, {v: i}).size() < y`,
 			residual: `2 < y`,
 		},
@@ -627,7 +626,7 @@ func TestTwoVarComprehensionsResidualAST(t *testing.T) {
 			in: map[string]any{
 				"x": []any{0, uint(1)},
 			},
-			unks:     []*interpreter.AttributePattern{cel.AttributePattern("y")},
+			unks:     []*cel.AttributePatternType{cel.AttributePattern("y")},
 			expr:     `x.transformMapEntry(i, v, i < y, {v: i})`,
 			residual: `[0, 1u].transformMapEntry(i, v, i < y, {v: i})`,
 		},
@@ -640,7 +639,7 @@ func TestTwoVarComprehensionsResidualAST(t *testing.T) {
 			in: map[string]any{
 				"x": []any{1, 2, 3},
 			},
-			unks:     []*interpreter.AttributePattern{cel.AttributePattern("y")},
+			unks:     []*cel.AttributePatternType{cel.AttributePattern("y")},
 			expr:     `x.exists(val, y.exists(key, _, key == val))`,
 			residual: `[1, 2, 3].exists(val, y.exists(key, _, key == val))`,
 		},
@@ -653,7 +652,7 @@ func TestTwoVarComprehensionsResidualAST(t *testing.T) {
 			in: map[string]any{
 				"y": map[int]string{1: "hi", 2: "hello", 3: "howdy"},
 			},
-			unks:     []*interpreter.AttributePattern{cel.AttributePattern("x")},
+			unks:     []*cel.AttributePatternType{cel.AttributePattern("x")},
 			expr:     `x.exists(val, y.exists(key, _, key == val))`,
 			residual: `x.exists(val, y.exists(key, _, key == val))`,
 		},
@@ -666,7 +665,7 @@ func TestTwoVarComprehensionsResidualAST(t *testing.T) {
 			in: map[string]any{
 				"y": map[int]string{1: "hi", 2: "hello", 3: "howdy"},
 			},
-			unks:     []*interpreter.AttributePattern{cel.AttributePattern("x")},
+			unks:     []*cel.AttributePatternType{cel.AttributePattern("x")},
 			expr:     `x.exists(val, y.exists(key, _, key == val)) && y.all(key, val, val.startsWith('h'))`,
 			residual: `x.exists(val, y.exists(key, _, key == val))`,
 		},
@@ -680,7 +679,7 @@ func TestTwoVarComprehensionsResidualAST(t *testing.T) {
 				"x": []int{42, 0, 43},
 				"y": map[int]string{1: "hi", 2: "hello", 3: "howdy"},
 			},
-			unks:     []*interpreter.AttributePattern{cel.AttributePattern("x").QualInt(1)},
+			unks:     []*cel.AttributePatternType{cel.AttributePattern("x").QualInt(1)},
 			expr:     `x.exists(val, y.exists(key, _, key == val)) || x[0] == 0 || x[1] == 1 || x[2] == 2`,
 			residual: `x.exists(val, y.exists(key, _, key == val)) || x[1] == 1`,
 		},
@@ -694,7 +693,7 @@ func TestTwoVarComprehensionsResidualAST(t *testing.T) {
 				"x": []int{42, 0, 43},
 				"y": map[int]string{1: "hi", 2: "hello", 3: "howdy"},
 			},
-			unks:     []*interpreter.AttributePattern{cel.AttributePattern("x").QualInt(1)},
+			unks:     []*cel.AttributePatternType{cel.AttributePattern("x").QualInt(1)},
 			expr:     `x.exists(val, y.exists(key, _, key == val)) || (x[?0].hasValue() && x[?1].hasValue())`,
 			residual: `x.exists(val, y.exists(key, _, key == val)) || x[?1].hasValue()`,
 		},
@@ -708,7 +707,7 @@ func TestTwoVarComprehensionsResidualAST(t *testing.T) {
 				"x": []string{"howdy", "hello", "hi"},
 				"y": map[int]string{0: "hi", 1: "hello", 2: "howdy"},
 			},
-			unks:     []*interpreter.AttributePattern{cel.AttributePattern("y").QualInt(1)},
+			unks:     []*cel.AttributePatternType{cel.AttributePattern("y").QualInt(1)},
 			expr:     `x.exists(key, val, y[?key] == optional.of(val))`,
 			residual: `["howdy", "hello", "hi"].exists(key, val, y[?key] == optional.of(val))`,
 		},
@@ -722,7 +721,7 @@ func TestTwoVarComprehensionsResidualAST(t *testing.T) {
 				"x": []string{"howdy"},
 				"y": map[int]string{0: "hello"},
 			},
-			unks:     []*interpreter.AttributePattern{cel.AttributePattern("x").QualInt(0)},
+			unks:     []*cel.AttributePatternType{cel.AttributePattern("x").QualInt(0)},
 			expr:     `y.exists(key, y[?key] == x[?key])`,
 			residual: `{0: "hello"}.exists(key, y[?key] == x[?key])`,
 		},
@@ -734,7 +733,7 @@ func TestTwoVarComprehensionsResidualAST(t *testing.T) {
 			in: map[string]any{
 				"y": map[int]string{0: "hi", 1: "hello", 2: "howdy"},
 			},
-			unks:     []*interpreter.AttributePattern{cel.AttributePattern("y").QualInt(1)},
+			unks:     []*cel.AttributePatternType{cel.AttributePattern("y").QualInt(1)},
 			expr:     `cel.bind(z, y[0], z + y[1])`,
 			residual: `cel.bind(z, "hi", "hi" + y[1])`,
 		},
@@ -748,7 +747,7 @@ func TestTwoVarComprehensionsResidualAST(t *testing.T) {
 				"x": []string{"hi", "hello", "howdy"},
 				"y": map[int]string{0: "hi", 1: "hello", 2: "howdy"},
 			},
-			unks:     []*interpreter.AttributePattern{cel.AttributePattern("y").QualInt(1)},
+			unks:     []*cel.AttributePatternType{cel.AttributePattern("y").QualInt(1)},
 			expr:     `cel.bind(z, y[0], x.all(i, val, val == z || optional.of(val) == y[?i]))`,
 			residual: `cel.bind(z, "hi", ["hi", "hello", "howdy"].all(i, val, val == z || optional.of(val) == y[?i]))`,
 		},
