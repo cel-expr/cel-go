@@ -174,13 +174,6 @@ type lexerError struct {
 	message string
 }
 
-type lexerPosition struct {
-	pos   int32
-	atEnd bool
-	done  bool
-	err   lexerError
-}
-
 var keywords = map[string]tokenKind{
 	"false":     tokFalse,
 	"true":      tokTrue,
@@ -230,8 +223,6 @@ type lexer struct {
 	content runes.Buffer
 	length  int32
 	pos     int32
-	atEnd   bool
-	done    bool
 	err     lexerError
 }
 
@@ -243,20 +234,13 @@ func newLexer(content runes.Buffer) *lexer {
 	}
 }
 
-func (l *lexer) SavePosition() lexerPosition {
-	return lexerPosition{
-		pos:   l.pos,
-		atEnd: l.atEnd,
-		done:  l.done,
-		err:   l.err,
-	}
+func (l *lexer) SavePosition() int32 {
+	return l.pos
 }
 
-func (l *lexer) RestorePosition(p lexerPosition) {
-	l.pos = p.pos
-	l.atEnd = p.atEnd
-	l.done = p.done
-	l.err = p.err
+func (l *lexer) RestorePosition(pos int32) {
+	l.pos = pos
+	l.err = lexerError{}
 }
 
 func (l *lexer) GetError() lexerError {
@@ -268,9 +252,6 @@ func (l *lexer) GetPosition() int32 {
 }
 
 func (l *lexer) makeToken(kind tokenKind, start, end int32) token {
-	if l.atEnd {
-		l.done = true
-	}
 	return token{kind: kind, start: start, end: end}
 }
 
@@ -606,8 +587,6 @@ func (l *lexer) consumeIdent() token {
 func (l *lexer) Lex() token {
 	start := l.pos
 	if l.pos >= l.length {
-		l.atEnd = true
-		l.done = true
 		return l.makeToken(tokEnd, start, start)
 	}
 	c := l.content.Get(int(l.pos))
