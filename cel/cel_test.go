@@ -4921,3 +4921,250 @@ func TestNativeTypeForAndAlias(t *testing.T) {
 		t.Errorf("Eval() got %v, wanted true", out)
 	}
 }
+
+func TestTypeParameterInTypeType(t *testing.T) {
+	t.Run("type_param_in_type_type_int", func(t *testing.T) {
+		env, err := NewEnv(
+			Function("cast",
+				Overload("cast_val_to_type",
+					[]*Type{DynType, types.NewTypeTypeWithParam(TypeParamType("T"))},
+					TypeParamType("T"),
+				),
+			),
+		)
+		if err != nil {
+			t.Fatalf("NewEnv() failed: %v", err)
+		}
+		ast, iss := env.Compile("cast('hello', int)")
+		if iss.Err() != nil {
+			t.Fatalf("Compile() failed: %v", iss.Err())
+		}
+		if !ast.OutputType().IsExactType(IntType) {
+			t.Errorf("OutputType() = %v, wanted %v", ast.OutputType(), IntType)
+		}
+	})
+
+	t.Run("type_param_in_type_type_string", func(t *testing.T) {
+		env, err := NewEnv(
+			Function("cast",
+				Overload("cast_val_to_type",
+					[]*Type{DynType, types.NewTypeTypeWithParam(TypeParamType("T"))},
+					TypeParamType("T"),
+				),
+			),
+		)
+		if err != nil {
+			t.Fatalf("NewEnv() failed: %v", err)
+		}
+		ast, iss := env.Compile("cast(123, string)")
+		if iss.Err() != nil {
+			t.Fatalf("Compile() failed: %v", iss.Err())
+		}
+		if !ast.OutputType().IsExactType(StringType) {
+			t.Errorf("OutputType() = %v, wanted %v", ast.OutputType(), StringType)
+		}
+	})
+
+	t.Run("composite_type_param_in_type_type", func(t *testing.T) {
+		env, err := NewEnv(
+			Function("first_elem_type",
+				Overload("first_elem_type_list",
+					[]*Type{DynType, types.NewTypeTypeWithParam(ListType(TypeParamType("T")))},
+					TypeParamType("T"),
+				),
+			),
+		)
+		if err != nil {
+			t.Fatalf("NewEnv() failed: %v", err)
+		}
+		ast, iss := env.Compile("first_elem_type('data', type([1]))")
+		if iss.Err() != nil {
+			t.Fatalf("Compile() failed: %v", iss.Err())
+		}
+		if !ast.OutputType().IsExactType(IntType) {
+			t.Errorf("OutputType() = %v, wanted %v", ast.OutputType(), IntType)
+		}
+	})
+
+	t.Run("nested_type_param_in_type_type", func(t *testing.T) {
+		env, err := NewEnv(
+			Function("unwrap_type",
+				Overload("unwrap_type_t",
+					[]*Type{types.NewTypeTypeWithParam(types.NewTypeTypeWithParam(TypeParamType("T")))},
+					types.NewTypeTypeWithParam(TypeParamType("T")),
+				),
+			),
+		)
+		if err != nil {
+			t.Fatalf("NewEnv() failed: %v", err)
+		}
+		ast, iss := env.Compile("unwrap_type(type(int))")
+		if iss.Err() != nil {
+			t.Fatalf("Compile() failed: %v", iss.Err())
+		}
+		wantType := types.NewTypeTypeWithParam(IntType)
+		if !ast.OutputType().IsExactType(wantType) {
+			t.Errorf("OutputType() = %v, wanted %v", ast.OutputType(), wantType)
+		}
+	})
+
+	t.Run("type_map_erasure_comparison", func(t *testing.T) {
+		env, err := NewEnv()
+		if err != nil {
+			t.Fatalf("NewEnv() failed: %v", err)
+		}
+		ast, iss := env.Compile("type({}) == map")
+		if iss.Err() != nil {
+			t.Fatalf("Compile() failed: %v", iss.Err())
+		}
+		if !ast.OutputType().IsExactType(BoolType) {
+			t.Errorf("OutputType() = %v, wanted bool", ast.OutputType())
+		}
+		prg, err := env.Program(ast)
+		if err != nil {
+			t.Fatalf("Program() failed: %v", err)
+		}
+		out, _, err := prg.Eval(NoVars())
+		if err != nil {
+			t.Fatalf("Eval() failed: %v", err)
+		}
+		if out != types.True {
+			t.Errorf("Eval() = %v, wanted true", out)
+		}
+	})
+
+	t.Run("type_list_erasure_comparison", func(t *testing.T) {
+		env, err := NewEnv()
+		if err != nil {
+			t.Fatalf("NewEnv() failed: %v", err)
+		}
+		ast, iss := env.Compile("type([1]) == list")
+		if iss.Err() != nil {
+			t.Fatalf("Compile() failed: %v", iss.Err())
+		}
+		if !ast.OutputType().IsExactType(BoolType) {
+			t.Errorf("OutputType() = %v, wanted bool", ast.OutputType())
+		}
+	})
+
+	t.Run("composite_type_comparisons", func(t *testing.T) {
+		env, err := NewEnv()
+		if err != nil {
+			t.Fatalf("NewEnv() failed: %v", err)
+		}
+		ast, iss := env.Compile("list == type([1]) && map == type({1:2u})")
+		if iss.Err() != nil {
+			t.Fatalf("Compile() failed: %v", iss.Err())
+		}
+		if !ast.OutputType().IsExactType(BoolType) {
+			t.Errorf("OutputType() = %v, wanted bool", ast.OutputType())
+		}
+	})
+
+	t.Run("type_comparisons_between_different_types", func(t *testing.T) {
+		env, err := NewEnv()
+		if err != nil {
+			t.Fatalf("NewEnv() failed: %v", err)
+		}
+		for _, expr := range []string{
+			"type(1) == type('a')",
+			"type(1) != uint",
+			"type(1) != type(1u)",
+			"type(1) == type(1u)",
+		} {
+			ast, iss := env.Compile(expr)
+			if iss.Err() != nil {
+				t.Errorf("Compile(%q) failed: %v", expr, iss.Err())
+			} else if !ast.OutputType().IsExactType(BoolType) {
+				t.Errorf("Compile(%q) OutputType() = %v, wanted bool", expr, ast.OutputType())
+			}
+		}
+
+		// Verify evaluation of equality/inequality between different types
+		ast, iss := env.Compile("type(1) != type(1u)")
+		if iss.Err() != nil {
+			t.Fatalf("Compile() failed: %v", iss.Err())
+		}
+		prg, err := env.Program(ast)
+		if err != nil {
+			t.Fatalf("Program() failed: %v", err)
+		}
+		out, _, err := prg.Eval(NoVars())
+		if err != nil {
+			t.Fatalf("Eval() failed: %v", err)
+		}
+		if out != types.True {
+			t.Errorf("Eval() = %v, wanted true", out)
+		}
+
+		ast, iss = env.Compile("type(1) == type(1u)")
+		if iss.Err() != nil {
+			t.Fatalf("Compile() failed: %v", iss.Err())
+		}
+		prg, err = env.Program(ast)
+		if err != nil {
+			t.Fatalf("Program() failed: %v", err)
+		}
+		out, _, err = prg.Eval(NoVars())
+		if err != nil {
+			t.Fatalf("Eval() failed: %v", err)
+		}
+		if out != types.False {
+			t.Errorf("Eval() = %v, wanted false", out)
+		}
+	})
+
+	t.Run("type_param_equality_unifies_type_params", func(t *testing.T) {
+		env, err := NewEnv(
+			Variable("x", types.NewTypeTypeWithParam(TypeParamType("T"))),
+			Variable("y", types.NewTypeTypeWithParam(types.NewTypeTypeWithParam(TypeParamType("R")))),
+		)
+		if err != nil {
+			t.Fatalf("NewEnv() failed: %v", err)
+		}
+		ast, iss := env.Compile("x == y")
+		if iss.Err() != nil {
+			t.Fatalf("Compile() failed: %v", iss.Err())
+		}
+		if !ast.OutputType().IsExactType(BoolType) {
+			t.Errorf("OutputType() = %v, wanted bool", ast.OutputType())
+		}
+	})
+}
+
+func TestOptionalListTypePermutations(t *testing.T) {
+	env, err := NewEnv(OptionalTypes())
+	if err != nil {
+		t.Fatalf("NewEnv() failed: %v", err)
+	}
+	tests := []string{
+		"[type([]), int, type(optional.none())]",
+		"[type([]), type(optional.none()), int]",
+		"[int, type([]), type(optional.none())]",
+		"[int, type(optional.none()), type([])]",
+		"[type(optional.none()), type([]), int]",
+		"[type(optional.none()), int, type([])]",
+	}
+	wantListType := ListType(DynType)
+	for _, expr := range tests {
+		t.Run(expr, func(t *testing.T) {
+			ast, iss := env.Compile(expr)
+			if iss.Err() != nil {
+				t.Fatalf("Compile(%q) failed: %v", expr, iss.Err())
+			}
+			if !ast.OutputType().IsExactType(wantListType) {
+				t.Errorf("OutputType() = %v, wanted %v", ast.OutputType(), wantListType)
+			}
+			elements := ast.NativeRep().Expr().AsList().Elements()
+			if len(elements) != 3 {
+				t.Fatalf("len(elements) = %d, wanted 3", len(elements))
+			}
+			for i, elem := range elements {
+				elemType := ast.NativeRep().GetType(elem.ID())
+				if elemType == nil || elemType == types.ErrorType {
+					t.Errorf("element %d type = %v, wanted valid type", i, elemType)
+				}
+			}
+		})
+	}
+}

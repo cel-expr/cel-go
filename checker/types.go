@@ -90,10 +90,29 @@ func isEqualOrLessSpecific(t1, t2 *types.Type) bool {
 		return isEqualOrLessSpecific(t1.Parameters()[0], t2.Parameters()[0]) &&
 			isEqualOrLessSpecific(t1.Parameters()[1], t2.Parameters()[1])
 	case types.TypeKind:
-		return true
+		if len(t1.Parameters()) > 0 && len(t2.Parameters()) > 0 {
+			return isEqualOrLessSpecific(t1.Parameters()[0], t2.Parameters()[0])
+		}
+		return len(t1.Parameters()) == 0
 	default:
 		return t1.IsExactType(t2)
 	}
+}
+
+// hasTypeParam returns true if the type is a type parameter or contains any type parameters directly or transitively.
+func hasTypeParam(t *types.Type) bool {
+	if t == nil {
+		return false
+	}
+	if t.Kind() == types.TypeParamKind {
+		return true
+	}
+	for _, param := range t.Parameters() {
+		if hasTypeParam(param) {
+			return true
+		}
+	}
+	return false
 }
 
 // / internalIsAssignable returns true if t1 is assignable to t2.
@@ -143,7 +162,24 @@ func internalIsAssignable(m *mapping, t1, t2 *types.Type) bool {
 		// Struct types.
 		return t2.IsAssignableType(t1)
 	case types.TypeKind:
-		return kind2 == types.TypeKind
+		if kind2 != types.TypeKind {
+			return false
+		}
+		if len(t1.Parameters()) == 0 || len(t2.Parameters()) == 0 {
+			return len(t2.Parameters()) == 0
+		}
+		fromType := t1.Parameters()[0]
+		toType := t2.Parameters()[0]
+		// If either type contains a type parameter (e.g., type(T) in foo(data, type(T)) -> T),
+		// delegate to inner type unification to bind or validate type parameter substitutions.
+		// Returns true if the inner types structurally match, unify with an unbound type param,
+		// or conform to an existing binding in 'm'. Returns false on structural/kind mismatches
+		// (e.g., int vs list(T)), occurs-check cycles, or conflicting type param bindings.
+		if hasTypeParam(fromType) || hasTypeParam(toType) {
+			return internalIsAssignable(m, fromType, toType)
+		}
+		// Concrete types are coassignable in CEL (e.g., type(1) == type("a"), type([1]) == list).
+		return true
 	case types.OpaqueKind, types.ListKind, types.MapKind:
 		return t1.Kind() == t2.Kind() && t1.TypeName() == t2.TypeName() &&
 			internalIsAssignableList(m, t1.Parameters(), t2.Parameters())

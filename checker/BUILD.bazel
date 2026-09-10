@@ -50,6 +50,7 @@ go_test(
         "cost_test.go",
         "env_test.go",
         "format_test.go",
+        "types_test.go",
     ],
     embed = [
         ":go_default_library",
