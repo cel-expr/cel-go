@@ -379,13 +379,8 @@ func (p *prattParserWorker) parse() ast.Expr {
 	if p.recursionLimitExceeded || p.isRecoveryLimitExceeded() {
 		return expr
 	}
-	if p.peekTok.kind != tokEnd {
-		if p.peekTok.kind != tokError {
-			p.reportSyntaxError(p.peekTok, "mismatched input '%s' expecting <EOF>", p.tokenText(p.peekTok))
-		}
-		for p.peekTok.kind != tokEnd && !p.isRecoveryLimitExceeded() {
-			p.nextToken()
-		}
+	if p.peekTok.kind != tokEnd && p.peekTok.kind != tokError {
+		p.reportSyntaxError(p.peekTok, "unexpected token after expression")
 	}
 	return expr
 }

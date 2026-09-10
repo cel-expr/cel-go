@@ -385,38 +385,16 @@ func (l *lexer) consumeIntegralSuffix() tokenKind {
 	return tokInt
 }
 
-func (l *lexer) consumeUntilAfter(c rune) bool {
-	for pos := l.pos; pos < l.length; pos++ {
-		if l.content.Get(int(pos)) == c {
-			l.pos = pos + 1
-			return true
-		}
-	}
-	l.pos = l.length
-	return false
-}
-
-func (l *lexer) consumeUntilAfterTriple(quote rune) bool {
-	pos := l.pos
-	for pos+3 <= l.length {
-		if l.content.Get(int(pos)) == quote &&
-			l.content.Get(int(pos+1)) == quote &&
-			l.content.Get(int(pos+2)) == quote {
-			l.pos = pos + 3
-			return true
-		}
-		pos++
-	}
-	l.pos = l.length
-	return false
-}
-
-func (l *lexer) consumeUntilAfterUnescaped(c rune) bool {
+func (l *lexer) consumeUntilAfter(c rune, isRaw bool) bool {
 	pos := l.pos
 	escaped := false
 	for pos < l.length {
 		cc := l.content.Get(int(pos))
-		if cc == '\\' {
+		if cc == '\n' || cc == '\r' {
+			l.pos = pos
+			return false
+		}
+		if !isRaw && cc == '\\' {
 			escaped = !escaped
 		} else {
 			if cc == c && !escaped {
@@ -431,12 +409,12 @@ func (l *lexer) consumeUntilAfterUnescaped(c rune) bool {
 	return false
 }
 
-func (l *lexer) consumeUntilAfterUnescapedTriple(quote rune) bool {
+func (l *lexer) consumeUntilAfterTriple(quote rune, isRaw bool) bool {
 	pos := l.pos
 	escaped := false
 	for pos < l.length {
 		cc := l.content.Get(int(pos))
-		if cc == '\\' {
+		if !isRaw && cc == '\\' {
 			escaped = !escaped
 		} else {
 			if !escaped && pos+3 <= l.length {
@@ -458,7 +436,7 @@ func (l *lexer) consumeUntilAfterUnescapedTriple(quote rune) bool {
 func (l *lexer) consumeQuotedIdent() token {
 	start := l.pos
 	l.advance(1)
-	if !l.consumeUntilAfter('`') {
+	if !l.consumeUntilAfter('`', true) {
 		return l.setError(start, l.pos, "unterminated quoted identifier")
 	}
 	return l.makeToken(tokIdent, start, l.pos)
@@ -468,13 +446,7 @@ func (l *lexer) consumeStringLiteral(start int32, quote rune, isBytes, isRaw boo
 	l.advance(1)
 	if l.pos+2 <= l.length && l.content.Get(int(l.pos)) == quote && l.content.Get(int(l.pos+1)) == quote {
 		l.advance(2)
-		var found bool
-		if isRaw {
-			found = l.consumeUntilAfterTriple(quote)
-		} else {
-			found = l.consumeUntilAfterUnescapedTriple(quote)
-		}
-		if !found {
+		if !l.consumeUntilAfterTriple(quote, isRaw) {
 			msg := "unterminated string literal"
 			if isBytes {
 				msg = "unterminated bytes literal"
@@ -487,13 +459,7 @@ func (l *lexer) consumeStringLiteral(start int32, quote rune, isBytes, isRaw boo
 		}
 		return l.makeToken(kind, start, l.pos)
 	}
-	var found bool
-	if isRaw {
-		found = l.consumeUntilAfter(quote)
-	} else {
-		found = l.consumeUntilAfterUnescaped(quote)
-	}
-	if !found {
+	if !l.consumeUntilAfter(quote, isRaw) {
 		msg := "unterminated string literal"
 		if isBytes {
 			msg = "unterminated bytes literal"
