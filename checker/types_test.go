@@ -157,6 +157,18 @@ func TestIsAssignable_TypeType(t *testing.T) {
 			wantAssign: false,
 		},
 		{
+			name:       "occursCheck_mapTypeParam_to_typeParam",
+			from:       types.NewTypeTypeWithParam(types.NewMapType(types.StringType, types.NewTypeParamType("T"))),
+			to:         types.NewTypeTypeWithParam(types.NewTypeParamType("T")),
+			wantAssign: false,
+		},
+		{
+			name:       "occursCheck_typeParam_to_mapTypeParam",
+			from:       types.NewTypeTypeWithParam(types.NewTypeParamType("T")),
+			to:         types.NewTypeTypeWithParam(types.NewMapType(types.StringType, types.NewTypeParamType("T"))),
+			wantAssign: false,
+		},
+		{
 			name: "occursCheck_failsOnTransitiveCycle",
 			from: types.NewTypeTypeWithParam(types.NewTypeParamType("R")),
 			to:   types.NewTypeTypeWithParam(types.NewTypeTypeWithParam(types.NewTypeParamType("T"))),
