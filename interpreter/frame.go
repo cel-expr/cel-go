@@ -79,6 +79,11 @@ type ExecutionFrame struct {
 	// scope provides the local activation for this frame (e.g. comprehension folder, block slots, or input Activation).
 	scope Activation
 
+	// functions supplies the late-bound function implementations for the evaluation, resolved
+	// once from the input activation. Scopes introduced during evaluation never supply function
+	// bindings, so a child frame inherits this value from its parent rather than resolving again.
+	functions FunctionActivation
+
 	// vars holds map-based input variables directly on the frame to eliminate pool allocations.
 	vars map[string]any
 
@@ -123,6 +128,12 @@ func NewExecutionFrame(input any) (*ExecutionFrame, error) {
 		// empty frame, no backing scope needed
 	case Activation:
 		f.scope = v
+		fns, err := FindFunctionActivation(f.scope)
+		if err != nil {
+			frameStack.Put(f)
+			return nil, err
+		}
+		f.functions = fns
 	case map[string]any:
 		f.vars = v
 	default:
@@ -193,6 +204,9 @@ func (f *ExecutionFrame) Push(activation Activation) *ExecutionFrame {
 	child.ctx = f.ctx
 	child.costTracker = f.costTracker
 	child.scope = activation
+	// Scopes pushed during evaluation never supply late-bound functions, so the child inherits
+	// the bindings resolved for the evaluation rather than searching its own hierarchy.
+	child.functions = f.functions
 	return child
 }
 
@@ -204,6 +218,7 @@ func (f *ExecutionFrame) Pop() *ExecutionFrame {
 	parent := f.parent
 	f.scope = nil
 	f.parent = nil
+	f.functions = nil
 	f.ctx = nil
 	f.costTracker = nil
 	if f.vars != nil {
@@ -263,6 +278,15 @@ func (f *ExecutionFrame) Parent() Activation {
 		return f.scope.Parent()
 	}
 	return nil
+}
+
+// ResolveFunction implements the FunctionActivation interface using the bindings resolved when
+// the evaluation began, so the cost of a lookup does not depend on the number of enclosing scopes.
+func (f *ExecutionFrame) ResolveFunction(name string) (functions.LateBoundOp, bool) {
+	if f.functions == nil {
+		return nil, false
+	}
+	return f.functions.ResolveFunction(name)
 }
 
 // AsPartialActivation implements the PartialActivation interface by proxying to the internal scope or parent.

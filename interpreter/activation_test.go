@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"cel.dev/cel-go/common/functions"
 	"cel.dev/cel-go/common/types"
 	"cel.dev/cel-go/common/types/ref"
 )
@@ -201,4 +202,253 @@ func TestAsPartialActivation_NonPartialActivation(t *testing.T) {
 	if _, found := AsPartialActivation(standardAct); found {
 		t.Error("AsPartialActivation(standardAct) wanted false, got true")
 	}
+}
+
+// funcOf returns a late-bound implementation which reports the tag it was created with, so that
+// tests can identify which of several bindings was resolved.
+func funcOf(tag string) functions.LateBoundOp {
+	return func(overloadID string, args ...ref.Val) ref.Val {
+		return types.String(tag)
+	}
+}
+
+// resolveFunction performs the lookup the way an evaluation does: the activation which supplies
+// the bindings is located once, then consulted by name.
+func resolveFunction(t *testing.T, vars Activation, name string) (functions.LateBoundOp, bool) {
+	t.Helper()
+	fa, err := FindFunctionActivation(vars)
+	if err != nil {
+		t.Fatalf("FindFunctionActivation() failed: %v", err)
+	}
+	if fa == nil {
+		return nil, false
+	}
+	return fa.ResolveFunction(name)
+}
+
+func TestFunctionActivationComposition(t *testing.T) {
+	tests := []struct {
+		name string
+		// vars builds the activation under test.
+		vars func(t *testing.T) Activation
+		// wantFuncs maps a function name to the tag of the binding which should be resolved,
+		// where an empty tag indicates that the name should not resolve.
+		wantFuncs map[string]string
+		// wantVars maps a variable name to the value which should be resolved.
+		wantVars map[string]any
+		// wantPartial indicates whether the activation exposes unknown attribute patterns.
+		wantPartial bool
+	}{
+		{
+			name: "functions over a map input",
+			vars: func(t *testing.T) Activation {
+				return mustFunctionVars(t, map[string]any{"a": 1}, map[string]functions.LateBoundOp{"f": funcOf("f")})
+			},
+			wantFuncs: map[string]string{"f": "f", "g": ""},
+			wantVars:  map[string]any{"a": 1},
+		},
+		{
+			name: "functions over an activation input",
+			vars: func(t *testing.T) Activation {
+				base := mustActivation(t, map[string]any{"a": 1})
+				return mustFunctionVars(t, base, map[string]functions.LateBoundOp{"f": funcOf("f")})
+			},
+			wantFuncs: map[string]string{"f": "f"},
+			wantVars:  map[string]any{"a": 1},
+		},
+		{
+			name: "no functions supplied",
+			vars: func(t *testing.T) Activation {
+				return mustActivation(t, map[string]any{"a": 1})
+			},
+			wantFuncs: map[string]string{"f": ""},
+			wantVars:  map[string]any{"a": 1},
+		},
+		{
+			name: "empty activation",
+			vars: func(t *testing.T) Activation {
+				return EmptyActivation()
+			},
+			wantFuncs: map[string]string{"f": ""},
+		},
+		{
+			name: "partial over functions",
+			vars: func(t *testing.T) Activation {
+				fnVars := mustFunctionVars(t, map[string]any{"a": 1}, map[string]functions.LateBoundOp{"f": funcOf("f")})
+				return mustPartialVars(t, fnVars, NewAttributePattern("b"))
+			},
+			wantFuncs:   map[string]string{"f": "f"},
+			wantVars:    map[string]any{"a": 1},
+			wantPartial: true,
+		},
+		{
+			name: "functions over partial",
+			vars: func(t *testing.T) Activation {
+				partial := mustPartialVars(t, map[string]any{"a": 1}, NewAttributePattern("b"))
+				return mustFunctionVars(t, partial, map[string]functions.LateBoundOp{"f": funcOf("f")})
+			},
+			wantFuncs:   map[string]string{"f": "f"},
+			wantVars:    map[string]any{"a": 1},
+			wantPartial: true,
+		},
+		{
+			name: "functions in the hierarchical parent",
+			vars: func(t *testing.T) Activation {
+				parent := mustFunctionVars(t, map[string]any{"a": 1}, map[string]functions.LateBoundOp{"f": funcOf("parent")})
+				return NewHierarchicalActivation(parent, mustActivation(t, map[string]any{"b": 2}))
+			},
+			wantFuncs: map[string]string{"f": "parent"},
+			wantVars:  map[string]any{"a": 1, "b": 2},
+		},
+		{
+			name: "functions in the hierarchical child",
+			vars: func(t *testing.T) Activation {
+				child := mustFunctionVars(t, map[string]any{"b": 2}, map[string]functions.LateBoundOp{"f": funcOf("child")})
+				return NewHierarchicalActivation(mustActivation(t, map[string]any{"a": 1}), child)
+			},
+			wantFuncs: map[string]string{"f": "child"},
+			wantVars:  map[string]any{"a": 1, "b": 2},
+		},
+		{
+			name: "functions beneath a hierarchical activation",
+			vars: func(t *testing.T) Activation {
+				fnVars := mustFunctionVars(t, map[string]any{"a": 1}, map[string]functions.LateBoundOp{"g": funcOf("inner")})
+				return NewHierarchicalActivation(
+					mustActivation(t, map[string]any{"b": 2}),
+					mustPartialVars(t, fnVars, NewAttributePattern("c")))
+			},
+			wantFuncs:   map[string]string{"g": "inner", "f": ""},
+			wantVars:    map[string]any{"a": 1, "b": 2},
+			wantPartial: true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			vars := tc.vars(t)
+			for name, want := range tc.wantFuncs {
+				fn, found := resolveFunction(t, vars, name)
+				if want == "" {
+					if found {
+						t.Errorf("ResolveFunction(%q) found a binding, wanted none", name)
+					}
+					continue
+				}
+				if !found {
+					t.Fatalf("ResolveFunction(%q) not found, wanted %q", name, want)
+				}
+				if got := fn("overload_id"); got.Equal(types.String(want)) != types.True {
+					t.Errorf("ResolveFunction(%q) resolved %v, wanted %q", name, got, want)
+				}
+			}
+			for name, want := range tc.wantVars {
+				got, found := vars.ResolveName(name)
+				if !found {
+					t.Errorf("ResolveName(%q) not found, wanted %v", name, want)
+					continue
+				}
+				if got != want {
+					t.Errorf("ResolveName(%q) got %v, wanted %v", name, got, want)
+				}
+			}
+			if _, isPartial := AsPartialActivation(vars); isPartial != tc.wantPartial {
+				t.Errorf("AsPartialActivation() got %t, wanted %t", isPartial, tc.wantPartial)
+			}
+		})
+	}
+}
+
+// TestFunctionActivationNestingRejected covers hierarchies which supply late-bound functions from
+// more than one activation. Such a hierarchy has no obvious resolution order, so it is reported
+// rather than resolved by proximity.
+func TestFunctionActivationNestingRejected(t *testing.T) {
+	fnA := map[string]functions.LateBoundOp{"f": funcOf("a")}
+	fnB := map[string]functions.LateBoundOp{"f": funcOf("b")}
+
+	t.Run("function activation over a function activation", func(t *testing.T) {
+		inner := mustFunctionVars(t, map[string]any{"a": 1}, fnA)
+		if _, err := NewFunctionActivation(inner, fnB); err == nil {
+			t.Error("NewFunctionActivation() over an existing binding wanted error, got nil")
+		}
+	})
+	t.Run("function activation over a partial wrapping one", func(t *testing.T) {
+		inner := mustFunctionVars(t, map[string]any{"a": 1}, fnA)
+		partial := mustPartialVars(t, inner, NewAttributePattern("b"))
+		if _, err := NewFunctionActivation(partial, fnB); err == nil {
+			t.Error("NewFunctionActivation() over a wrapped binding wanted error, got nil")
+		}
+	})
+	t.Run("function activation over a hierarchy containing one", func(t *testing.T) {
+		inner := NewHierarchicalActivation(
+			mustActivation(t, map[string]any{"a": 1}),
+			mustFunctionVars(t, map[string]any{"b": 2}, fnA))
+		if _, err := NewFunctionActivation(inner, fnB); err == nil {
+			t.Error("NewFunctionActivation() over a hierarchy wanted error, got nil")
+		}
+	})
+	t.Run("both sides of a hierarchical activation", func(t *testing.T) {
+		vars := NewHierarchicalActivation(
+			mustFunctionVars(t, map[string]any{"a": 1}, fnA),
+			mustFunctionVars(t, map[string]any{"b": 2}, fnB))
+		if _, err := FindFunctionActivation(vars); err == nil {
+			t.Error("FindFunctionActivation() over two bindings wanted error, got nil")
+		}
+	})
+}
+
+func TestNewFunctionActivationErrors(t *testing.T) {
+	if _, err := NewFunctionActivation(nil, map[string]functions.LateBoundOp{"f": funcOf("f")}); err == nil {
+		t.Error("NewFunctionActivation(nil) wanted error, got nil")
+	}
+	if _, err := NewFunctionActivation(map[string]any{}, map[string]functions.LateBoundOp{"f": nil}); err == nil {
+		t.Error("NewFunctionActivation() with a nil binding wanted error, got nil")
+	}
+}
+
+func TestFunctionActivationBindingsAreCopied(t *testing.T) {
+	funcs := map[string]functions.LateBoundOp{"f": funcOf("original")}
+	vars, err := NewFunctionActivation(map[string]any{}, funcs)
+	if err != nil {
+		t.Fatalf("NewFunctionActivation() failed: %v", err)
+	}
+	// Mutating the input after construction must not affect the activation.
+	funcs["f"] = funcOf("mutated")
+	funcs["g"] = funcOf("added")
+
+	fn, found := vars.ResolveFunction("f")
+	if !found {
+		t.Fatal("ResolveFunction('f') not found")
+	}
+	if got := fn("overload_id"); got.Equal(types.String("original")) != types.True {
+		t.Errorf("ResolveFunction('f') resolved %v, wanted 'original'", got)
+	}
+	if _, found := vars.ResolveFunction("g"); found {
+		t.Error("ResolveFunction('g') found a binding added after construction")
+	}
+}
+
+func mustActivation(t *testing.T, vars map[string]any) Activation {
+	t.Helper()
+	act, err := NewActivation(vars)
+	if err != nil {
+		t.Fatalf("NewActivation() failed: %v", err)
+	}
+	return act
+}
+
+func mustFunctionVars(t *testing.T, vars any, funcs map[string]functions.LateBoundOp) FunctionActivation {
+	t.Helper()
+	act, err := NewFunctionActivation(vars, funcs)
+	if err != nil {
+		t.Fatalf("NewFunctionActivation() failed: %v", err)
+	}
+	return act
+}
+
+func mustPartialVars(t *testing.T, vars any, patterns ...*AttributePattern) PartialActivation {
+	t.Helper()
+	act, err := NewPartialActivation(vars, patterns...)
+	if err != nil {
+		t.Fatalf("NewPartialActivation() failed: %v", err)
+	}
+	return act
 }

@@ -947,3 +947,75 @@ func TestSyncSelect_ProtoInBind(t *testing.T) {
 		t.Fatalf("Eval() got %v (%T), wanted unknown", valBind, valBind)
 	}
 }
+
+// TestBindingsLateBoundFunctions verifies that late-bound function implementations remain
+// reachable from inside the scopes introduced by cel.bind and cel.@block.
+//
+// Both constructs push an activation which wraps, rather than extends, the one supplied to Eval.
+// The bindings are located once when the evaluation begins and carried on the frame, so these
+// scopes do not need to forward the lookup themselves.
+func TestBindingsLateBoundFunctions(t *testing.T) {
+	env, err := cel.NewEnv(
+		Bindings(),
+		cel.Variable("x", cel.IntType),
+		cel.Function("inc",
+			cel.Overload("inc_int", []*cel.Type{cel.IntType}, cel.IntType, cel.LateFunctionBinding()),
+		),
+	)
+	if err != nil {
+		t.Fatalf("cel.NewEnv() failed: %v", err)
+	}
+	tests := []struct {
+		name string
+		expr string
+		want ref.Val
+	}{
+		{
+			name: "call inside a bind body",
+			expr: "cel.bind(y, x + 1, inc(y))",
+			want: types.Int(3),
+		},
+		{
+			name: "call inside a bind initializer",
+			expr: "cel.bind(y, inc(x), y + 1)",
+			want: types.Int(3),
+		},
+		{
+			name: "nested binds",
+			expr: "cel.bind(y, inc(x), cel.bind(z, inc(y), inc(z)))",
+			want: types.Int(4),
+		},
+		{
+			name: "call inside a comprehension inside a bind",
+			expr: "cel.bind(y, [1, 2], y.map(i, inc(i)))",
+			want: types.DefaultTypeAdapter.NativeToValue([]int64{2, 3}),
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ast, iss := env.Compile(tc.expr)
+			if iss.Err() != nil {
+				t.Fatalf("Compile(%q) failed: %v", tc.expr, iss.Err())
+			}
+			prg, err := env.Program(ast)
+			if err != nil {
+				t.Fatalf("Program() failed: %v", err)
+			}
+			vars, err := cel.FunctionVars(map[string]any{"x": 1}, map[string]cel.LateBoundFunction{
+				"inc": func(overloadID string, args ...ref.Val) ref.Val {
+					return types.Int(args[0].(types.Int) + 1)
+				},
+			})
+			if err != nil {
+				t.Fatalf("cel.FunctionVars() failed: %v", err)
+			}
+			out, _, err := prg.Eval(vars)
+			if err != nil {
+				t.Fatalf("Eval() failed: %v", err)
+			}
+			if out.Equal(tc.want) != types.True {
+				t.Errorf("Eval() got %v, wanted %v", out, tc.want)
+			}
+		})
+	}
+}

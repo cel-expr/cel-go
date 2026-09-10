@@ -537,6 +537,11 @@ func Functions(funcs ...*functions.Overload) ProgramOption {
 // a Lib EnvOption, vars may shadow variables provided by previously added libraries.
 //
 // The vars value may either be an `cel.Activation` instance or a `map[string]any`.
+//
+// The vars value may supply late-bound function implementations, e.g. via FunctionVars, in which
+// case they apply to every evaluation of the program. Only one source of function bindings is
+// permitted, so an error is returned when Globals is applied more than once and more than one of
+// the activations supplies them.
 func Globals(vars any) ProgramOption {
 	return func(p *prog) (*prog, error) {
 		defaultVars, err := NewActivation(vars)
@@ -545,6 +550,9 @@ func Globals(vars any) ProgramOption {
 		}
 		if p.defaultVars != nil {
 			defaultVars = interpreter.NewHierarchicalActivation(p.defaultVars, defaultVars)
+		}
+		if _, err := interpreter.FindFunctionActivation(defaultVars); err != nil {
+			return nil, err
 		}
 		p.defaultVars = defaultVars
 		return p, nil

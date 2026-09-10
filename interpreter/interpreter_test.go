@@ -3063,3 +3063,146 @@ func (t *testLegacyInterpretable) ID() int64 {
 func (t *testLegacyInterpretable) Eval(vars Activation) ref.Val {
 	return types.IntOne
 }
+
+type parentActivationWrapper struct {
+	parent Activation
+}
+
+func (paw *parentActivationWrapper) ResolveName(name string) (any, bool) {
+	return paw.parent.ResolveName(name)
+}
+
+func (paw *parentActivationWrapper) Parent() Activation {
+	return paw.parent
+}
+
+func TestLateBoundInterpretable(t *testing.T) {
+	tests := []struct {
+		name    string
+		eval    *evalLateBoundFunc
+		funcs   map[string]functions.LateBoundOp
+		want    ref.Val
+		wantErr bool
+	}{
+		{
+			name: "unary",
+			eval: &evalLateBoundFunc{
+				id:       1,
+				function: "inc",
+				args: []InterpretableV2{
+					NewConstValue(2, types.Int(41)),
+				},
+			},
+			funcs: map[string]functions.LateBoundOp{
+				"inc": func(overloadID string, args ...ref.Val) ref.Val {
+					return types.Int(args[0].(types.Int) + 1)
+				},
+			},
+			want: types.Int(42),
+		},
+		{
+			name: "binary",
+			eval: &evalLateBoundFunc{
+				id:       3,
+				function: "concat",
+				args: []InterpretableV2{
+					NewConstValue(4, types.String("hello ")),
+					NewConstValue(5, types.String("world")),
+				},
+			},
+			funcs: map[string]functions.LateBoundOp{
+				"concat": func(overloadID string, args ...ref.Val) ref.Val {
+					return types.String(string(args[0].(types.String)) + string(args[1].(types.String)))
+				},
+			},
+			want: types.String("hello world"),
+		},
+		{
+			name: "varargs",
+			eval: &evalLateBoundFunc{
+				id:       6,
+				function: "join3",
+				args: []InterpretableV2{
+					NewConstValue(7, types.String("a")),
+					NewConstValue(8, types.String("b")),
+					NewConstValue(9, types.String("c")),
+				},
+			},
+			funcs: map[string]functions.LateBoundOp{
+				"join3": func(overloadID string, args ...ref.Val) ref.Val {
+					return types.String(string(args[0].(types.String)) + "-" + string(args[1].(types.String)) + "-" + string(args[2].(types.String)))
+				},
+			},
+			want: types.String("a-b-c"),
+		},
+		{
+			name: "zero arity",
+			eval: &evalLateBoundFunc{
+				id:       10,
+				function: "pi",
+			},
+			funcs: map[string]functions.LateBoundOp{
+				"pi": func(overloadID string, args ...ref.Val) ref.Val {
+					return types.Double(3.14)
+				},
+			},
+			want: types.Double(3.14),
+		},
+		{
+			name: "missing binding",
+			eval: &evalLateBoundFunc{
+				id:       1,
+				function: "inc",
+				args: []InterpretableV2{
+					NewConstValue(2, types.Int(41)),
+				},
+			},
+			wantErr: true,
+		},
+		{
+			// Receiver-style dispatch on the operand is not a fallback for a missing binding,
+			// even when the operand implements traits.Receiver for the function name.
+			name: "no receiver-style fallback",
+			eval: &evalLateBoundFunc{
+				id:       11,
+				function: "contains",
+				overload: "contains_string",
+				args: []InterpretableV2{
+					NewConstValue(12, types.String("hello world")),
+					NewConstValue(13, types.String("world")),
+				},
+			},
+			wantErr: true,
+		},
+		{
+			// Variables and functions occupy separate namespaces within the activation.
+			name: "variable of the same name is not a binding",
+			eval: &evalLateBoundFunc{
+				id:       14,
+				function: "inc",
+				args: []InterpretableV2{
+					NewConstValue(15, types.Int(41)),
+				},
+			},
+			wantErr: true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			vars, err := NewFunctionActivation(map[string]any{"inc": types.IntOne}, tc.funcs)
+			if err != nil {
+				t.Fatalf("NewFunctionActivation() failed: %v", err)
+			}
+			res := tc.eval.Eval(vars)
+			if tc.wantErr {
+				if !types.IsError(res) {
+					t.Fatalf("Eval() = %v, wanted error", res)
+				}
+				return
+			}
+			if res.Equal(tc.want) != types.True {
+				t.Errorf("Eval() = %v, wanted %v", res, tc.want)
+			}
+		})
+	}
+}

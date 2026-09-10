@@ -633,7 +633,7 @@ func (un *evalUnary) Exec(frame *ExecutionFrame) ref.Val {
 	var res ref.Val
 	// If the implementation is bound and the argument value has the right traits required to
 	// invoke it, then call the implementation.
-	if un.impl != nil && (un.trait == 0 || argVal.Type().HasTrait(un.trait) || (!strict && types.IsUnknownOrError(argVal))) {
+	if un.impl != nil && matchOperandTrait(un.trait, strict, argVal) {
 		res = labelErrNode(un.id, un.impl(argVal))
 	} else if argVal.Type().HasTrait(traits.ReceiverType) {
 		// Otherwise, if the argument is a ReceiverType attempt to invoke the receiver method on the
@@ -702,7 +702,7 @@ func (bin *evalBinary) Exec(frame *ExecutionFrame) ref.Val {
 	var res ref.Val
 	// If the implementation is bound and the argument value has the right traits required to
 	// invoke it, then call the implementation.
-	if bin.impl != nil && (bin.trait == 0 || lVal.Type().HasTrait(bin.trait) || (!strict && types.IsUnknownOrError(lVal))) {
+	if bin.impl != nil && matchOperandTrait(bin.trait, strict, lVal) {
 		res = labelErrNode(bin.id, bin.impl(lVal, rVal))
 	} else if lVal.Type().HasTrait(traits.ReceiverType) {
 		// Otherwise, if the argument is a ReceiverType attempt to invoke the receiver method on the
@@ -800,7 +800,7 @@ func (fn *evalVarArgs) Exec(frame *ExecutionFrame) ref.Val {
 	// If the implementation is bound and the argument value has the right traits required to
 	// invoke it, then call the implementation.
 	arg0 := argVals[0]
-	if fn.impl != nil && (fn.trait == 0 || arg0.Type().HasTrait(fn.trait) || (!strict && types.IsUnknownOrError(arg0))) {
+	if fn.impl != nil && matchOperandTrait(fn.trait, strict, arg0) {
 		res = labelErrNode(fn.id, fn.impl(argVals...))
 	} else if arg0.Type().HasTrait(traits.ReceiverType) {
 		// Otherwise, if the argument is a ReceiverType attempt to invoke the receiver method on the
@@ -831,6 +831,124 @@ func (fn *evalVarArgs) OverloadID() string {
 // Args returns the normalized arguments to the function overload.
 func (fn *evalVarArgs) Args() []InterpretableV2 {
 	return fn.args
+}
+
+// evalLateBoundFunc represents a function call where the function implementation is resolved from
+// the Activation at evaluation time.
+type evalLateBoundFunc struct {
+	id        int64
+	function  string
+	overload  string
+	args      []InterpretableV2
+	trait     int
+	nonStrict bool
+	member    bool
+	dispatch  functions.LateBoundDispatcher
+}
+
+// ID implements the Interpretable interface method.
+func (fn *evalLateBoundFunc) ID() int64 {
+	return fn.id
+}
+
+// Function implements the InterpretableCall interface method.
+func (fn *evalLateBoundFunc) Function() string {
+	return fn.function
+}
+
+// OverloadID implements the InterpretableCall interface method.
+func (fn *evalLateBoundFunc) OverloadID() string {
+	return fn.overload
+}
+
+// Args returns the argument Interpretables for the function call.
+func (fn *evalLateBoundFunc) Args() []InterpretableV2 {
+	return fn.args
+}
+
+// Eval implements the Interpretable interface method.
+func (fn *evalLateBoundFunc) Eval(vars Activation) ref.Val {
+	return EvalActivation(vars, fn.Exec)
+}
+
+// Exec implements the InterpretableV2 interface method.
+func (fn *evalLateBoundFunc) Exec(frame *ExecutionFrame) ref.Val {
+	argVals := make([]ref.Val, len(fn.args))
+	strict := !fn.nonStrict
+	var unk *types.Unknown
+	for i, arg := range fn.args {
+		argVals[i] = arg.Exec(frame)
+		if strict {
+			if types.IsError(argVals[i]) {
+				return argVals[i]
+			}
+			unk, _ = types.MaybeMergeUnknowns(argVals[i], unk)
+		}
+	}
+	if strict && unk != nil {
+		trackCostEvalVarArgs(frame, fn.id, fn, argVals, unk)
+		return unk
+	}
+	var res ref.Val
+	// A late-bound function is only invoked when the runtime arguments agree with a declared
+	// overload and the activation supplies a compatible implementation. Unlike other call
+	// types, there is no fallback to receiver-style dispatch on the operand: the function
+	// declaration promised a binding supplied at evaluation time, so a missing or mismatched
+	// binding is unambiguously an error.
+	if lateFn, found := fn.resolve(frame, argVals, strict); found {
+		res = types.LabelErrNode(fn.id, lateFn(argVals...))
+	} else {
+		res = types.NewErrWithNodeID(fn.id, "no such overload: %s", fn.function)
+	}
+	switch len(argVals) {
+	case 0:
+		trackCostEvalZeroArity(frame, fn.id, fn, res)
+	case 1:
+		trackCostEvalUnary(frame, fn.id, fn, argVals[0], res)
+	case 2:
+		trackCostEvalBinary(frame, fn.id, fn, argVals[0], argVals[1], res)
+	default:
+		trackCostEvalVarArgs(frame, fn.id, fn, argVals, res)
+	}
+	return res
+}
+
+// resolve determines which declared overload the runtime arguments satisfy and resolves its
+// implementation from the activation.
+func (fn *evalLateBoundFunc) resolve(frame *ExecutionFrame, args []ref.Val, strict bool) (functions.FunctionOp, bool) {
+	overloadID, matched := fn.matchOverload(args, strict)
+	if !matched {
+		return nil, false
+	}
+	impl, found := frame.ResolveFunction(fn.function)
+	if !found {
+		return nil, false
+	}
+	return func(args ...ref.Val) ref.Val { return impl(overloadID, args...) }, true
+}
+
+// matchOverload reports the id of the declared overload which matches the runtime arguments.
+//
+// Plans which were not created from a function declaration have no signature to check against,
+// in which case the call falls back to the operand trait recorded for the call site.
+func (fn *evalLateBoundFunc) matchOverload(args []ref.Val, strict bool) (string, bool) {
+	if fn.dispatch != nil {
+		return fn.dispatch(fn.member, args...)
+	}
+	if len(args) == 0 || matchOperandTrait(fn.trait, strict, args[0]) {
+		return fn.overload, true
+	}
+	return "", false
+}
+
+// matchOperandTrait returns true if the operand satisfies the trait required by the function
+// implementation, or if the implementation does not require a trait.
+//
+// Non-strict functions are given the chance to handle unknown and error operands themselves.
+func matchOperandTrait(trait int, strict bool, operand ref.Val) bool {
+	return trait == 0 ||
+		(!strict && types.IsUnknownOrError(operand)) ||
+		operand.Type().HasTrait(trait)
 }
 
 // evalList evaluates a list construction expression.

@@ -2596,7 +2596,7 @@ func TestContextProtoJSONFieldNames(t *testing.T) {
 }
 
 func TestRegexOptimizer(t *testing.T) {
-	var stringTests = []struct {
+	stringTests := []struct {
 		expr          string
 		optimizeRegex bool
 		progErr       string
@@ -4303,13 +4303,13 @@ func TestOptionalMapCost(t *testing.T) {
 	)
 
 	tests := []struct {
-		name       string
-		expr       string
-		in         map[string]any
-		v3Est      cost.CostEstimate
-		v3Actual   uint64
-		v4Est      cost.CostEstimate
-		v4Actual   uint64
+		name     string
+		expr     string
+		in       map[string]any
+		v3Est    cost.CostEstimate
+		v3Actual uint64
+		v4Est    cost.CostEstimate
+		v4Actual uint64
 	}{
 		{
 			name:     "string equality optMap",
@@ -5499,4 +5499,911 @@ func TestCostModel(t *testing.T) {
 	if actualCost == 0 {
 		t.Errorf("expected non-zero actual cost, got %d", actualCost)
 	}
+}
+func TestLateBoundFunctions(t *testing.T) {
+	env, err := NewEnv(
+		Variable("x", IntType),
+		Variable("y", IntType),
+		Function("inc",
+			Overload("inc_int", []*Type{IntType}, IntType, LateFunctionBinding()),
+		),
+		Function("add",
+			Overload("add_int_int", []*Type{IntType, IntType}, IntType, LateFunctionBinding()),
+		),
+		Function("sum",
+			Overload("sum_int_int_int", []*Type{IntType, IntType, IntType}, IntType, LateFunctionBinding()),
+		),
+		Function("now_unix",
+			Overload("now_unix_zero", []*Type{}, IntType, LateFunctionBinding()),
+		),
+		Function("tag",
+			MemberOverload("tag_int_string", []*Type{IntType, StringType}, IntType, LateFunctionBinding()),
+		),
+	)
+	if err != nil {
+		t.Fatalf("NewEnv() failed: %v", err)
+	}
+
+	tests := []struct {
+		name    string
+		expr    string
+		vars    map[string]any
+		funcs   map[string]LateBoundFunction
+		want    ref.Val
+		wantErr string
+	}{
+		{
+			name: "unary call",
+			expr: "inc(x)",
+			vars: map[string]any{"x": 5},
+			funcs: map[string]LateBoundFunction{
+				"inc": func(overloadID string, args ...ref.Val) ref.Val {
+					return types.Int(args[0].(types.Int) + 1)
+				},
+			},
+			want: types.Int(6),
+		},
+		{
+			name:    "unary missing from activation",
+			expr:    "inc(x)",
+			vars:    map[string]any{"x": 5},
+			wantErr: "no such overload: inc",
+		},
+		{
+			name: "unary shadowed by a variable of the same name",
+			expr: "inc(x)",
+			vars: map[string]any{"x": 5, "inc": "not a function"},
+			funcs: map[string]LateBoundFunction{
+				"inc": func(overloadID string, args ...ref.Val) ref.Val {
+					return types.Int(args[0].(types.Int) + 1)
+				},
+			},
+			want: types.Int(6),
+		},
+		{
+			name: "binary call",
+			expr: "add(x, y)",
+			vars: map[string]any{"x": 3, "y": 4},
+			funcs: map[string]LateBoundFunction{
+				"add": func(overloadID string, args ...ref.Val) ref.Val {
+					return types.Int(args[0].(types.Int) + args[1].(types.Int))
+				},
+			},
+			want: types.Int(7),
+		},
+		{
+			name: "binary member call",
+			expr: "x.tag('sample')",
+			vars: map[string]any{"x": 42},
+			funcs: map[string]LateBoundFunction{
+				"tag": func(overloadID string, args ...ref.Val) ref.Val {
+					return args[0]
+				},
+			},
+			want: types.Int(42),
+		},
+		{
+			name:    "binary missing from activation",
+			expr:    "add(x, y)",
+			vars:    map[string]any{"x": 3, "y": 4},
+			wantErr: "no such overload: add",
+		},
+		{
+			name: "varargs call",
+			expr: "sum(x, y, 10)",
+			vars: map[string]any{"x": 1, "y": 2},
+			funcs: map[string]LateBoundFunction{
+				"sum": func(overloadID string, args ...ref.Val) ref.Val {
+					var total int64
+					for _, arg := range args {
+						total += int64(arg.(types.Int))
+					}
+					return types.Int(total)
+				},
+			},
+			want: types.Int(13),
+		},
+		{
+			name:    "varargs missing from activation",
+			expr:    "sum(x, y, 10)",
+			vars:    map[string]any{"x": 1, "y": 2},
+			wantErr: "no such overload: sum",
+		},
+		{
+			name: "zero arity call",
+			expr: "now_unix()",
+			vars: map[string]any{},
+			funcs: map[string]LateBoundFunction{
+				"now_unix": func(overloadID string, args ...ref.Val) ref.Val {
+					return types.Int(1234567890)
+				},
+			},
+			want: types.Int(1234567890),
+		},
+		{
+			name:    "zero arity missing from activation",
+			expr:    "now_unix()",
+			vars:    map[string]any{},
+			wantErr: "no such overload: now_unix",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ast, iss := env.Compile(tc.expr)
+			if iss.Err() != nil {
+				t.Fatalf("Compile(%q) failed: %v", tc.expr, iss.Err())
+			}
+			prg, err := env.Program(ast)
+			if err != nil {
+				t.Fatalf("Program() failed: %v", err)
+			}
+			vars, err := FunctionVars(tc.vars, tc.funcs)
+			if err != nil {
+				t.Fatalf("FunctionVars() failed: %v", err)
+			}
+			out, _, err := prg.Eval(vars)
+			if tc.wantErr != "" {
+				if err == nil {
+					t.Fatalf("Eval() got %v, wanted error %q", out, tc.wantErr)
+				}
+				if !strings.Contains(err.Error(), tc.wantErr) {
+					t.Errorf("Eval() error = %v, wanted %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Eval() failed: %v", err)
+			}
+			if out.Equal(tc.want) != types.True {
+				t.Errorf("Eval() got %v, wanted %v", out, tc.want)
+			}
+		})
+	}
+}
+
+func TestLateBoundTrace(t *testing.T) {
+	type traceEntry struct {
+		tag string
+		val any
+	}
+
+	tType := TypeParamType("T")
+	env, err := NewEnv(
+		Variable("a", IntType),
+		Variable("b", IntType),
+		Function("trace",
+			Overload("trace_val", []*Type{tType}, tType, LateFunctionBinding()),
+			Overload("trace_val_tag", []*Type{tType, StringType}, tType, LateFunctionBinding()),
+			MemberOverload("trace_val_tag_member", []*Type{tType, StringType}, tType, LateFunctionBinding()),
+		),
+	)
+	if err != nil {
+		t.Fatalf("NewEnv() failed: %v", err)
+	}
+
+	ast, iss := env.Compile(`trace(a, "input_a") + (b * 2).trace("calc_b") == trace(17, "expected")`)
+	if iss.Err() != nil {
+		t.Fatalf("Compile() failed: %v", iss.Err())
+	}
+
+	prg, err := env.Program(ast)
+	if err != nil {
+		t.Fatalf("Program() failed: %v", err)
+	}
+
+	var traceLogs []traceEntry
+	traceFn := func(overloadID string, args ...ref.Val) ref.Val {
+		val := args[0]
+		tag := ""
+		if len(args) > 1 {
+			tag = string(args[1].(types.String))
+		}
+		traceLogs = append(traceLogs, traceEntry{tag: tag, val: val.Value()})
+		// Return identity value of the input expression result
+		return val
+	}
+
+	act, err := FunctionVars(
+		map[string]any{"a": 5, "b": 6},
+		map[string]LateBoundFunction{"trace": traceFn})
+	if err != nil {
+		t.Fatalf("FunctionVars() failed: %v", err)
+	}
+	out, _, err := prg.Eval(act)
+	if err != nil {
+		t.Fatalf("Eval() failed: %v", err)
+	}
+	if out != types.True {
+		t.Errorf("Eval() got %v, wanted true", out)
+	}
+
+	expectedLogs := []traceEntry{
+		{tag: "input_a", val: int64(5)},
+		{tag: "calc_b", val: int64(12)},
+		{tag: "expected", val: int64(17)},
+	}
+	if !reflect.DeepEqual(traceLogs, expectedLogs) {
+		t.Errorf("traceLogs = %v, wanted %v", traceLogs, expectedLogs)
+	}
+}
+
+func TestLateBoundFunctionSignatureGuard(t *testing.T) {
+	env, err := NewEnv(
+		Variable("dyn_val", DynType),
+		Function("inc",
+			Overload("inc_int", []*Type{IntType}, IntType, LateFunctionBinding()),
+		),
+	)
+	if err != nil {
+		t.Fatalf("NewEnv() failed: %v", err)
+	}
+	tests := []struct {
+		name    string
+		expr    string
+		parsed  bool
+		vars    map[string]any
+		want    ref.Val
+		wantErr string
+	}{
+		{
+			name: "declared signature satisfied",
+			expr: "inc(1)",
+			want: types.Int(2),
+		},
+		{
+			name: "dyn argument matching the declaration",
+			expr: "inc(dyn_val)",
+			vars: map[string]any{"dyn_val": 1},
+			want: types.Int(2),
+		},
+		{
+			name:    "dyn argument violating the declaration",
+			expr:    "inc(dyn_val)",
+			vars:    map[string]any{"dyn_val": "not-an-int"},
+			wantErr: "no such overload: inc",
+		},
+		{
+			name:    "unchecked argument violating the declaration",
+			expr:    "inc('not-an-int')",
+			parsed:  true,
+			wantErr: "no such overload: inc",
+		},
+		{
+			name:    "unchecked arity mismatch",
+			expr:    "inc(1, 2)",
+			parsed:  true,
+			wantErr: "no such overload: inc",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var ast *Ast
+			var iss *Issues
+			if tc.parsed {
+				ast, iss = env.Parse(tc.expr)
+			} else {
+				ast, iss = env.Compile(tc.expr)
+			}
+			if iss.Err() != nil {
+				t.Fatalf("Compile(%q) failed: %v", tc.expr, iss.Err())
+			}
+			prg, err := env.Program(ast)
+			if err != nil {
+				t.Fatalf("Program() failed: %v", err)
+			}
+			act, err := FunctionVars(tc.vars, map[string]LateBoundFunction{
+				// A binding which would panic if it were invoked with the wrong argument type,
+				// proving the guard runs before the implementation.
+				"inc": func(overloadID string, args ...ref.Val) ref.Val {
+					return types.Int(args[0].(types.Int) + 1)
+				},
+			})
+			if err != nil {
+				t.Fatalf("FunctionVars() failed: %v", err)
+			}
+			out, _, err := prg.Eval(act)
+			if tc.wantErr != "" {
+				if err == nil {
+					t.Fatalf("Eval() got %v, wanted error %q", out, tc.wantErr)
+				}
+				if !strings.Contains(err.Error(), tc.wantErr) {
+					t.Errorf("Eval() error = %v, wanted %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Eval() failed: %v", err)
+			}
+			if out.Equal(tc.want) != types.True {
+				t.Errorf("Eval() got %v, wanted %v", out, tc.want)
+			}
+		})
+	}
+}
+
+func TestLateBoundFunctionOverloadID(t *testing.T) {
+	env, err := NewEnv(
+		Function("describe",
+			Overload("describe_int", []*Type{IntType}, StringType, LateFunctionBinding()),
+			Overload("describe_string", []*Type{StringType}, StringType, LateFunctionBinding()),
+			MemberOverload("describe_int_member", []*Type{IntType}, StringType, LateFunctionBinding()),
+		),
+	)
+	if err != nil {
+		t.Fatalf("NewEnv() failed: %v", err)
+	}
+	tests := []struct {
+		name   string
+		expr   string
+		parsed bool
+		want   string
+	}{
+		{name: "global int overload", expr: "describe(1)", want: "describe_int"},
+		{name: "global string overload", expr: "describe('a')", want: "describe_string"},
+		{name: "member overload", expr: "(1).describe()", want: "describe_int_member"},
+		// Without a checked AST the overload is resolved from the runtime argument types and
+		// the receiver style of the call.
+		{name: "unchecked global int overload", expr: "describe(1)", parsed: true, want: "describe_int"},
+		{name: "unchecked global string overload", expr: "describe('a')", parsed: true, want: "describe_string"},
+		{name: "unchecked member overload", expr: "(1).describe()", parsed: true, want: "describe_int_member"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var ast *Ast
+			var iss *Issues
+			if tc.parsed {
+				ast, iss = env.Parse(tc.expr)
+			} else {
+				ast, iss = env.Compile(tc.expr)
+			}
+			if iss.Err() != nil {
+				t.Fatalf("Compile(%q) failed: %v", tc.expr, iss.Err())
+			}
+			prg, err := env.Program(ast)
+			if err != nil {
+				t.Fatalf("Program() failed: %v", err)
+			}
+			act, err := FunctionVars(NoVars(), map[string]LateBoundFunction{
+				"describe": func(overloadID string, args ...ref.Val) ref.Val {
+					return types.String(overloadID)
+				},
+			})
+			if err != nil {
+				t.Fatalf("FunctionVars() failed: %v", err)
+			}
+			out, _, err := prg.Eval(act)
+			if err != nil {
+				t.Fatalf("Eval() failed: %v", err)
+			}
+			if out.Equal(types.String(tc.want)) != types.True {
+				t.Errorf("Eval() got %v, wanted %v", out, tc.want)
+			}
+		})
+	}
+}
+
+func TestLateBoundFunctionVariableNamespace(t *testing.T) {
+	// Late bindings are supplied in a namespace which is separate from variables, so the same
+	// qualified name may refer to both a variable and a late-bound function.
+	env, err := NewEnv(
+		Variable("inc", IntType),
+		Function("inc", Overload("inc_int", []*Type{IntType}, IntType, LateFunctionBinding())),
+	)
+	if err != nil {
+		t.Fatalf("NewEnv() failed: %v", err)
+	}
+	ast, iss := env.Compile("inc(inc)")
+	if iss.Err() != nil {
+		t.Fatalf("Compile() failed: %v", iss.Err())
+	}
+	prg, err := env.Program(ast)
+	if err != nil {
+		t.Fatalf("Program() failed: %v", err)
+	}
+	act, err := FunctionVars(map[string]any{"inc": 41}, map[string]LateBoundFunction{
+		"inc": func(overloadID string, args ...ref.Val) ref.Val {
+			return types.Int(args[0].(types.Int) + 1)
+		},
+	})
+	if err != nil {
+		t.Fatalf("FunctionVars() failed: %v", err)
+	}
+	out, _, err := prg.Eval(act)
+	if err != nil {
+		t.Fatalf("Eval() failed: %v", err)
+	}
+	if out.Equal(types.Int(42)) != types.True {
+		t.Errorf("Eval() got %v, wanted 42", out)
+	}
+}
+
+func TestLateBoundFunctionCost(t *testing.T) {
+	env, err := NewEnv(
+		Variable("x", IntType),
+		Function("rpc",
+			Overload("rpc_int", []*Type{IntType}, IntType, LateFunctionBinding()),
+		),
+	)
+	if err != nil {
+		t.Fatalf("NewEnv() failed: %v", err)
+	}
+	ast, iss := env.Compile("rpc(x)")
+	if iss.Err() != nil {
+		t.Fatalf("Compile() failed: %v", iss.Err())
+	}
+
+	// Without a published estimate a late-bound call is charged the standard default for a
+	// function call, since nothing about the implementation is known at estimation time.
+	est, err := env.EstimateCost(ast, testCostEstimator{hints: map[string]uint64{}})
+	if err != nil {
+		t.Fatalf("EstimateCost() failed: %v", err)
+	}
+	if est.Max != 2 { // 1 for the call, 1 for resolving 'x'
+		t.Errorf("EstimateCost() got max %d, wanted 2", est.Max)
+	}
+
+	// An estimate may be attached to the overload by id, which is how a caller declares the cost
+	// of the implementations it intends to bind.
+	est, err = env.EstimateCost(ast, testCostEstimator{hints: map[string]uint64{}},
+		cost.OverloadCostEstimate("rpc_int", func(estimator cost.Estimator, target *cost.AstNode, args []cost.AstNode) *cost.CallEstimate {
+			return &cost.CallEstimate{CostEstimate: cost.FixedCostEstimate(42)}
+		}))
+	if err != nil {
+		t.Fatalf("EstimateCost() failed: %v", err)
+	}
+	if est.Max != 43 { // 42 for the call, 1 for resolving 'x'
+		t.Errorf("EstimateCost() got max %d, wanted 43", est.Max)
+	}
+
+	// Runtime cost tracking can likewise be attached by overload id.
+	prg, err := env.Program(ast, CostTracking(nil),
+		CostTrackerOptions(cost.OverloadTracker("rpc_int", func(args []ref.Val, result ref.Val) *uint64 {
+			trackedCost := uint64(99)
+			return &trackedCost
+		})))
+	if err != nil {
+		t.Fatalf("Program() failed: %v", err)
+	}
+	act, err := FunctionVars(map[string]any{"x": 1}, map[string]LateBoundFunction{
+		"rpc": func(overloadID string, args ...ref.Val) ref.Val { return args[0] },
+	})
+	if err != nil {
+		t.Fatalf("FunctionVars() failed: %v", err)
+	}
+	_, det, err := prg.Eval(act)
+	if err != nil {
+		t.Fatalf("Eval() failed: %v", err)
+	}
+	if *det.ActualCost() != 100 { // 99 for the call, 1 for resolving 'x'
+		t.Errorf("ActualCost() got %d, wanted 100", *det.ActualCost())
+	}
+}
+
+func TestLateBoundFunctionNonStrict(t *testing.T) {
+	env, err := NewEnv(
+		Variable("x", IntType),
+		Function("observe",
+			Overload("observe_int", []*Type{IntType}, StringType,
+				LateFunctionBinding(), OverloadIsNonStrict()),
+		),
+	)
+	if err != nil {
+		t.Fatalf("NewEnv() failed: %v", err)
+	}
+	ast, iss := env.Compile("observe(x)")
+	if iss.Err() != nil {
+		t.Fatalf("Compile() failed: %v", iss.Err())
+	}
+	prg, err := env.Program(ast, EvalOptions(OptPartialEval))
+	if err != nil {
+		t.Fatalf("Program() failed: %v", err)
+	}
+	// A non-strict overload accepts unknown arguments, so the signature check must not reject
+	// an operand which is unknown rather than the declared type.
+	sawUnknown := false
+	partial, err := PartialVars(map[string]any{}, AttributePattern("x"))
+	if err != nil {
+		t.Fatalf("PartialVars() failed: %v", err)
+	}
+	act, err := FunctionVars(partial, map[string]LateBoundFunction{
+		"observe": func(overloadID string, args ...ref.Val) ref.Val {
+			sawUnknown = types.IsUnknown(args[0])
+			return types.String("observed")
+		},
+	})
+	if err != nil {
+		t.Fatalf("FunctionVars() failed: %v", err)
+	}
+	out, _, err := prg.Eval(act)
+	if err != nil {
+		t.Fatalf("Eval() failed: %v", err)
+	}
+	if !sawUnknown {
+		t.Error("non-strict late binding was not invoked with the unknown argument")
+	}
+	if out.Equal(types.String("observed")) != types.True {
+		t.Errorf("Eval() got %v, wanted 'observed'", out)
+	}
+}
+
+// lateBoundComprehensionEnv declares the late-bound functions exercised by the comprehension
+// tests. Comprehensions install a nested scope (a folder) on top of the caller's activation, so
+// these cases verify that function resolution reaches through the comprehension scope, through
+// the hierarchical activation it is pushed onto, and into the user-supplied bindings.
+func lateBoundComprehensionEnv(t *testing.T) *Env {
+	t.Helper()
+	env, err := NewEnv(
+		Variable("x", IntType),
+		Function("inc",
+			Overload("inc_int", []*Type{IntType}, IntType, LateFunctionBinding()),
+		),
+	)
+	if err != nil {
+		t.Fatalf("NewEnv() failed: %v", err)
+	}
+	return env
+}
+
+func lateBoundInc(overloadID string, args ...ref.Val) ref.Val {
+	return types.Int(args[0].(types.Int) + 1)
+}
+
+func TestLateBoundFunctionComprehensions(t *testing.T) {
+	env := lateBoundComprehensionEnv(t)
+	incFuncs := map[string]LateBoundFunction{"inc": lateBoundInc}
+
+	tests := []struct {
+		name    string
+		expr    string
+		vars    map[string]any
+		funcs   map[string]LateBoundFunction
+		want    ref.Val
+		wantErr string
+	}{
+		{
+			name:  "map over a list literal",
+			expr:  "[1, 2, 3].map(i, inc(i))",
+			vars:  map[string]any{},
+			funcs: incFuncs,
+			want:  types.DefaultTypeAdapter.NativeToValue([]int64{2, 3, 4}),
+		},
+		{
+			name:  "map referencing a variable from the outer scope",
+			expr:  "[1, 2].map(i, inc(i) + x)",
+			vars:  map[string]any{"x": 10},
+			funcs: incFuncs,
+			want:  types.DefaultTypeAdapter.NativeToValue([]int64{12, 13}),
+		},
+		{
+			name:  "filter",
+			expr:  "[1, 2, 3].filter(i, inc(i) > 2)",
+			vars:  map[string]any{},
+			funcs: incFuncs,
+			want:  types.DefaultTypeAdapter.NativeToValue([]int64{2, 3}),
+		},
+		{
+			name:  "exists short circuits",
+			expr:  "[1, 2, 3].exists(i, inc(i) == 2)",
+			vars:  map[string]any{},
+			funcs: incFuncs,
+			want:  types.True,
+		},
+		{
+			name:  "all",
+			expr:  "[1, 2, 3].all(i, inc(i) > i)",
+			vars:  map[string]any{},
+			funcs: incFuncs,
+			want:  types.True,
+		},
+		{
+			name:  "nested comprehension",
+			expr:  "[[1], [2]].map(l, l.map(i, inc(i)))",
+			vars:  map[string]any{},
+			funcs: incFuncs,
+			want:  types.DefaultTypeAdapter.NativeToValue([][]int64{{2}, {3}}),
+		},
+		{
+			name:  "deeply nested comprehension",
+			expr:  "[[[[1]]]].map(a, a.map(b, b.map(c, c.map(i, inc(i)))))",
+			vars:  map[string]any{},
+			funcs: incFuncs,
+			want:  types.DefaultTypeAdapter.NativeToValue([][][][]int64{{{{2}}}}),
+		},
+		{
+			// Map key iteration order is not deterministic, so the assertion must not depend on
+			// the order in which the late-bound function is applied.
+			name:  "comprehension over map keys",
+			expr:  "{'a': 1, 'b': 2}.all(k, inc({'a': 1, 'b': 2}[k]) > 1)",
+			vars:  map[string]any{},
+			funcs: incFuncs,
+			want:  types.True,
+		},
+		{
+			name:  "iteration variable shadows the function name",
+			expr:  "[1, 2].map(inc, inc(inc))",
+			vars:  map[string]any{},
+			funcs: incFuncs,
+			want:  types.DefaultTypeAdapter.NativeToValue([]int64{2, 3}),
+		},
+		{
+			name:    "missing binding inside a comprehension",
+			expr:    "[1, 2, 3].map(i, inc(i))",
+			vars:    map[string]any{},
+			wantErr: "no such overload: inc",
+		},
+		{
+			// A miss must terminate and report the function name even though each comprehension
+			// scope points back at its enclosing frame. See
+			// TestLateBoundFunctionResolverTraversal for the bound on how many scopes are visited.
+			name:    "missing binding inside a deeply nested comprehension",
+			expr:    "[[[[1]]]].map(a, a.map(b, b.map(c, c.map(i, inc(i)))))",
+			vars:    map[string]any{},
+			wantErr: "no such overload: inc",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ast, iss := env.Compile(tc.expr)
+			if iss.Err() != nil {
+				t.Fatalf("Compile(%q) failed: %v", tc.expr, iss.Err())
+			}
+			prg, err := env.Program(ast)
+			if err != nil {
+				t.Fatalf("Program() failed: %v", err)
+			}
+			vars, err := FunctionVars(tc.vars, tc.funcs)
+			if err != nil {
+				t.Fatalf("FunctionVars() failed: %v", err)
+			}
+			out, _, err := prg.Eval(vars)
+			if tc.wantErr != "" {
+				if err == nil {
+					t.Fatalf("Eval() got %v, wanted error %q", out, tc.wantErr)
+				}
+				if !strings.Contains(err.Error(), tc.wantErr) {
+					t.Errorf("Eval() error = %v, wanted %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Eval() failed: %v", err)
+			}
+			if out.Equal(tc.want) != types.True {
+				t.Errorf("Eval() got %v, wanted %v", out, tc.want)
+			}
+		})
+	}
+}
+
+func TestLateBoundFunctionComprehensionActivations(t *testing.T) {
+	env := lateBoundComprehensionEnv(t)
+	incFuncs := map[string]LateBoundFunction{"inc": lateBoundInc}
+
+	tests := []struct {
+		name string
+		// vars builds the activation supplied to Eval.
+		vars func(t *testing.T) any
+		// opts are additional program options, e.g. default variables or partial evaluation.
+		opts []ProgramOption
+		want ref.Val
+	}{
+		{
+			name: "function bindings wrapped in a partial activation",
+			vars: func(t *testing.T) any {
+				t.Helper()
+				fnVars, err := FunctionVars(map[string]any{"x": 10}, incFuncs)
+				if err != nil {
+					t.Fatalf("FunctionVars() failed: %v", err)
+				}
+				partial, err := PartialVars(fnVars, AttributePattern("unused"))
+				if err != nil {
+					t.Fatalf("PartialVars() failed: %v", err)
+				}
+				return partial
+			},
+			opts: []ProgramOption{EvalOptions(OptPartialEval)},
+			want: types.DefaultTypeAdapter.NativeToValue([]int64{12, 13}),
+		},
+		{
+			name: "function bindings layered over a partial activation",
+			vars: func(t *testing.T) any {
+				t.Helper()
+				partial, err := PartialVars(map[string]any{"x": 10}, AttributePattern("unused"))
+				if err != nil {
+					t.Fatalf("PartialVars() failed: %v", err)
+				}
+				fnVars, err := FunctionVars(partial, incFuncs)
+				if err != nil {
+					t.Fatalf("FunctionVars() failed: %v", err)
+				}
+				return fnVars
+			},
+			opts: []ProgramOption{EvalOptions(OptPartialEval)},
+			want: types.DefaultTypeAdapter.NativeToValue([]int64{12, 13}),
+		},
+		{
+			name: "function bindings supplied as program default variables",
+			vars: func(t *testing.T) any {
+				t.Helper()
+				// The default variables become the parent of the evaluation-time activation, so
+				// the comprehension scope must resolve the function through both layers.
+				return map[string]any{"x": 10}
+			},
+			opts: func() []ProgramOption {
+				defaults, err := FunctionVars(map[string]any{}, incFuncs)
+				if err != nil {
+					t.Fatalf("FunctionVars() failed: %v", err)
+				}
+				return []ProgramOption{Globals(defaults)}
+			}(),
+			want: types.DefaultTypeAdapter.NativeToValue([]int64{12, 13}),
+		},
+		{
+			name: "function bindings supplied as the hierarchical child",
+			vars: func(t *testing.T) any {
+				t.Helper()
+				// Program default variables become the hierarchical parent and this activation
+				// becomes the child, which is the inverse of the case above.
+				fnVars, err := FunctionVars(map[string]any{}, incFuncs)
+				if err != nil {
+					t.Fatalf("FunctionVars() failed: %v", err)
+				}
+				return fnVars
+			},
+			opts: []ProgramOption{Globals(map[string]any{"x": 10})},
+			want: types.DefaultTypeAdapter.NativeToValue([]int64{12, 13}),
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ast, iss := env.Compile("[1, 2].map(i, inc(i) + x)")
+			if iss.Err() != nil {
+				t.Fatalf("Compile() failed: %v", iss.Err())
+			}
+			prg, err := env.Program(ast, tc.opts...)
+			if err != nil {
+				t.Fatalf("Program() failed: %v", err)
+			}
+			out, _, err := prg.Eval(tc.vars(t))
+			if err != nil {
+				t.Fatalf("Eval() failed: %v", err)
+			}
+			if out.Equal(tc.want) != types.True {
+				t.Errorf("Eval() got %v, wanted %v", out, tc.want)
+			}
+		})
+	}
+}
+
+// countingActivation sits at the root of an activation chain and records how many times function
+// resolution reaches it. It never supplies a binding, so every lookup traverses the full chain.
+type countingActivation struct {
+	Activation
+	calls int
+}
+
+func (a *countingActivation) ResolveFunction(name string) (LateBoundFunction, bool) {
+	a.calls++
+	return nil, false
+}
+
+// nestedComprehension builds `[[..[1]..]].map(vN, .. v1.map(v0, inc(v0)) ..)` at the given depth.
+func nestedComprehension(depth int) string {
+	inner := "inc(v0)"
+	for i := 1; i < depth; i++ {
+		inner = fmt.Sprintf("v%d.map(v%d, %s)", i, i-1, inner)
+	}
+	list := strings.Repeat("[", depth) + "1" + strings.Repeat("]", depth)
+	return fmt.Sprintf("%s.map(v%d, %s)", list, depth-1, inner)
+}
+
+// TestLateBoundFunctionResolverTraversal asserts that resolving a late-bound function visits each
+// activation scope at most once, regardless of how deeply the call site is nested inside
+// comprehensions.
+//
+// The bindings are located once when the evaluation begins, so a call site performs a single
+// lookup no matter how many scopes enclose it. Were resolution performed per call by walking the
+// activation hierarchy, the count would instead grow with nesting depth: each comprehension pushes
+// a scope whose Parent points back at the enclosing frame rather than at the next link in the
+// chain, so a walk which follows that pointer re-visits every ancestor once per level.
+func TestLateBoundFunctionResolverTraversal(t *testing.T) {
+	env := lateBoundComprehensionEnv(t)
+	for _, depth := range []int{1, 2, 4, 8, 12} {
+		t.Run(fmt.Sprintf("depth %d", depth), func(t *testing.T) {
+			expr := nestedComprehension(depth)
+			ast, iss := env.Compile(expr)
+			if iss.Err() != nil {
+				t.Fatalf("Compile(%q) failed: %v", expr, iss.Err())
+			}
+			prg, err := env.Program(ast)
+			if err != nil {
+				t.Fatalf("Program() failed: %v", err)
+			}
+			root := &countingActivation{Activation: NoVars()}
+			_, _, err = prg.Eval(root)
+			if err == nil || !strings.Contains(err.Error(), "no such overload: inc") {
+				t.Fatalf("Eval() error = %v, wanted 'no such overload: inc'", err)
+			}
+			// The innermost expression is evaluated exactly once, so the root is visited once.
+			if root.calls != 1 {
+				t.Errorf("resolution reached the root activation %d times at depth %d, wanted 1",
+					root.calls, depth)
+			}
+		})
+	}
+}
+
+// TestLateBoundFunctionSingleActivation covers the requirement that only one activation in a
+// hierarchy supplies late-bound function implementations. Layering them would make the bindings
+// which apply depend on the order of composition, which is reported instead.
+func TestLateBoundFunctionSingleActivation(t *testing.T) {
+	env := lateBoundComprehensionEnv(t)
+	fnA := map[string]LateBoundFunction{"inc": lateBoundInc}
+	fnB := map[string]LateBoundFunction{"inc": lateBoundInc}
+	ast, iss := env.Compile("inc(1)")
+	if iss.Err() != nil {
+		t.Fatalf("Compile() failed: %v", iss.Err())
+	}
+
+	t.Run("FunctionVars over FunctionVars", func(t *testing.T) {
+		inner, err := FunctionVars(map[string]any{}, fnA)
+		if err != nil {
+			t.Fatalf("FunctionVars() failed: %v", err)
+		}
+		if _, err := FunctionVars(inner, fnB); err == nil {
+			t.Error("FunctionVars() over existing bindings wanted error, got nil")
+		}
+	})
+	t.Run("Globals applied twice", func(t *testing.T) {
+		defaultsA, err := FunctionVars(map[string]any{}, fnA)
+		if err != nil {
+			t.Fatalf("FunctionVars() failed: %v", err)
+		}
+		defaultsB, err := FunctionVars(map[string]any{}, fnB)
+		if err != nil {
+			t.Fatalf("FunctionVars() failed: %v", err)
+		}
+		if _, err := env.Program(ast, Globals(defaultsA), Globals(defaultsB)); err == nil {
+			t.Error("Program() with two sources of bindings wanted error, got nil")
+		}
+	})
+	t.Run("Globals and evaluation-time bindings", func(t *testing.T) {
+		defaults, err := FunctionVars(map[string]any{}, fnA)
+		if err != nil {
+			t.Fatalf("FunctionVars() failed: %v", err)
+		}
+		prg, err := env.Program(ast, Globals(defaults))
+		if err != nil {
+			t.Fatalf("Program() failed: %v", err)
+		}
+		evalVars, err := FunctionVars(map[string]any{}, fnB)
+		if err != nil {
+			t.Fatalf("FunctionVars() failed: %v", err)
+		}
+		// The conflict only exists once the two hierarchies are combined, so it is reported by
+		// Eval rather than by Program.
+		if _, _, err := prg.Eval(evalVars); err == nil {
+			t.Error("Eval() with bindings from defaults and input wanted error, got nil")
+		}
+	})
+	t.Run("Globals alone remains valid", func(t *testing.T) {
+		defaults, err := FunctionVars(map[string]any{}, fnA)
+		if err != nil {
+			t.Fatalf("FunctionVars() failed: %v", err)
+		}
+		prg, err := env.Program(ast, Globals(defaults))
+		if err != nil {
+			t.Fatalf("Program() failed: %v", err)
+		}
+		out, _, err := prg.Eval(map[string]any{})
+		if err != nil {
+			t.Fatalf("Eval() failed: %v", err)
+		}
+		if out.Equal(types.Int(2)) != types.True {
+			t.Errorf("Eval() got %v, wanted 2", out)
+		}
+	})
 }
