@@ -90,10 +90,14 @@ func isEqualOrLessSpecific(t1, t2 *types.Type) bool {
 		return isEqualOrLessSpecific(t1.Parameters()[0], t2.Parameters()[0]) &&
 			isEqualOrLessSpecific(t1.Parameters()[1], t2.Parameters()[1])
 	case types.TypeKind:
-		if len(t1.Parameters()) > 0 && len(t2.Parameters()) > 0 {
+		p1Len, p2Len := len(t1.Parameters()), len(t2.Parameters())
+		if p1Len > 0 && p2Len > 0 {
+			if p1Len != p2Len {
+				return false
+			}
 			return isEqualOrLessSpecific(t1.Parameters()[0], t2.Parameters()[0])
 		}
-		return len(t1.Parameters()) == 0
+		return p1Len == 0
 	default:
 		return t1.IsExactType(t2)
 	}
@@ -165,8 +169,12 @@ func internalIsAssignable(m *mapping, t1, t2 *types.Type) bool {
 		if kind2 != types.TypeKind {
 			return false
 		}
-		if len(t1.Parameters()) == 0 || len(t2.Parameters()) == 0 {
-			return len(t2.Parameters()) == 0
+		p1Len, p2Len := len(t1.Parameters()), len(t2.Parameters())
+		if p1Len == 0 || p2Len == 0 {
+			return p2Len == 0
+		}
+		if p1Len != p2Len {
+			return false
 		}
 		fromType := t1.Parameters()[0]
 		toType := t2.Parameters()[0]

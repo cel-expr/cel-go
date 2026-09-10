@@ -30,6 +30,24 @@ func TestIsAssignable_TypeType(t *testing.T) {
 		wantSubs   map[string]*types.Type
 	}{
 		{
+			name:       "unparameterized_to_unparameterized",
+			from:       types.TypeType,
+			to:         types.TypeType,
+			wantAssign: true,
+		},
+		{
+			name:       "parameterized_to_unparameterized",
+			from:       types.NewTypeTypeWithParam(types.IntType),
+			to:         types.TypeType,
+			wantAssign: true,
+		},
+		{
+			name:       "unparameterized_to_parameterized",
+			from:       types.TypeType,
+			to:         types.NewTypeTypeWithParam(types.IntType),
+			wantAssign: false,
+		},
+		{
 			name:       "concreteTypes_legacyCoassignability",
 			from:       types.NewTypeTypeWithParam(types.IntType),
 			to:         types.NewTypeTypeWithParam(types.StringType),
