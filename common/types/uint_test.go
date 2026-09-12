@@ -118,6 +118,17 @@ func TestUintCompare(t *testing.T) {
 			out: IntOne,
 		},
 		{
+			// 2^53+1 has no double representation, so it must not compare equal to 2^53.
+			a:   Uint(1<<53) + 1,
+			b:   Double(1 << 53),
+			out: IntOne,
+		},
+		{
+			a:   Uint(math.MaxUint64),
+			b:   Double(math.MaxUint64),
+			out: IntNegOne,
+		},
+		{
 			a:   Uint(1),
 			b:   String("1"),
 			out: NoSuchOverloadErr(),
@@ -377,6 +388,16 @@ func TestUintEqual(t *testing.T) {
 		{
 			a:   Uint(10),
 			b:   Double(math.NaN()),
+			out: False,
+		},
+		{
+			a:   Uint(1<<53) + 1,
+			b:   Double(1 << 53),
+			out: False,
+		},
+		{
+			a:   Uint(math.MaxUint64),
+			b:   Double(math.MaxUint64),
 			out: False,
 		},
 	}
