@@ -308,6 +308,10 @@ func (p *planBuilder) planCall(expr ast.Expr) (InterpretableV2, error) {
 	if fnDef != nil && fnDef.Async != nil {
 		return p.planCallAsync(expr, fnName, oName, fnDef, args)
 	}
+	// Late-bound overloads are planned into an evalLateBoundFunc regardless of arity.
+	if fnDef != nil && fnDef.LateBound {
+		return p.planCallLateBound(expr, fnName, oName, fnDef, target != nil, args)
+	}
 	switch argCount {
 	case 0:
 		return p.planCallZero(expr, fnName, oName, fnDef)
@@ -328,6 +332,28 @@ func (p *planBuilder) planCall(expr ast.Expr) (InterpretableV2, error) {
 	default:
 		return p.planCallVarArgs(expr, fnName, oName, fnDef, args)
 	}
+}
+
+// planCallLateBound generates a late-bound callable Interpretable.
+func (p *planBuilder) planCallLateBound(expr ast.Expr,
+	function string,
+	overload string,
+	impl *functions.Overload,
+	memberStyle bool,
+	args []InterpretableV2) (InterpretableV2, error) {
+	if impl == nil || !impl.LateBound {
+		return nil, fmt.Errorf("no such overload: %s()", function)
+	}
+	return &evalLateBoundFunc{
+		id:        expr.ID(),
+		function:  function,
+		overload:  overload,
+		args:      args,
+		trait:     impl.OperandTrait,
+		nonStrict: impl.NonStrict,
+		member:    memberStyle,
+		dispatch:  impl.LateBoundDispatch,
+	}, nil
 }
 
 // planCallAsync generates an asynchronous callable Interpretable.

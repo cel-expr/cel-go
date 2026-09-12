@@ -607,9 +607,11 @@ func (c *coster) functionCost(e ast.Expr, function, overloadID string, target *A
 			}
 		}
 	}
-	if est := c.estimator.EstimateCallCost(function, overloadID, target, args); est != nil {
-		callEst := *est
-		return CallEstimate{CostEstimate: callEst.Add(argCostSum()), ResultSize: est.ResultSize}
+	if c.estimator != nil {
+		if est := c.estimator.EstimateCallCost(function, overloadID, target, args); est != nil {
+			callEst := *est
+			return CallEstimate{CostEstimate: callEst.Add(argCostSum()), ResultSize: est.ResultSize}
+		}
 	}
 	switch overloadID {
 	// O(n) functions
@@ -821,10 +823,12 @@ func (c *coster) computeSize(e ast.Expr) *SizeEstimate {
 	// Ensure size estimates are computed first as users may choose to override the costs that
 	// CEL would otherwise ascribe to the type.
 	node := astNode{expr: e, path: c.getPath(e), t: c.getType(e)}
-	if size := c.estimator.EstimateSize(node); size != nil {
-		// storing the computed size should reduce calls to EstimateSize()
-		c.computedSizes[e.ID()] = *size
-		return size
+	if c.estimator != nil {
+		if size := c.estimator.EstimateSize(node); size != nil {
+			// storing the computed size should reduce calls to EstimateSize()
+			c.computedSizes[e.ID()] = *size
+			return size
+		}
 	}
 	if size := computeTypeSize(c.getType(e)); size != nil {
 		return size

@@ -1387,12 +1387,18 @@ func TestAsyncBinding(t *testing.T) {
 		if !od.HasBinding() {
 			t.Errorf("Overload %s does not have binding, wanted async binding", od.ID())
 		}
-		if !od.HasLateBinding() {
-			t.Errorf("Overload %s does not have late binding, wanted async binding to be late bound", od.ID())
+		if !od.IsAsync() {
+			t.Errorf("Overload %s is not async, wanted async binding", od.ID())
+		}
+		if od.HasLateBinding() {
+			t.Errorf("Overload %s has late binding, wanted async binding to not be late bound", od.ID())
 		}
 	}
-	if !fn.HasLateBinding() {
-		t.Errorf("Function %s does not have late binding, wanted async function to be late bound", fn.Name())
+	if !fn.IsAsync() {
+		t.Errorf("Function %s is not async, wanted async function", fn.Name())
+	}
+	if fn.HasLateBinding() {
+		t.Errorf("Function %s has late binding, wanted async function to not be late bound", fn.Name())
 	}
 	bindings, err := fn.Bindings()
 	if err != nil {
@@ -1466,8 +1472,11 @@ func TestSingletonAsyncBinding(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewFunction() failed: %v", err)
 	}
-	if !fn.HasLateBinding() {
-		t.Errorf("Function %s does not have late binding, wanted singleton async function to be late bound", fn.Name())
+	if !fn.IsAsync() {
+		t.Errorf("Function %s is not async, wanted singleton async function to be async", fn.Name())
+	}
+	if fn.HasLateBinding() {
+		t.Errorf("Function %s has late binding, wanted singleton async function to not be late bound", fn.Name())
 	}
 	bindings, err := fn.Bindings()
 	if err != nil {

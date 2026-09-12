@@ -52,7 +52,7 @@ func asyncReturning(val ref.Val, calls *atomic.Int32) functions.AsyncOp {
 // newTestFrame creates an ExecutionFrame with an evaluation context attached.
 func newTestFrame(t *testing.T, ctx context.Context) (*ExecutionFrame, func()) {
 	t.Helper()
-	frame, err := NewExecutionFrame(EmptyActivation())
+	frame, err := NewExecutionFrame(EmptyActivation(), nil)
 	if err != nil {
 		t.Fatalf("NewExecutionFrame() failed: %v", err)
 	}
@@ -83,7 +83,7 @@ func awaitResult(t *testing.T, frame *ExecutionFrame, completions <-chan int64, 
 }
 
 func TestComputeResultWithoutContext(t *testing.T) {
-	frame, err := NewExecutionFrame(EmptyActivation())
+	frame, err := NewExecutionFrame(EmptyActivation(), nil)
 	if err != nil {
 		t.Fatalf("NewExecutionFrame() failed: %v", err)
 	}
@@ -961,7 +961,7 @@ func TestAsyncWithTraceAndExhaustiveEval(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	frame, err := NewExecutionFrame(EmptyActivation())
+	frame, err := NewExecutionFrame(EmptyActivation(), nil)
 	if err != nil {
 		t.Fatalf("NewExecutionFrame failed: %v", err)
 	}
@@ -1025,7 +1025,7 @@ loop:
 }
 
 func TestAsyncSetupWithoutContextErrors(t *testing.T) {
-	frame, err := NewExecutionFrame(EmptyActivation())
+	frame, err := NewExecutionFrame(EmptyActivation(), nil)
 	if err != nil {
 		t.Fatalf("NewExecutionFrame() failed: %v", err)
 	}

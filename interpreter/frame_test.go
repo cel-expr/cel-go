@@ -18,6 +18,7 @@ import (
 	"context"
 	"testing"
 
+	"cel.dev/cel-go/common/functions"
 	"cel.dev/cel-go/common/types"
 	"cel.dev/cel-go/common/types/ref"
 )
@@ -476,10 +477,124 @@ func TestFrameSetContextChildError(t *testing.T) {
 }
 
 func TestNewExecutionFrameInvalidInput(t *testing.T) {
-	f, err := NewExecutionFrame(123)
+	f, err := NewExecutionFrame(123, nil)
 	if err == nil {
 		f.Close()
 		t.Error("NewExecutionFrame with int input did not return error")
+	}
+}
+
+func TestNewExecutionFrameGlobals(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    any
+		globals  Activation
+		wantVar  ref.Val
+		wantFunc string
+	}{
+		{
+			name:    "globals only",
+			input:   map[string]any{},
+			globals: mustActivation(t, map[string]any{"x": types.Int(1)}),
+			wantVar: types.Int(1),
+		},
+		{
+			name:    "input shadows globals",
+			input:   map[string]any{"x": types.Int(2)},
+			globals: mustActivation(t, map[string]any{"x": types.Int(1)}),
+			wantVar: types.Int(2),
+		},
+		{
+			name:    "globals visible to an activation input",
+			input:   mustActivation(t, map[string]any{"y": types.Int(3)}),
+			globals: mustActivation(t, map[string]any{"x": types.Int(1)}),
+			wantVar: types.Int(1),
+		},
+		{
+			name:     "functions supplied by globals",
+			input:    map[string]any{"x": types.Int(1)},
+			globals:  mustFunctionVars(t, map[string]any{}, map[string]functions.LateBoundOp{"f": funcOf("global")}),
+			wantVar:  types.Int(1),
+			wantFunc: "global",
+		},
+		{
+			name:     "functions supplied by the input",
+			input:    mustFunctionVars(t, map[string]any{"x": types.Int(1)}, map[string]functions.LateBoundOp{"f": funcOf("input")}),
+			globals:  mustActivation(t, map[string]any{}),
+			wantVar:  types.Int(1),
+			wantFunc: "input",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			f, err := NewExecutionFrame(tc.input, tc.globals)
+			if err != nil {
+				t.Fatalf("NewExecutionFrame() failed: %v", err)
+			}
+			defer f.Close()
+
+			got, found := f.ResolveName("x")
+			if !found {
+				t.Fatal("ResolveName('x') returned not found")
+			}
+			if got != tc.wantVar {
+				t.Errorf("ResolveName('x') got %v, want %v", got, tc.wantVar)
+			}
+			fn, found := f.ResolveFunction("f")
+			if found != (tc.wantFunc != "") {
+				t.Fatalf("ResolveFunction('f') found = %t, want %t", found, tc.wantFunc != "")
+			}
+			if found {
+				if out := fn("f"); out != types.String(tc.wantFunc) {
+					t.Errorf("ResolveFunction('f') resolved to %v, want %v", out, tc.wantFunc)
+				}
+			}
+		})
+	}
+}
+
+// TestNewExecutionFrameGlobalsFunctionConflict ensures the single-source rule for late-bound
+// functions is enforced when the globals and the input are composed by the frame itself, rather
+// than only when the caller nests the activations.
+func TestNewExecutionFrameGlobalsFunctionConflict(t *testing.T) {
+	globals := mustFunctionVars(t, map[string]any{}, map[string]functions.LateBoundOp{"f": funcOf("global")})
+	input := mustFunctionVars(t, map[string]any{}, map[string]functions.LateBoundOp{"f": funcOf("input")})
+
+	f, err := NewExecutionFrame(input, globals)
+	if err == nil {
+		f.Close()
+		t.Fatal("NewExecutionFrame() with function bindings on both layers succeeded, wanted an error")
+	}
+}
+
+// TestNewExecutionFrameGlobalsPreservesMapInput guards the reason globals are composed inside the
+// constructor: a map input keeps using the frame's activation, which caches lazily resolved values
+// separately rather than writing them back into the caller's map.
+func TestNewExecutionFrameGlobalsPreservesMapInput(t *testing.T) {
+	calls := 0
+	input := map[string]any{
+		"x": func() ref.Val {
+			calls++
+			return types.Int(42)
+		},
+	}
+	f, err := NewExecutionFrame(input, mustActivation(t, map[string]any{"y": types.Int(1)}))
+	if err != nil {
+		t.Fatalf("NewExecutionFrame() failed: %v", err)
+	}
+	defer f.Close()
+
+	for i := 0; i < 2; i++ {
+		got, found := f.ResolveName("x")
+		if !found || got != types.Int(42) {
+			t.Fatalf("ResolveName('x') got (%v, %t), want (42, true)", got, found)
+		}
+	}
+	if calls != 1 {
+		t.Errorf("lazy binding evaluated %d times, want 1", calls)
+	}
+	if _, isFunc := input["x"].(func() ref.Val); !isFunc {
+		t.Errorf("lazy binding was overwritten in the caller's map with %v", input["x"])
 	}
 }
 
@@ -586,7 +701,7 @@ func TestLazyVariableResolution(t *testing.T) {
 
 func mustNewExecutionFrame(t testing.TB, input any) *ExecutionFrame {
 	t.Helper()
-	f, err := NewExecutionFrame(input)
+	f, err := NewExecutionFrame(input, nil)
 	if err != nil {
 		t.Fatalf("NewExecutionFrame() failed: %v", err)
 	}

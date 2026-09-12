@@ -889,7 +889,7 @@ func (e *Env) ResidualAst(a *Ast, details *EvalDetails) (*Ast, error) {
 // EstimateCost estimates the cost of a type checked CEL expression using the length estimates of input data and
 // extension functions provided by estimator.
 func (e *Env) EstimateCost(ast *Ast, estimator cost.Estimator, opts ...cost.CostOption) (cost.CostEstimate, error) {
-	extendedOpts := make([]cost.CostOption, 0, len(e.costOptions))
+	extendedOpts := make([]cost.CostOption, 0, len(e.costOptions)+len(opts))
 	extendedOpts = append(extendedOpts, opts...)
 	extendedOpts = append(extendedOpts, e.costOptions...)
 	return cost.Cost(ast.NativeRep(), estimator, extendedOpts...)

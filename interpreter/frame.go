@@ -76,6 +76,11 @@ type ExecutionFrame struct {
 	// Activation provides the context for resolving variables by name.
 	Activation
 
+	// functions supplies the late-bound function implementations for the evaluation, resolved
+	// once from the input activation. Scopes introduced during evaluation never supply function
+	// bindings, so a child frame inherits this value from its parent rather than resolving again.
+	functions FunctionActivation
+
 	// parent provides the context for parent scopes (used for comprehension iterators).
 	parent *ExecutionFrame
 
@@ -84,16 +89,52 @@ type ExecutionFrame struct {
 }
 
 // NewExecutionFrame creates a new execution frame from the pool.
-func NewExecutionFrame(input any) (*ExecutionFrame, error) {
-	f := frameStack.Get().(*ExecutionFrame)
+//
+// The input supplies the variables for a single evaluation and may be an Activation or a
+// map[string]any. When globals is non-nil the input is layered over it, so that values shared by
+// every evaluation of a program remain visible while the input takes precedence.
+//
+// The activation hierarchy is fixed once the frame exists. Composing it here, rather than
+// extending it afterwards, keeps the late-bound function bindings resolved from it consistent for
+// the whole evaluation, and lets a map input use the frame's activation representation, which
+// caches lazily resolved values without writing them back into the caller's map.
+func NewExecutionFrame(input any, globals Activation) (*ExecutionFrame, error) {
+	var vars Activation
+	// created tracks an activation allocated here, which must be released if the frame is not
+	// produced. An activation supplied by the caller is never released, as the caller retains it.
+	var created *inputActivation
 	switch v := input.(type) {
 	case Activation:
-		f.Activation = v
+		vars = v
 	case map[string]any:
-		f.Activation = activationInput.create(v)
+		created = activationInput.create(v)
+		vars = created
 	default:
 		return nil, fmt.Errorf("invalid input, wanted Activation or map[string]any, got: (%T)%v", input, input)
 	}
+	// The composed hierarchy is owned by the frame and lives exactly as long as it does, so it is
+	// taken from the same pool the comprehension scopes use. Close releases it; the globals and an
+	// Activation input are left untouched because the caller retains those.
+	var wrapper Activation
+	if globals != nil {
+		wrapper = activationStack.create(globals, vars)
+		vars = wrapper
+	}
+	// Resolve before taking a frame from the pool so that a rejected hierarchy leaves nothing to
+	// unwind.
+	fns, err := FindFunctionActivation(vars)
+	if err != nil {
+		if wrapper != nil {
+			activationStack.release(wrapper)
+		}
+		if created != nil {
+			activationInput.release(created)
+		}
+		return nil, err
+	}
+	f := frameStack.Get().(*ExecutionFrame)
+	f.Activation = vars
+	f.functions = fns
 	return f, nil
 }
 
@@ -139,6 +180,7 @@ func (f *ExecutionFrame) Close() {
 	}
 	f.ctx = nil
 	f.parent = nil
+	f.functions = nil
 	if f.Activation != nil {
 		switch a := f.Activation.(type) {
 		case *hierarchicalActivation:
@@ -162,6 +204,9 @@ func (f *ExecutionFrame) Push(activation Activation) *ExecutionFrame {
 	child := frameStack.Get().(*ExecutionFrame)
 	child.parent = f
 	child.ctx = f.ctx
+	// Scopes pushed during evaluation never supply late-bound functions, so the child inherits
+	// the bindings resolved for the evaluation rather than searching its own hierarchy.
+	child.functions = f.functions
 	child.Activation = activationStack.create(f.Activation, activation)
 	return child
 }
@@ -175,6 +220,7 @@ func (f *ExecutionFrame) Pop() *ExecutionFrame {
 	activationStack.release(f.Activation)
 	f.Activation = nil
 	f.parent = nil
+	f.functions = nil
 	f.ctx = nil
 	frameStack.Put(f)
 	return parent
@@ -188,6 +234,15 @@ func (f *ExecutionFrame) ResolveName(name string) (any, bool) {
 // Parent implements the Activation interface by proxying to the internal activation.
 func (f *ExecutionFrame) Parent() Activation {
 	return f.Activation.Parent()
+}
+
+// ResolveFunction implements the FunctionActivation interface using the bindings resolved when
+// the evaluation began, so the cost of a lookup does not depend on the number of enclosing scopes.
+func (f *ExecutionFrame) ResolveFunction(name string) (functions.LateBoundOp, bool) {
+	if f.functions == nil {
+		return nil, false
+	}
+	return f.functions.ResolveFunction(name)
 }
 
 // AsPartialActivation implements the PartialActivation interface by proxying to the internal activation.

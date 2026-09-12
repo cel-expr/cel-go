@@ -98,8 +98,8 @@ func (opt *constantFoldingOptimizer) Optimize(ctx *OptimizerContext, a *ast.AST)
 			if fold.Kind() == ast.CallKind && maybePruneBranches(ctx, a, fold) {
 				continue
 			}
-			// Late-bound function calls cannot be folded.
-			if fold.Kind() == ast.CallKind && isLateBoundFunctionCall(ctx, fold) {
+			// Async and late-bound function calls cannot be folded.
+			if fold.Kind() == ast.CallKind && (isLateBoundFunctionCall(ctx, fold) || isAsyncFunctionCall(ctx, fold)) {
 				continue
 			}
 			// Otherwise, assume all context is needed to evaluate the expression.
@@ -177,7 +177,7 @@ func evaluateExpr(ctx *OptimizerContext, a *ast.AST, navigableExpr ast.Navigable
 	if err != nil {
 		return nil, errCannotFold
 	}
-	// Folding will not attempt to call async functions which are all marked as late-bound,
+	// Folding will not attempt to call async functions,
 	// but the presence of such functions requires the use of `ConcurrentEval` in order to
 	// avoid an early return error which blocks async functions from running in `Eval` and
 	// `ContextEval` call paths.
@@ -196,6 +196,15 @@ func isLateBoundFunctionCall(ctx *OptimizerContext, expr ast.Expr) bool {
 		return false
 	}
 	return function.HasLateBinding()
+}
+
+func isAsyncFunctionCall(ctx *OptimizerContext, expr ast.Expr) bool {
+	call := expr.AsCall()
+	function := ctx.Functions()[call.FunctionName()]
+	if function == nil {
+		return false
+	}
+	return function.IsAsync()
 }
 
 // maybePruneBranches inspects the non-strict call expression to determine whether
@@ -581,8 +590,8 @@ func (opt *constantFoldingOptimizer) constantExprMatcher(ctx *OptimizerContext, 
 			if e.Kind() == ast.IdentKind && !vars[e.AsIdent()] {
 				constantExprs = false
 			}
-			// Late-bound function calls cannot be folded.
-			if e.Kind() == ast.CallKind && isLateBoundFunctionCall(ctx, e) {
+			// Async and late-bound function calls cannot be folded.
+			if e.Kind() == ast.CallKind && (isLateBoundFunctionCall(ctx, e) || isAsyncFunctionCall(ctx, e)) {
 				constantExprs = false
 			}
 		})

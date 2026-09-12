@@ -23,6 +23,7 @@ import (
 	"cel.dev/cel-go/cel/async"
 	"cel.dev/cel-go/common/ast"
 	"cel.dev/cel-go/common/cost"
+	"cel.dev/cel-go/common/functions"
 	"cel.dev/cel-go/common/operators"
 	"cel.dev/cel-go/common/overloads"
 	"cel.dev/cel-go/common/types"
@@ -113,6 +114,55 @@ func NoVars() Activation {
 func PartialVars(vars any,
 	unknowns ...*AttributePatternType) (PartialActivation, error) {
 	return interpreter.NewPartialActivation(vars, unknowns...)
+}
+
+// FunctionActivation extends the Activation interface with implementations for the functions
+// declared with a late binding.
+type FunctionActivation = interpreter.FunctionActivation
+
+// LateBoundFunction is the signature required of all late-bound function implementations.
+//
+// The overload id indicates which of the declared overloads matched the call arguments, which
+// permits a single implementation to serve all overloads of the function.
+//
+// An implementation which depends on the state of the evaluation should capture that state in a
+// closure, as the activation is not an input to the call.
+type LateBoundFunction = functions.LateBoundOp
+
+// FunctionVars returns an Activation which supplies the implementations of late-bound functions
+// in addition to the variables provided by the `vars` input.
+//
+// Function bindings are held in a namespace which is separate from variables, so a function and
+// a variable may share the same qualified name.
+//
+// The `vars` value may either be an Activation or any valid input to the NewActivation call.
+//
+// Late-bound functions apply to a whole evaluation rather than to a lexical scope, so only one
+// activation may supply them. An error is returned when `vars` already does, whether directly or
+// through a partial or hierarchical activation which wraps one; supply the complete set of
+// bindings in a single call instead. The same restriction applies to the combination of Globals
+// and the activation passed to Eval, which is reported by Eval.
+//
+// Since the bindings are supplied for a single evaluation alongside the variables of that
+// evaluation, an implementation may close over state which the expression is not permitted to
+// read directly. Below, a role table is consulted by the `role` function but is never exposed as
+// a variable, so an expression can only observe the entry for the argument it asks about:
+//
+//	roles := map[string]string{"tristan": "admin"}
+//	act, err := cel.FunctionVars(map[string]any{"user": user}, map[string]cel.LateBoundFunction{
+//	    "role": func(overloadID string, args ...ref.Val) ref.Val {
+//	        role, found := roles[string(args[0].(types.String))]
+//	        if !found {
+//	            return types.NewErr("no role for user: %s", args[0])
+//	        }
+//	        return types.String(role)
+//	    },
+//	})
+//
+// The same technique supplies state which must stay fixed for the duration of an evaluation, such
+// as the timestamp that a `valid_until(x)` call compares against.
+func FunctionVars(vars any, funcs map[string]LateBoundFunction) (FunctionActivation, error) {
+	return interpreter.NewFunctionActivation(vars, funcs)
 }
 
 // AttributePattern returns an AttributePattern that matches a top-level variable. The pattern is
@@ -494,16 +544,7 @@ func (p *prog) ContextEval(ctx context.Context, input any) (ref.Val, *EvalDetail
 
 // newExecutionFrame creates an ExecutionFrame for the given input without a timeout context.
 func (p *prog) newExecutionFrame(input any) (*interpreter.ExecutionFrame, error) {
-	frame, err := interpreter.NewExecutionFrame(input)
-	if err != nil {
-		return nil, err
-	}
-	if p.defaultVars != nil {
-		// Update the frame's activation in place.
-		frame.Activation = interpreter.NewHierarchicalActivation(p.defaultVars, frame.Activation)
-	}
-
-	return frame, nil
+	return interpreter.NewExecutionFrame(input, p.defaultVars)
 }
 
 // newAsyncFrame creates an ExecutionFrame configured for asynchronous evaluation under the

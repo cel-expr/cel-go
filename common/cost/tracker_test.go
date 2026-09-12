@@ -176,7 +176,7 @@ func TestCostTrackerStandardFunctions(t *testing.T) {
 }
 
 func TestTrackCostAdvanced(t *testing.T) {
-	var equalCases = []struct {
+	equalCases := []struct {
 		in      any
 		lhsExpr string
 		rhsExpr string
@@ -212,7 +212,7 @@ func TestTrackCostAdvanced(t *testing.T) {
 		})
 
 	}
-	var smallerCases = []struct {
+	smallerCases := []struct {
 		in      any
 		lhsExpr string
 		rhsExpr string

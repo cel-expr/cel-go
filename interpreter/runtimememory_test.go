@@ -63,7 +63,7 @@ func TestMemoryObserver_StateLifecycle(t *testing.T) {
 		},
 	}
 
-	frame, err := NewExecutionFrame(EmptyActivation())
+	frame, err := NewExecutionFrame(EmptyActivation(), nil)
 	if err != nil {
 		t.Fatalf("NewExecutionFrame() failed: %v", err)
 	}
@@ -104,7 +104,7 @@ func TestMemoryObserver_StateLifecycle(t *testing.T) {
 			return nil, errors.New("factory failure")
 		},
 	}
-	frame2, err := NewExecutionFrame(EmptyActivation())
+	frame2, err := NewExecutionFrame(EmptyActivation(), nil)
 	if err != nil {
 		t.Fatalf("NewExecutionFrame() failed: %v", err)
 	}
