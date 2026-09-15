@@ -353,10 +353,14 @@ func (or *evalOr) Exec(frame *ExecutionFrame) ref.Val {
 			return types.True
 		}
 		if !ok {
-			isUnk := false
-			unk, isUnk = types.MaybeMergeUnknowns(val, unk)
-			if !isUnk && err == nil {
-				if types.IsError(val) {
+			if unkVal, isUnk := val.(*types.Unknown); isUnk {
+				if unk == nil {
+					unk = unkVal
+				} else {
+					unk = types.MergeUnknowns(unk, unkVal)
+				}
+			} else if err == nil {
+				if isError(val) {
 					err = val
 				} else {
 					err = types.MaybeNoSuchOverloadErr(val)
@@ -401,10 +405,14 @@ func (and *evalAnd) Exec(frame *ExecutionFrame) ref.Val {
 			return types.False
 		}
 		if !ok {
-			isUnk := false
-			unk, isUnk = types.MaybeMergeUnknowns(val, unk)
-			if !isUnk && err == nil {
-				if types.IsError(val) {
+			if unkVal, isUnk := val.(*types.Unknown); isUnk {
+				if unk == nil {
+					unk = unkVal
+				} else {
+					unk = types.MergeUnknowns(unk, unkVal)
+				}
+			} else if err == nil {
+				if isError(val) {
 					err = val
 				} else {
 					err = types.MaybeNoSuchOverloadErr(val)
@@ -441,23 +449,20 @@ func (eq *evalEq) ID() int64 {
 // Exec implements the InterpretableV2 interface method.
 func (eq *evalEq) Exec(frame *ExecutionFrame) ref.Val {
 	lVal := eq.lhs.Exec(frame)
-	if types.IsError(lVal) {
+	if isError(lVal) {
 		// To preserve legacy cost tracking behavior for ==
 		// track this cost, but it will be removed in the future.
 		trackCostEvalBinary(frame, eq.id, eq, lVal, types.UnknownType, lVal)
 		return lVal
 	}
 	rVal := eq.rhs.Exec(frame)
-	if types.IsError(rVal) {
+	if isError(rVal) {
 		// To preserve legacy cost tracking behavior for ==,
 		// track this cost, but it will be removed in the future.
 		trackCostEvalBinary(frame, eq.id, eq, lVal, rVal, rVal)
 		return rVal
 	}
-	var unk *types.Unknown
-	unk, _ = types.MaybeMergeUnknowns(lVal, unk)
-	unk, _ = types.MaybeMergeUnknowns(rVal, unk)
-	if unk != nil {
+	if unk := mergeBinaryUnknowns(lVal, rVal); unk != nil {
 		trackCostEvalBinary(frame, eq.id, eq, lVal, rVal, unk)
 		return unk
 	}
@@ -500,23 +505,20 @@ func (ne *evalNe) ID() int64 {
 // Exec implements the InterpretableV2 interface method.
 func (ne *evalNe) Exec(frame *ExecutionFrame) ref.Val {
 	lVal := ne.lhs.Exec(frame)
-	if types.IsError(lVal) {
+	if isError(lVal) {
 		// To preserve legacy cost tracking behavior for !=,
 		// track this cost, but it will be removed in the future.
 		trackCostEvalBinary(frame, ne.id, ne, lVal, types.UnknownType, lVal)
 		return lVal
 	}
 	rVal := ne.rhs.Exec(frame)
-	if types.IsError(rVal) {
+	if isError(rVal) {
 		// To preserve legacy cost tracking behavior for !=,
 		// track this cost, but it will be removed in the future.
 		trackCostEvalBinary(frame, ne.id, ne, lVal, rVal, rVal)
 		return rVal
 	}
-	var unk *types.Unknown
-	unk, _ = types.MaybeMergeUnknowns(lVal, unk)
-	unk, _ = types.MaybeMergeUnknowns(rVal, unk)
-	if unk != nil {
+	if unk := mergeBinaryUnknowns(lVal, rVal); unk != nil {
 		trackCostEvalBinary(frame, ne.id, ne, lVal, rVal, unk)
 		return unk
 	}
@@ -559,7 +561,7 @@ func (zero *evalZeroArity) ID() int64 {
 
 // Exec implements the InterpretableV2 interface method.
 func (zero *evalZeroArity) Exec(frame *ExecutionFrame) ref.Val {
-	res := types.LabelErrNode(zero.id, zero.impl())
+	res := labelErrNode(zero.id, zero.impl())
 	trackCostEvalZeroArity(frame, zero.id, zero, res)
 	return res
 }
@@ -602,29 +604,31 @@ func (un *evalUnary) ID() int64 {
 // Exec implements the InterpretableV2 interface method.
 func (un *evalUnary) Exec(frame *ExecutionFrame) ref.Val {
 	argVal := un.arg.Exec(frame)
-	// Early return if the argument to the function is error in strict mode.
+	// Early return if the argument to the function is error or unknown in strict mode.
 	strict := !un.nonStrict
-	if strict && types.IsError(argVal) {
-		// To preserve legacy cost tracking behavior for logical not,
-		// this cost is tracked, but will be removed in the future.
-		if un.function == operators.LogicalNot {
+	if strict {
+		switch v := argVal.(type) {
+		case *types.Err:
+			// To preserve legacy cost tracking behavior for logical not,
+			// this cost is tracked, but will be removed in the future.
+			if un.function == operators.LogicalNot {
+				trackCostEvalUnary(frame, un.id, un, argVal, argVal)
+			}
+			return v
+		case *types.Unknown:
 			trackCostEvalUnary(frame, un.id, un, argVal, argVal)
+			return v
 		}
-		return argVal
-	}
-	if strict && types.IsUnknown(argVal) {
-		trackCostEvalUnary(frame, un.id, un, argVal, argVal)
-		return argVal
 	}
 	var res ref.Val
 	// If the implementation is bound and the argument value has the right traits required to
 	// invoke it, then call the implementation.
-	if un.impl != nil && (un.trait == 0 || (!strict && types.IsUnknownOrError(argVal)) || argVal.Type().HasTrait(un.trait)) {
-		res = types.LabelErrNode(un.id, un.impl(argVal))
+	if un.impl != nil && (un.trait == 0 || argVal.Type().HasTrait(un.trait) || (!strict && types.IsUnknownOrError(argVal))) {
+		res = labelErrNode(un.id, un.impl(argVal))
 	} else if argVal.Type().HasTrait(traits.ReceiverType) {
 		// Otherwise, if the argument is a ReceiverType attempt to invoke the receiver method on the
 		// operand (arg0).
-		res = types.LabelErrNode(un.id, argVal.(traits.Receiver).Receive(un.function, un.overload, []ref.Val{}))
+		res = labelErrNode(un.id, argVal.(traits.Receiver).Receive(un.function, un.overload, []ref.Val{}))
 	} else {
 		res = types.NewErrWithNodeID(un.id, "no such overload: %s", un.function)
 	}
@@ -672,18 +676,15 @@ func (bin *evalBinary) ID() int64 {
 func (bin *evalBinary) Exec(frame *ExecutionFrame) ref.Val {
 	lVal := bin.lhs.Exec(frame)
 	strict := !bin.nonStrict
-	if strict && types.IsError(lVal) {
+	if strict && isError(lVal) {
 		return lVal
 	}
 	rVal := bin.rhs.Exec(frame)
-	if strict && types.IsError(rVal) {
+	if strict && isError(rVal) {
 		return rVal
 	}
 	if strict {
-		var unk *types.Unknown
-		unk, _ = types.MaybeMergeUnknowns(lVal, unk)
-		unk, _ = types.MaybeMergeUnknowns(rVal, unk)
-		if unk != nil {
+		if unk := mergeBinaryUnknowns(lVal, rVal); unk != nil {
 			trackCostEvalBinary(frame, bin.id, bin, lVal, rVal, unk)
 			return unk
 		}
@@ -691,12 +692,12 @@ func (bin *evalBinary) Exec(frame *ExecutionFrame) ref.Val {
 	var res ref.Val
 	// If the implementation is bound and the argument value has the right traits required to
 	// invoke it, then call the implementation.
-	if bin.impl != nil && (bin.trait == 0 || (!strict && types.IsUnknownOrError(lVal)) || lVal.Type().HasTrait(bin.trait)) {
-		res = types.LabelErrNode(bin.id, bin.impl(lVal, rVal))
+	if bin.impl != nil && (bin.trait == 0 || lVal.Type().HasTrait(bin.trait) || (!strict && types.IsUnknownOrError(lVal))) {
+		res = labelErrNode(bin.id, bin.impl(lVal, rVal))
 	} else if lVal.Type().HasTrait(traits.ReceiverType) {
 		// Otherwise, if the argument is a ReceiverType attempt to invoke the receiver method on the
 		// operand (arg0).
-		res = types.LabelErrNode(bin.id, lVal.(traits.Receiver).Receive(bin.function, bin.overload, []ref.Val{rVal}))
+		res = labelErrNode(bin.id, lVal.(traits.Receiver).Receive(bin.function, bin.overload, []ref.Val{rVal}))
 	} else {
 		res = types.NewErrWithNodeID(bin.id, "no such overload: %s", bin.function)
 	}
@@ -756,13 +757,20 @@ func (fn *evalVarArgs) Exec(frame *ExecutionFrame) ref.Val {
 	strict := !fn.nonStrict
 	var unk *types.Unknown
 	for i, arg := range fn.args {
-		argVals[i] = arg.Exec(frame)
+		argVal := arg.Exec(frame)
 		if strict {
-			if types.IsError(argVals[i]) {
-				return argVals[i]
+			switch v := argVal.(type) {
+			case *types.Err:
+				return v
+			case *types.Unknown:
+				if unk == nil {
+					unk = v
+				} else {
+					unk = types.MergeUnknowns(unk, v)
+				}
 			}
-			unk, _ = types.MaybeMergeUnknowns(argVals[i], unk)
 		}
+		argVals[i] = argVal
 	}
 	if strict && unk != nil {
 		trackCostEvalVarArgs(frame, fn.id, fn, argVals, unk)
@@ -771,7 +779,7 @@ func (fn *evalVarArgs) Exec(frame *ExecutionFrame) ref.Val {
 	if len(argVals) == 0 {
 		var res ref.Val
 		if fn.impl != nil {
-			res = types.LabelErrNode(fn.id, fn.impl())
+			res = labelErrNode(fn.id, fn.impl())
 		} else {
 			res = types.NewErrWithNodeID(fn.id, "no such overload: %s %d", fn.function, fn.id)
 		}
@@ -782,12 +790,12 @@ func (fn *evalVarArgs) Exec(frame *ExecutionFrame) ref.Val {
 	// If the implementation is bound and the argument value has the right traits required to
 	// invoke it, then call the implementation.
 	arg0 := argVals[0]
-	if fn.impl != nil && (fn.trait == 0 || (!strict && types.IsUnknownOrError(arg0)) || arg0.Type().HasTrait(fn.trait)) {
-		res = types.LabelErrNode(fn.id, fn.impl(argVals...))
+	if fn.impl != nil && (fn.trait == 0 || arg0.Type().HasTrait(fn.trait) || (!strict && types.IsUnknownOrError(arg0))) {
+		res = labelErrNode(fn.id, fn.impl(argVals...))
 	} else if arg0.Type().HasTrait(traits.ReceiverType) {
 		// Otherwise, if the argument is a ReceiverType attempt to invoke the receiver method on the
 		// operand (arg0).
-		res = types.LabelErrNode(fn.id, arg0.(traits.Receiver).Receive(fn.function, fn.overload, argVals[1:]))
+		res = labelErrNode(fn.id, arg0.(traits.Receiver).Receive(fn.function, fn.overload, argVals[1:]))
 	} else {
 		res = types.NewErrWithNodeID(fn.id, "no such overload: %s %d", fn.function, fn.id)
 	}
@@ -810,11 +818,12 @@ func (fn *evalVarArgs) OverloadID() string {
 	return fn.overload
 }
 
-// Args returns the argument to the unary function.
+// Args returns the normalized arguments to the function overload.
 func (fn *evalVarArgs) Args() []InterpretableV2 {
 	return fn.args
 }
 
+// evalList evaluates a list construction expression.
 type evalList struct {
 	id           int64
 	elems        []InterpretableV2
@@ -830,26 +839,54 @@ func (l *evalList) ID() int64 {
 
 // Exec implements the InterpretableV2 interface method.
 func (l *evalList) Exec(frame *ExecutionFrame) ref.Val {
-	elemVals := make([]ref.Val, 0, len(l.elems))
 	var unk *types.Unknown
+	if !l.hasOptionals {
+		elemVals := make([]ref.Val, len(l.elems))
+		for i, elem := range l.elems {
+			elemVal := elem.Exec(frame)
+			switch v := elemVal.(type) {
+			case *types.Err:
+				return v
+			case *types.Unknown:
+				if unk == nil {
+					unk = v
+				} else {
+					unk = types.MergeUnknowns(unk, v)
+				}
+			}
+			elemVals[i] = elemVal
+		}
+		if unk != nil {
+			trackCostCreateList(frame, l.id, unk)
+			return unk
+		}
+		res := types.NewRefValList(l.adapter, elemVals)
+		trackCostCreateList(frame, l.id, res)
+		return res
+	}
+
+	elemVals := make([]ref.Val, 0, len(l.elems))
 	for i, elem := range l.elems {
 		elemVal := elem.Exec(frame)
-		if types.IsError(elemVal) {
-			return elemVal
-		}
-		unk, _ = types.MaybeMergeUnknowns(elemVal, unk)
-		if l.hasOptionals && l.optionals[i] {
-			if types.IsUnknown(elemVal) {
-				// skip optional checks for unknown values as they aren't fully resolved yet.
+		switch v := elemVal.(type) {
+		case *types.Err:
+			return v
+		case *types.Unknown:
+			if unk == nil {
+				unk = v
 			} else {
-				optVal, ok := elemVal.(*types.Optional)
-				if !ok {
-					return types.LabelErrNode(l.id, invalidOptionalElementInit(elemVal))
-				}
-				if !optVal.HasValue() {
+				unk = types.MergeUnknowns(unk, v)
+			}
+		case *types.Optional:
+			if l.optionals[i] {
+				if !v.HasValue() {
 					continue
 				}
-				elemVal = optVal.GetValue()
+				elemVal = v.GetValue()
+			}
+		default:
+			if l.optionals[i] {
+				return types.LabelErrNode(l.id, invalidOptionalElementInit(elemVal))
 			}
 		}
 		elemVals = append(elemVals, elemVal)
@@ -894,29 +931,77 @@ func (m *evalMap) ID() int64 {
 func (m *evalMap) Exec(frame *ExecutionFrame) ref.Val {
 	entries := make(map[ref.Val]ref.Val, len(m.keys))
 	var unk *types.Unknown
+	if !m.hasOptionals {
+		for i, key := range m.keys {
+			keyVal := key.Exec(frame)
+			switch v := keyVal.(type) {
+			case *types.Err:
+				return v
+			case *types.Unknown:
+				if unk == nil {
+					unk = v
+				} else {
+					unk = types.MergeUnknowns(unk, v)
+				}
+			}
+
+			valVal := m.vals[i].Exec(frame)
+			switch v := valVal.(type) {
+			case *types.Err:
+				return v
+			case *types.Unknown:
+				if unk == nil {
+					unk = v
+				} else {
+					unk = types.MergeUnknowns(unk, v)
+				}
+			}
+			entries[keyVal] = valVal
+		}
+		if unk != nil {
+			trackCostCreateMap(frame, m.id, unk)
+			return unk
+		}
+		res := types.NewRefValMap(m.adapter, entries)
+		trackCostCreateMap(frame, m.id, res)
+		return res
+	}
+
 	for i, key := range m.keys {
 		keyVal := key.Exec(frame)
-		if types.IsError(keyVal) {
-			return keyVal
+		switch v := keyVal.(type) {
+		case *types.Err:
+			return v
+		case *types.Unknown:
+			if unk == nil {
+				unk = v
+			} else {
+				unk = types.MergeUnknowns(unk, v)
+			}
 		}
-		unk, _ = types.MaybeMergeUnknowns(keyVal, unk)
 
 		valVal := m.vals[i].Exec(frame)
-		if types.IsError(valVal) {
-			return valVal
-		}
-		unk, _ = types.MaybeMergeUnknowns(valVal, unk)
-
-		if m.hasOptionals && m.optionals[i] && !types.IsUnknown(valVal) {
-			optVal, ok := valVal.(*types.Optional)
-			if !ok {
+		switch v := valVal.(type) {
+		case *types.Err:
+			return v
+		case *types.Unknown:
+			if unk == nil {
+				unk = v
+			} else {
+				unk = types.MergeUnknowns(unk, v)
+			}
+		case *types.Optional:
+			if m.optionals[i] {
+				if !v.HasValue() {
+					delete(entries, keyVal)
+					continue
+				}
+				valVal = v.GetValue()
+			}
+		default:
+			if m.optionals[i] {
 				return types.LabelErrNode(m.id, invalidOptionalEntryInit(keyVal, valVal))
 			}
-			if !optVal.HasValue() {
-				delete(entries, keyVal)
-				continue
-			}
-			valVal = optVal.GetValue()
 		}
 		entries[keyVal] = valVal
 	}
@@ -973,22 +1058,53 @@ func (o *evalObj) ID() int64 {
 func (o *evalObj) Exec(frame *ExecutionFrame) ref.Val {
 	fieldVals := make(map[string]ref.Val, len(o.fields))
 	var unk *types.Unknown
+	if !o.hasOptionals {
+		for i, field := range o.fields {
+			val := o.vals[i].Exec(frame)
+			switch v := val.(type) {
+			case *types.Err:
+				return v
+			case *types.Unknown:
+				if unk == nil {
+					unk = v
+				} else {
+					unk = types.MergeUnknowns(unk, v)
+				}
+			}
+			fieldVals[field] = val
+		}
+		if unk != nil {
+			trackCostCreateStruct(frame, o.id, unk)
+			return unk
+		}
+		res := labelErrNode(o.id, o.provider.NewValue(o.typeName, fieldVals))
+		trackCostCreateStruct(frame, o.id, res)
+		return res
+	}
+
 	for i, field := range o.fields {
 		val := o.vals[i].Exec(frame)
-		if types.IsError(val) {
-			return val
-		}
-		unk, _ = types.MaybeMergeUnknowns(val, unk)
-		if o.hasOptionals && o.optionals[i] && !types.IsUnknown(val) {
-			optVal, ok := val.(*types.Optional)
-			if !ok {
+		switch v := val.(type) {
+		case *types.Err:
+			return v
+		case *types.Unknown:
+			if unk == nil {
+				unk = v
+			} else {
+				unk = types.MergeUnknowns(unk, v)
+			}
+		case *types.Optional:
+			if o.optionals[i] {
+				if !v.HasValue() {
+					delete(fieldVals, field)
+					continue
+				}
+				val = v.GetValue()
+			}
+		default:
+			if o.optionals[i] {
 				return types.LabelErrNode(o.id, invalidOptionalEntryInit(field, val))
 			}
-			if !optVal.HasValue() {
-				delete(fieldVals, field)
-				continue
-			}
-			val = optVal.GetValue()
 		}
 		fieldVals[field] = val
 	}
@@ -996,7 +1112,7 @@ func (o *evalObj) Exec(frame *ExecutionFrame) ref.Val {
 		trackCostCreateStruct(frame, o.id, unk)
 		return unk
 	}
-	res := types.LabelErrNode(o.id, o.provider.NewValue(o.typeName, fieldVals))
+	res := labelErrNode(o.id, o.provider.NewValue(o.typeName, fieldVals))
 	trackCostCreateStruct(frame, o.id, res)
 	return res
 }
@@ -1354,10 +1470,14 @@ func (or *evalExhaustiveOr) Exec(frame *ExecutionFrame) ref.Val {
 			isTrue = true
 		}
 		if !ok && !isTrue {
-			isUnk := false
-			unk, isUnk = types.MaybeMergeUnknowns(val, unk)
-			if !isUnk && err == nil {
-				if types.IsError(val) {
+			if unkVal, isUnk := val.(*types.Unknown); isUnk {
+				if unk == nil {
+					unk = unkVal
+				} else {
+					unk = types.MergeUnknowns(unk, unkVal)
+				}
+			} else if err == nil {
+				if isError(val) {
 					err = val
 				} else {
 					err = types.MaybeNoSuchOverloadErr(val)
@@ -1406,10 +1526,14 @@ func (and *evalExhaustiveAnd) Exec(frame *ExecutionFrame) ref.Val {
 			isFalse = true
 		}
 		if !ok && !isFalse {
-			isUnk := false
-			unk, isUnk = types.MaybeMergeUnknowns(val, unk)
-			if !isUnk && err == nil {
-				if types.IsError(val) {
+			if unkVal, isUnk := val.(*types.Unknown); isUnk {
+				if unk == nil {
+					unk = unkVal
+				} else {
+					unk = types.MergeUnknowns(unk, unkVal)
+				}
+			} else if err == nil {
+				if isError(val) {
 					err = val
 				} else {
 					err = types.MaybeNoSuchOverloadErr(val)
@@ -1860,4 +1984,45 @@ func trackCostQualify(frame *ExecutionFrame, id int64) {
 	if costs := frame.CostTracker(); costs != nil {
 		costs.Qualify(id)
 	}
+}
+
+func isError(val ref.Val) bool {
+	_, ok := val.(*types.Err)
+	return ok
+}
+
+func isUnknown(val ref.Val) bool {
+	_, ok := val.(*types.Unknown)
+	return ok
+}
+
+func mergeBinaryUnknowns(lVal, rVal ref.Val) *types.Unknown {
+	lUnk, lIsUnk := lVal.(*types.Unknown)
+	rUnk, rIsUnk := rVal.(*types.Unknown)
+	if !lIsUnk {
+		if !rIsUnk {
+			return nil
+		}
+		return rUnk
+	}
+	if !rIsUnk {
+		return lUnk
+	}
+	return types.MergeUnknowns(lUnk, rUnk)
+}
+
+func mergeUnknown(dst *types.Unknown, src ref.Val) *types.Unknown {
+	if unk, ok := src.(*types.Unknown); ok {
+		if dst == nil {
+			return unk
+		}
+		return types.MergeUnknowns(dst, unk)
+	}
+	return dst
+}
+func labelErrNode(id int64, val ref.Val) ref.Val {
+	if err, ok := val.(*types.Err); ok && err.NodeID() == 0 {
+		return types.LabelErrNode(id, err)
+	}
+	return val
 }
