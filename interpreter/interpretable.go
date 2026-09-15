@@ -161,7 +161,7 @@ func (oi *ObservableInterpretable) Exec(frame *ExecutionFrame) ref.Val {
 
 // Eval proxies to the ObserveEval method while invoking a no-op callback to report the observations.
 func (oi *ObservableInterpretable) Eval(vars Activation) ref.Val {
-	return oi.ObserveExec(AsFrame(vars), func(any) {})
+	return oi.ObserveEval(vars, func(any) {})
 }
 
 // ObserveEval evaluates an interpretable and performs per-evaluation state-tracking.
@@ -169,7 +169,16 @@ func (oi *ObservableInterpretable) Eval(vars Activation) ref.Val {
 // This method is concurrency safe and the expectation is that the observer function will use
 // a switch statement to determine the type of the state which has been reported back from the call.
 func (oi *ObservableInterpretable) ObserveEval(vars Activation, observer func(any)) ref.Val {
-	return oi.ObserveExec(AsFrame(vars), observer)
+	frame, ok := vars.(*ExecutionFrame)
+	if !ok {
+		var err error
+		frame, err = NewExecutionFrame(vars)
+		if err != nil {
+			return types.NewErr("invalid activation: %v", err)
+		}
+		defer frame.Close()
+	}
+	return oi.ObserveExec(frame, observer)
 }
 
 // ObserveExec evaluates an interpretable and performs per-evaluation state-tracking.
@@ -195,18 +204,19 @@ func (oi *ObservableInterpretable) ObserveExec(frame *ExecutionFrame, observer f
 	return result
 }
 
-// AsFrame promotes an Activation to an ExecutionFrame.
-func AsFrame(a Activation) *ExecutionFrame {
-	if f, ok := a.(*ExecutionFrame); ok {
-		return f
+// EvalActivation runs an InterpretableV2 Exec method safely with any Activation,
+// wrapping it in a pooled ExecutionFrame if needed and releasing it after execution.
+func EvalActivation(ctx Activation, exec func(*ExecutionFrame) ref.Val) ref.Val {
+	if f, ok := ctx.(*ExecutionFrame); ok {
+		return exec(f)
 	}
-	frame := &ExecutionFrame{Activation: a}
-	// Walk the activation hierarchy to find a parent ExecutionFrame and inherit
-	// its shared context.
-	if parent := findFrame(a); parent != nil {
-		frame.ctx = parent.ctx
+	f, err := NewExecutionFrame(ctx)
+	if err != nil {
+		return types.NewErr("invalid activation: %v", err)
 	}
-	return frame
+	res := exec(f)
+	f.Close()
+	return res
 }
 
 // findFrame walks the activation hierarchy via Unwrap and Parent to locate an
@@ -258,7 +268,7 @@ func (test *evalTestOnly) Exec(frame *ExecutionFrame) ref.Val {
 
 // Eval implements the Interpretable interface method.
 func (test *evalTestOnly) Eval(ctx Activation) ref.Val {
-	return test.Exec(AsFrame(ctx))
+	return EvalActivation(ctx, test.Exec)
 }
 
 // AddQualifier appends a qualifier that will always and only perform a presence test.
@@ -376,7 +386,7 @@ func (or *evalOr) Exec(frame *ExecutionFrame) ref.Val {
 
 // Eval implements the Interpretable interface method.
 func (or *evalOr) Eval(ctx Activation) ref.Val {
-	return or.Exec(AsFrame(ctx))
+	return EvalActivation(ctx, or.Exec)
 }
 
 type evalAnd struct {
@@ -424,7 +434,7 @@ func (and *evalAnd) Exec(frame *ExecutionFrame) ref.Val {
 
 // Eval implements the Interpretable interface method.
 func (and *evalAnd) Eval(ctx Activation) ref.Val {
-	return and.Exec(AsFrame(ctx))
+	return EvalActivation(ctx, and.Exec)
 }
 
 type evalEq struct {
@@ -468,7 +478,7 @@ func (eq *evalEq) Exec(frame *ExecutionFrame) ref.Val {
 
 // Eval implements the Interpretable interface method.
 func (eq *evalEq) Eval(ctx Activation) ref.Val {
-	return eq.Exec(AsFrame(ctx))
+	return EvalActivation(ctx, eq.Exec)
 }
 
 // Function implements the InterpretableCall interface method.
@@ -527,7 +537,7 @@ func (ne *evalNe) Exec(frame *ExecutionFrame) ref.Val {
 
 // Eval implements the Interpretable interface method.
 func (ne *evalNe) Eval(ctx Activation) ref.Val {
-	return ne.Exec(AsFrame(ctx))
+	return EvalActivation(ctx, ne.Exec)
 }
 
 // Function implements the InterpretableCall interface method.
@@ -566,7 +576,7 @@ func (zero *evalZeroArity) Exec(frame *ExecutionFrame) ref.Val {
 
 // Eval implements the Interpretable interface method.
 func (zero *evalZeroArity) Eval(ctx Activation) ref.Val {
-	return zero.Exec(AsFrame(ctx))
+	return EvalActivation(ctx, zero.Exec)
 }
 
 // Function implements the InterpretableCall interface method.
@@ -634,7 +644,7 @@ func (un *evalUnary) Exec(frame *ExecutionFrame) ref.Val {
 
 // Eval implements the Interpretable interface method.
 func (un *evalUnary) Eval(ctx Activation) ref.Val {
-	return un.Exec(AsFrame(ctx))
+	return EvalActivation(ctx, un.Exec)
 }
 
 // Function implements the InterpretableCall interface method.
@@ -706,7 +716,7 @@ func (bin *evalBinary) Exec(frame *ExecutionFrame) ref.Val {
 
 // Eval implements the Interpretable interface method.
 func (bin *evalBinary) Eval(ctx Activation) ref.Val {
-	return bin.Exec(AsFrame(ctx))
+	return EvalActivation(ctx, bin.Exec)
 }
 
 // Function implements the InterpretableCall interface method.
@@ -797,7 +807,7 @@ func (fn *evalVarArgs) Exec(frame *ExecutionFrame) ref.Val {
 
 // Eval implements the Interpretable interface method.
 func (fn *evalVarArgs) Eval(ctx Activation) ref.Val {
-	return fn.Exec(AsFrame(ctx))
+	return EvalActivation(ctx, fn.Exec)
 }
 
 // Function implements the InterpretableCall interface method.
@@ -865,7 +875,7 @@ func (l *evalList) Exec(frame *ExecutionFrame) ref.Val {
 
 // Eval implements the Interpretable interface method.
 func (l *evalList) Eval(ctx Activation) ref.Val {
-	return l.Exec(AsFrame(ctx))
+	return EvalActivation(ctx, l.Exec)
 }
 
 func (l *evalList) InitVals() []InterpretableV2 {
@@ -931,7 +941,7 @@ func (m *evalMap) Exec(frame *ExecutionFrame) ref.Val {
 
 // Eval implements the Interpretable interface method.
 func (m *evalMap) Eval(ctx Activation) ref.Val {
-	return m.Exec(AsFrame(ctx))
+	return EvalActivation(ctx, m.Exec)
 }
 
 func (m *evalMap) InitVals() []InterpretableV2 {
@@ -1003,7 +1013,7 @@ func (o *evalObj) Exec(frame *ExecutionFrame) ref.Val {
 
 // Eval implements the Interpretable interface method.
 func (o *evalObj) Eval(ctx Activation) ref.Val {
-	return o.Exec(AsFrame(ctx))
+	return EvalActivation(ctx, o.Exec)
 }
 
 // InitVals implements the InterpretableConstructor interface method.
@@ -1042,14 +1052,23 @@ func (fold *evalFold) ID() int64 {
 
 // Exec implements the InterpretableV2 interface method.
 func (fold *evalFold) Exec(frame *ExecutionFrame) ref.Val {
-	// Initialize the folder interface
 	f := newFolder(fold, frame)
-	defer releaseFolder(f)
-
 	foldRange := fold.iterRange.Exec(frame)
+
+	// Early return if the folder is an error or unknown.
 	if types.IsUnknownOrError(foldRange) {
+		releaseFolder(f)
 		return foldRange
 	}
+
+	// Short-circuit the iteration if the range is empty.
+	if sizer, ok := foldRange.(traits.Sizer); ok && sizer.Size() == types.IntZero {
+		res := f.evalResult()
+		releaseFolder(f)
+		return res
+	}
+
+	// Otherwise, attempt a two variable fold.
 	if fold.iterVar2 != "" {
 		var foldable traits.Foldable
 		switch r := foldRange.(type) {
@@ -1063,19 +1082,25 @@ func (fold *evalFold) Exec(frame *ExecutionFrame) ref.Val {
 			return types.NewErrWithNodeID(fold.ID(), "unsupported comprehension range type: %T", foldRange)
 		}
 		foldable.Fold(f)
-		return f.evalResult()
+		res := f.evalResult()
+		releaseFolder(f)
+		return res
 	}
 
+	// If the value is not foldable or just a single variable, fallback to an iterable fold.
 	if !foldRange.Type().HasTrait(traits.IterableType) {
+		releaseFolder(f)
 		return types.ValOrErr(foldRange, "got '%T', expected iterable type", foldRange)
 	}
 	iterable := foldRange.(traits.Iterable)
-	return f.foldIterable(iterable)
+	res := f.foldIterable(iterable)
+	releaseFolder(f)
+	return res
 }
 
 // Eval implements the Interpretable interface method.
 func (fold *evalFold) Eval(ctx Activation) ref.Val {
-	return fold.Exec(AsFrame(ctx))
+	return EvalActivation(ctx, fold.Exec)
 }
 
 // Optional Interpretable implementations that specialize, subsume, or extend the core evaluation
@@ -1108,7 +1133,7 @@ func (e *evalSetMembership) Exec(frame *ExecutionFrame) ref.Val {
 
 // Eval implements the Interpretable interface method.
 func (e *evalSetMembership) Eval(ctx Activation) ref.Val {
-	return e.Exec(AsFrame(ctx))
+	return EvalActivation(ctx, e.Exec)
 }
 
 // evalWatch is an Interpretable implementation that wraps the execution of a given
@@ -1127,7 +1152,7 @@ func (e *evalWatch) Exec(frame *ExecutionFrame) ref.Val {
 
 // Eval implements the Interpretable interface method.
 func (e *evalWatch) Eval(vars Activation) ref.Val {
-	return e.Exec(AsFrame(vars))
+	return EvalActivation(vars, e.Exec)
 }
 
 // evalWatchAttr describes a watcher of an InterpretableAttribute Interpretable.
@@ -1191,7 +1216,7 @@ func (e *evalWatchAttr) Exec(frame *ExecutionFrame) ref.Val {
 
 // Eval implements the Interpretable interface method.
 func (e *evalWatchAttr) Eval(vars Activation) ref.Val {
-	return e.Exec(AsFrame(vars))
+	return EvalActivation(vars, e.Exec)
 }
 
 // evalWatchConstQual observes the qualification of an object using a constant boolean, int,
@@ -1327,7 +1352,7 @@ func (e *evalWatchConst) Exec(frame *ExecutionFrame) ref.Val {
 
 // Eval implements the Interpretable interface method.
 func (e *evalWatchConst) Eval(vars Activation) ref.Val {
-	return e.Exec(AsFrame(vars))
+	return EvalActivation(vars, e.Exec)
 }
 
 // evalExhaustiveOr is just like evalOr, but does not short-circuit argument evaluation.
@@ -1379,7 +1404,7 @@ func (or *evalExhaustiveOr) Exec(frame *ExecutionFrame) ref.Val {
 
 // Eval implements the Interpretable interface method.
 func (or *evalExhaustiveOr) Eval(ctx Activation) ref.Val {
-	return or.Exec(AsFrame(ctx))
+	return EvalActivation(ctx, or.Exec)
 }
 
 // evalExhaustiveAnd is just like evalAnd, but does not short-circuit argument evaluation.
@@ -1431,7 +1456,7 @@ func (and *evalExhaustiveAnd) Exec(frame *ExecutionFrame) ref.Val {
 
 // Eval implements the Interpretable interface method.
 func (and *evalExhaustiveAnd) Eval(ctx Activation) ref.Val {
-	return and.Exec(AsFrame(ctx))
+	return EvalActivation(ctx, and.Exec)
 }
 
 // evalExhaustiveConditional is like evalConditional, but does not short-circuit argument
@@ -1470,7 +1495,7 @@ func (cond *evalExhaustiveConditional) Exec(frame *ExecutionFrame) ref.Val {
 
 // Eval implements the Interpretable interface method.
 func (cond *evalExhaustiveConditional) Eval(ctx Activation) ref.Val {
-	return cond.Exec(AsFrame(ctx))
+	return EvalActivation(ctx, cond.Exec)
 }
 
 // evalAttr evaluates an Attribute value.
@@ -1521,7 +1546,7 @@ func (a *evalAttr) Exec(frame *ExecutionFrame) ref.Val {
 
 // Eval implements the Interpretable interface method.
 func (a *evalAttr) Eval(ctx Activation) ref.Val {
-	return a.Exec(AsFrame(ctx))
+	return EvalActivation(ctx, a.Exec)
 }
 
 // Qualify proxies to the Attribute's Qualify method.
@@ -1572,7 +1597,7 @@ func (c *evalWatchConstructor) Exec(frame *ExecutionFrame) ref.Val {
 
 // Eval implements the Interpretable Eval function.
 func (c *evalWatchConstructor) Eval(vars Activation) ref.Val {
-	return c.Exec(AsFrame(vars))
+	return EvalActivation(vars, c.Exec)
 }
 
 func invalidOptionalEntryInit(field any, value ref.Val) ref.Val {
@@ -1693,10 +1718,16 @@ func (f *folder) ResolveName(name string) (any, bool) {
 	}
 	if !f.computeResult {
 		if name == f.iterVar {
+			if v, ok := f.iterVar1Val.(ref.Val); ok {
+				return v, true
+			}
 			f.iterVar1Val = f.adapter.NativeToValue(f.iterVar1Val)
 			return f.iterVar1Val, true
 		}
 		if name == f.iterVar2 {
+			if v, ok := f.iterVar2Val.(ref.Val); ok {
+				return v, true
+			}
 			f.iterVar2Val = f.adapter.NativeToValue(f.iterVar2Val)
 			return f.iterVar2Val, true
 		}
@@ -1733,8 +1764,8 @@ func (f *folder) IsLocalVariable(name string) bool {
 // UnknownAttributePatterns implements the PartialActivation interface returning the unknown patterns
 // if they were provided to the input activation, or an empty set if the proxied activation is not partial.
 func (f *folder) UnknownAttributePatterns() []*AttributePattern {
-	if pv, ok := f.frame.parent.Activation.(partialActivationConverter); ok {
-		if partial, isPartial := pv.AsPartialActivation(); isPartial {
+	if f.frame.parent != nil {
+		if partial, isPartial := f.frame.parent.AsPartialActivation(); isPartial {
 			return partial.UnknownAttributePatterns()
 		}
 	}
@@ -1742,8 +1773,8 @@ func (f *folder) UnknownAttributePatterns() []*AttributePattern {
 }
 
 func (f *folder) AsPartialActivation() (PartialActivation, bool) {
-	if pv, ok := f.frame.parent.Activation.(partialActivationConverter); ok {
-		if _, isPartial := pv.AsPartialActivation(); isPartial {
+	if f.frame.parent != nil {
+		if _, isPartial := f.frame.parent.AsPartialActivation(); isPartial {
 			return f, true
 		}
 	}

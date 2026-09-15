@@ -426,6 +426,7 @@ func (p *prog) Eval(input any) (out ref.Val, det *EvalDetails, err error) {
 	}
 	// Build a hierarchical activation if there are default vars set.
 	var frame *interpreter.ExecutionFrame
+	var mustClose bool
 	if f, ok := input.(*interpreter.ExecutionFrame); ok {
 		frame = f
 	} else {
@@ -433,7 +434,7 @@ func (p *prog) Eval(input any) (out ref.Val, det *EvalDetails, err error) {
 		if err != nil {
 			return nil, nil, err
 		}
-		defer frame.Close()
+		mustClose = true
 	}
 	// Configure error recovery and details capture for evaluation.
 	defer func() {
@@ -445,6 +446,9 @@ func (p *prog) Eval(input any) (out ref.Val, det *EvalDetails, err error) {
 			default:
 				err = fmt.Errorf("internal error: %v", r)
 			}
+		}
+		if mustClose {
+			frame.Close()
 		}
 	}()
 
@@ -499,8 +503,7 @@ func (p *prog) newExecutionFrame(input any) (*interpreter.ExecutionFrame, error)
 		return nil, err
 	}
 	if p.defaultVars != nil {
-		// Update the frame's activation in place.
-		frame.Activation = interpreter.NewHierarchicalActivation(p.defaultVars, frame.Activation)
+		frame.SetDefaultVars(p.defaultVars)
 	}
 
 	return frame, nil

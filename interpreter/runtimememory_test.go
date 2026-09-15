@@ -371,7 +371,10 @@ func benchmarkMemoryTracker(b *testing.B, expr string, vars []*decls.VariableDec
 		b.Fatalf("NewInterpretable() failed: %v", err)
 	}
 
-	frame := AsFrame(constructTestActivation(b, in))
+	frame, err := NewExecutionFrame(constructTestActivation(b, in))
+	if err != nil {
+		b.Fatalf("NewExecutionFrame() failed: %v", err)
+	}
 
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -494,7 +497,10 @@ func runOptionsBenchmark(b *testing.B, expr string, vars []*decls.VariableDecl, 
 		b.Fatalf("NewInterpretable() failed: %v", err)
 	}
 
-	frame := AsFrame(constructTestActivation(b, in))
+	frame, err := NewExecutionFrame(constructTestActivation(b, in))
+	if err != nil {
+		b.Fatalf("NewExecutionFrame() failed: %v", err)
+	}
 
 	b.ResetTimer()
 	b.ReportAllocs()

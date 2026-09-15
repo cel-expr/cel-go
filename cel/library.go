@@ -981,7 +981,7 @@ func (opt *evalOptionalOr) Exec(frame *interpreter.ExecutionFrame) ref.Val {
 // Eval evaluates the left-hand side optional to determine whether it contains a value, else
 // proceeds with the right-hand side evaluation.
 func (opt *evalOptionalOr) Eval(ctx interpreter.Activation) ref.Val {
-	return opt.Exec(interpreter.AsFrame(ctx))
+	return interpreter.EvalActivation(ctx, opt.Exec)
 }
 
 // evalOptionalOrValue selects between an optional or a concrete value. If the optional has a value,
@@ -1017,7 +1017,7 @@ func (opt *evalOptionalOrValue) Exec(frame *interpreter.ExecutionFrame) ref.Val 
 // Eval evaluates the left-hand side optional to determine whether it contains a value, else
 // proceeds with the right-hand side evaluation.
 func (opt *evalOptionalOrValue) Eval(ctx interpreter.Activation) ref.Val {
-	return opt.Exec(interpreter.AsFrame(ctx))
+	return interpreter.EvalActivation(ctx, opt.Exec)
 }
 
 type timeLegacyLibrary struct{}

@@ -86,8 +86,8 @@ func (mt *memoryTrackerFactory) GetState(frame *ExecutionFrame) any {
 // peak at the expression nodes which produced them; constants are part of the program image
 // rather than runtime-materialized memory and are not observed.
 func (mt *memoryTrackerFactory) Observe(vars Activation, id int64, programStep any, val ref.Val) {
-	frame := AsFrame(vars)
-	if frame == nil || frame.ctx == nil || frame.ctx.memory == nil {
+	frame, ok := vars.(*ExecutionFrame)
+	if !ok || frame.ctx == nil || frame.ctx.memory == nil {
 		return
 	}
 	tracker := frame.ctx.memory

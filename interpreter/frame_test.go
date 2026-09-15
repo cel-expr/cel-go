@@ -265,8 +265,8 @@ func TestFrameUnwrap(t *testing.T) {
 	childFrame := frame.Push(childAct)
 	defer childFrame.Pop()
 
-	if got := childFrame.Unwrap(); got != childFrame.Activation {
-		t.Errorf("Unwrap() got %v, want %v", got, childFrame.Activation)
+	if got := childFrame.Unwrap(); got != childFrame.Scope() {
+		t.Errorf("Unwrap() got %v, want %v", got, childFrame.Scope())
 	}
 }
 
@@ -410,7 +410,7 @@ func TestFrameLifecycleAndPooling(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewActivation failed: %v", err)
 	}
-	frame.Activation = NewHierarchicalActivation(parentAct, frame.Activation)
+	frame.SetDefaultVars(parentAct)
 
 	val, found = frame.ResolveName("c")
 	if !found || val != 3 {

@@ -335,7 +335,11 @@ func (a *absoluteAttribute) Resolve(vars Activation) (any, error) {
 		inputVars = vars
 		wrapped, ok := inputVars.(activationWrapper)
 		for ok {
-			inputVars = wrapped.Unwrap()
+			next := wrapped.Unwrap()
+			if next == nil {
+				break
+			}
+			inputVars = next
 			wrapped, ok = inputVars.(activationWrapper)
 		}
 	}
@@ -1304,6 +1308,12 @@ func (q *unknownQualifier) Value() ref.Val {
 }
 
 func applyQualifiers(vars Activation, obj any, qualifiers []Qualifier) (any, bool, error) {
+	// Early return if there's nothing to apply
+	if len(qualifiers) == 0 {
+		return obj, false, nil
+	}
+
+	// Test for an optional select that's on an empty value.
 	optObj, isOpt := obj.(*types.Optional)
 	if isOpt {
 		if !optObj.HasValue() {
@@ -1312,6 +1322,7 @@ func applyQualifiers(vars Activation, obj any, qualifiers []Qualifier) (any, boo
 		obj = optObj.GetValue()
 	}
 
+	frame, hasFrame := vars.(*ExecutionFrame)
 	var err error
 	for _, qual := range qualifiers {
 		var qualObj any
@@ -1319,7 +1330,9 @@ func applyQualifiers(vars Activation, obj any, qualifiers []Qualifier) (any, boo
 		if isOpt {
 			var present bool
 			qualObj, present, err = qual.QualifyIfPresent(vars, obj, false)
-			trackCostQualify(AsFrame(vars), qual.ID())
+			if hasFrame {
+				trackCostQualify(frame, qual.ID())
+			}
 			if err != nil {
 				return nil, false, err
 			}
@@ -1331,7 +1344,9 @@ func applyQualifiers(vars Activation, obj any, qualifiers []Qualifier) (any, boo
 			}
 		} else {
 			qualObj, err = qual.Qualify(vars, obj)
-			trackCostQualify(AsFrame(vars), qual.ID())
+			if hasFrame {
+				trackCostQualify(frame, qual.ID())
+			}
 			if err != nil {
 				return nil, false, err
 			}

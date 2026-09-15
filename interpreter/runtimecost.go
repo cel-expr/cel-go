@@ -130,5 +130,5 @@ func (c *costTrackingInterpretable) Exec(frame *ExecutionFrame) ref.Val {
 }
 
 func (c *costTrackingInterpretable) Eval(ctx Activation) ref.Val {
-	return c.Exec(AsFrame(ctx))
+	return EvalActivation(ctx, c.Exec)
 }

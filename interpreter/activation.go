@@ -43,7 +43,8 @@ func EmptyActivation() Activation {
 type emptyActivation struct{}
 
 func (emptyActivation) ResolveName(string) (any, bool) { return nil, false }
-func (emptyActivation) Parent() Activation             { return nil }
+
+func (emptyActivation) Parent() Activation { return nil }
 
 // NewActivation returns an activation based on a map-based binding where the map keys are
 // expected to be qualified names used with ResolveName calls.
@@ -122,10 +123,15 @@ func (a *hierarchicalActivation) Parent() Activation {
 
 // ResolveName implements the Activation interface method.
 func (a *hierarchicalActivation) ResolveName(name string) (any, bool) {
-	if object, found := a.child.ResolveName(name); found {
-		return object, found
+	if a.child != nil {
+		if object, found := a.child.ResolveName(name); found {
+			return object, found
+		}
 	}
-	return a.parent.ResolveName(name)
+	if a.parent != nil {
+		return a.parent.ResolveName(name)
+	}
+	return nil, false
 }
 
 // Unwrap returns the parent activation, stripping the local child scope.

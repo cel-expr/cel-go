@@ -93,7 +93,7 @@ func (fn *evalAsyncFunc) Args() []InterpretableV2 {
 
 // Eval implements the Interpretable interface method.
 func (fn *evalAsyncFunc) Eval(vars Activation) ref.Val {
-	return fn.Exec(AsFrame(vars))
+	return EvalActivation(vars, fn.Exec)
 }
 
 // Exec implements the InterpretableV2 interface method.

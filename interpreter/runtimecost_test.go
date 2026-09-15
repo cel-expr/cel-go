@@ -100,7 +100,10 @@ func TestCostObserverIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewActivation() failed: %v", err)
 	}
-	frame := AsFrame(act)
+	frame, err := NewExecutionFrame(act)
+	if err != nil {
+		t.Fatalf("NewExecutionFrame() failed: %v", err)
+	}
 	prg.Exec(frame)
 
 	if tracker.ActualCost() != 3 {
@@ -213,7 +216,10 @@ func TestListMapAccessCost(t *testing.T) {
 			if err != nil {
 				t.Fatalf("NewActivation() failed: %v", err)
 			}
-			frame := AsFrame(act)
+			frame, err := NewExecutionFrame(act)
+			if err != nil {
+				t.Fatalf("NewExecutionFrame() failed: %v", err)
+			}
 			res := prg.Exec(frame)
 			actual := tracker.ActualCost()
 			t.Logf("expr: %s => res: %v, actual cost: %d, expected: %d", expr, res, actual, expected)

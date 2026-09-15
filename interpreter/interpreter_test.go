@@ -2701,7 +2701,11 @@ func program(t testing.TB, tst *testCase, opts ...PlannerOption) (InterpretableV
 		if err != nil {
 			return nil, nil, err
 		}
-		return prg, AsFrame(vars), nil
+		frame, err := NewExecutionFrame(vars)
+		if err != nil {
+			return nil, nil, err
+		}
+		return prg, frame, nil
 	}
 	// Check the expression.
 	checked, errs := checker.Check(parsed, s, env)
@@ -2713,7 +2717,11 @@ func program(t testing.TB, tst *testCase, opts ...PlannerOption) (InterpretableV
 	if err != nil {
 		return nil, nil, err
 	}
-	return prg, AsFrame(vars), nil
+	frame, err := NewExecutionFrame(vars)
+	if err != nil {
+		return nil, nil, err
+	}
+	return prg, frame, nil
 }
 
 func base64Encode(val ref.Val) ref.Val {
@@ -2855,15 +2863,6 @@ func funcBindings(t testing.TB, funcs ...*decls.FunctionDecl) []*functions.Overl
 		bindings = append(bindings, overloads...)
 	}
 	return bindings
-}
-
-type testActivationWrapper struct {
-	Activation
-	name string
-}
-
-func (tw *testActivationWrapper) Unwrap() Activation {
-	return tw.Activation
 }
 
 func TestInterruptErrorIs(t *testing.T) {
@@ -3042,33 +3041,6 @@ func TestExhaustiveOperatorsLegacyEval(t *testing.T) {
 	}
 }
 
-func TestFindFrame(t *testing.T) {
-	frame := mustNewExecutionFrame(t, EmptyActivation())
-	defer frame.Close()
-
-	tests := []struct {
-		name string
-		act  Activation
-	}{
-		{
-			name: "nested wrapper",
-			act:  &testActivationWrapper{Activation: &testActivationWrapper{Activation: frame, name: "w1"}, name: "w2"},
-		},
-		{
-			name: "parent hierarchy",
-			act:  &parentActivationWrapper{parent: frame},
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			found := findFrame(tc.act)
-			if found != frame {
-				t.Errorf("findFrame() = %v, wanted %v", found, frame)
-			}
-		})
-	}
-}
-
 func TestObservableInterpretable(t *testing.T) {
 	obsInt := &ObservableInterpretable{InterpretableV2: NewConstValue(12, types.True)}
 	if obsInt.ID() != 12 {
@@ -3090,16 +3062,4 @@ func (t *testLegacyInterpretable) ID() int64 {
 
 func (t *testLegacyInterpretable) Eval(vars Activation) ref.Val {
 	return types.IntOne
-}
-
-type parentActivationWrapper struct {
-	parent Activation
-}
-
-func (paw *parentActivationWrapper) ResolveName(name string) (any, bool) {
-	return paw.parent.ResolveName(name)
-}
-
-func (paw *parentActivationWrapper) Parent() Activation {
-	return paw.parent
 }
