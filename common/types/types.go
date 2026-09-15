@@ -412,6 +412,11 @@ func (t *Type) String() string {
 	return fmt.Sprintf("%s(%s)", t.DeclaredTypeName(), strings.Join(params, ", "))
 }
 
+// IsDyn indicates whether the type is dynamic in any way.
+func (t *Type) IsDyn() bool {
+	return t.isDyn()
+}
+
 // isDyn indicates whether the type is dynamic in any way.
 func (t *Type) isDyn() bool {
 	k := t.Kind()

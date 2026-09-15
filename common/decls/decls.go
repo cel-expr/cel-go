@@ -882,15 +882,16 @@ func (o *OverloadDecl) matchesRuntimeSignature(disableTypeGuards bool, args ...r
 }
 
 func matchRuntimeArgType(nonStrict, disableTypeGuards bool, argType *types.Type, arg ref.Val) bool {
-	if nonStrict && (disableTypeGuards || types.IsUnknownOrError(arg)) {
+	if disableTypeGuards {
 		return true
 	}
-	// Note, early returns and unknown aggregation happen in the interpretable.go file; however, this check is here
-	// for defense in depth or for scenarios where someone manipulates bindings to offer their own dispatch logic.
-	if types.IsUnknownOrError(arg) {
-		return false
+	if argType.IsAssignableRuntimeType(arg) {
+		if !nonStrict && argType.IsDyn() && types.IsUnknownOrError(arg) {
+			return false
+		}
+		return true
 	}
-	return disableTypeGuards || argType.IsAssignableRuntimeType(arg)
+	return nonStrict && types.IsUnknownOrError(arg)
 }
 
 func matchOperandTrait(trait int, arg ref.Val) bool {
