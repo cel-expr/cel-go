@@ -216,6 +216,7 @@ func TestAlgorithmConstants(t *testing.T) {
 
 func TestHMACCompositionWithEncodersAndStrings(t *testing.T) {
 	env, err := cel.NewEnv(
+		cel.OptionalTypes(),
 		hmaclib.Library(),
 		ext.Encoders(),
 		ext.Strings(),

@@ -2,11 +2,12 @@
 
 ## 1. Overview
 
-The `encoders` extension library provides standard encoding, decoding, and parsing functions for Common Expression Language (CEL). It allows expressions to safely interact with serialized data representations like Base64 and JSON without compromising execution safety, determinism, or resource boundaries.
+The `encoders` extension library provides standard encoding, decoding, and parsing functions for Common Expression Language (CEL). It allows expressions to safely interact with serialized data representations like Base64, JSON, and YAML without compromising execution safety, determinism, or resource boundaries.
 
-The library defines functions under two primary namespaces:
+The library defines functions under three primary namespaces:
 - `base64`: For standard Base64 binary-to-text encoding and decoding.
 - `json`: For serializing CEL values to JSON and parsing JSON payloads into dynamic or strongly-typed CEL representations.
+- `yaml`: For serializing CEL values to YAML and parsing YAML payloads into dynamic or strongly-typed CEL representations.
 
 ---
 
@@ -73,19 +74,42 @@ json.parse(string, type(T)) -> optional_type(T)
     - `json:",omitempty"`: omits zero-value fields during serialization.
 - Returns `optional.none()` if the JSON value does not match the expected target schema or type.
 
+### 3.3. YAML Functions
+
+```text
+yaml.encode(dyn) -> string
+yaml.parse(string) -> optional_type(dyn)
+yaml.parse(string, type(T)) -> optional_type(T)
+```
+
+#### `yaml.encode(val)`
+- Converts any CEL value into a YAML string, building directly on top of JSON serialization:
+  - First converts CEL `val` to JSON via `jsonEncodeValue(val)` (handling primitives, lists, maps, protobuf messages, native Go structs with `json` struct tags).
+  - Unmarshals the normalized intermediate representation and marshals it into formatted YAML via `go.yaml.in/yaml/v3`.
+  - Produces valid YAML ending with a newline.
+
+#### `yaml.parse(string)` & `yaml.parse(string, type(T))`
+- Decodes YAML into a sanitized intermediate JSON structure, then leverages `json.parse` / `jsonParseWithType` engine:
+  - Validates a single root YAML document (multiple documents return `optional.none()`).
+  - Supports all dynamic and strongly-typed schema targets (primitives, lists, maps, timestamps, durations, protobuf messages, Go structs).
+  - Returns `optional.none()` on malformed YAML syntax or schema mismatches.
+
 ---
 
 ## 4. Security & Resource Bounds
 
 ### 4.1. Payload Size Limit
-To prevent memory exhaustion attacks (e.g., billion-laughs-style JSON bombs, deeply nested objects, or multi-gigabyte payloads), `json.parse` enforces a strict 10MB maximum input size:
+To prevent memory exhaustion attacks (e.g., billion-laughs-style bombs, deeply nested structures, or multi-gigabyte payloads), `json.parse` and `yaml.parse` enforce a strict 10MB maximum input size:
 ```go
-const maxJSONSize = 10 * 1024 * 1024 // 10MB
+const (
+    maxJSONSize = 10 * 1024 * 1024 // 10MB
+    maxYAMLSize = 10 * 1024 * 1024 // 10MB
+)
 ```
 Inputs exceeding this limit immediately return a CEL runtime error.
 
 ### 4.2. Cost Modeling
-JSON parsing and serialization complexity cannot be statically bounded without inspecting runtime payloads and target schema depths. Therefore:
+JSON and YAML parsing and serialization complexity cannot be statically bounded without inspecting runtime payloads and target schema depths. Therefore:
 - **Cost Estimation**: Overload cost estimators return `checker.UnknownCostEstimate()` (`CostEstimate{Min: 0, Max: math.MaxUint64}`).
 - **Cost Tracking**: Runtime cost trackers return `math.MaxUint64`.
 
@@ -93,7 +117,7 @@ JSON parsing and serialization complexity cannot be statically bounded without i
 
 ### 5.1. Instantiation via `Provider.NewValue`
 
-`json.parse` utilizes `types.Provider.NewValue(typeName, map[string]ref.Val{})` to instantiate target types:
+`json.parse` and `yaml.parse` utilize `types.Provider.NewValue(typeName, map[string]ref.Val{})` to instantiate target types:
 1. **Protobuf Messages**: `NewValue` returns a proto value whose underlying `proto.Message` is cloned and populated using `protojson.Unmarshal`.
 2. **Native Go Objects**: `NewValue` returns a native struct value whose `reflect.Type` is used to instantiate a pointer (`reflect.New(rt)`) and populated via standard `json.Unmarshal`.
 3. **No Private Registry Exposure**: Avoids leaking internal registry structures or requiring custom reflection getters on `Registry`.
@@ -102,8 +126,7 @@ JSON parsing and serialization complexity cannot be statically bounded without i
 
 To maintain a clean separation of concerns:
 - **`common/types/native.go` & `ext/native.go`**: Contain all Go struct reflection, struct tag inspection (`json:"..."`, `cel:"..."`, `omitempty`, `json:"-"`), anonymous embedded struct promotion, and zero-value omission rules. `nativeObj.ConvertToNative(types.JSONValueType)` / `nativeObj.ConvertToNative(types.JSONStructType)` transforms native objects into standard structured representations.
-- **`ext/encoders.go`**: Acts as a format-level encoder/decoder. It performs payload size verification, invokes `val.ConvertToNative(types.JSONValueType)`, and calls the format-specific marshal/unmarshal engine (`protojson`).
-- **Future Format Support (YAML, XML)**: Adding support for formats such as YAML or XML will follow the exact same architecture: format encoders in `ext/` remain lightweight wrappers over `ConvertToNative` / `NewValue`, while native type reflection and tag mappings reside centrally in `common/types/native.go` and `ext/native.go`.
+- **`ext/encoders.go`**: Acts as a format-level encoder/decoder. It performs payload size verification, invokes `val.ConvertToNative(types.JSONValueType)`, and delegates to format engines (`protojson`, `yaml/v3`). YAML support builds seamlessly on top of JSON transformation.
 
 ---
 
