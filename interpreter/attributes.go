@@ -173,6 +173,18 @@ func (r *attrFactory) AbsoluteAttribute(id int64, names ...string) NamespacedAtt
 			names[idx] = strings.TrimPrefix(name, ".")
 		}
 	}
+	if len(names) == 1 && !disambiguateNames {
+		return &identAttribute{
+			id:                     id,
+			name:                   names[0],
+			candidateNames:         names,
+			qualifiers:             []Qualifier{},
+			adapter:                r.adapter,
+			provider:               r.provider,
+			fac:                    r,
+			errorOnBadPresenceTest: r.errorOnBadPresenceTest,
+		}
+	}
 	return &absoluteAttribute{
 		id:                     id,
 		namespaceNames:         names,
@@ -359,6 +371,9 @@ func (a *absoluteAttribute) Resolve(vars Activation) (any, error) {
 			if isUnknown {
 				return obj, nil
 			}
+			if len(a.qualifiers) == 0 {
+				return obj, nil
+			}
 			obj, isOpt, err := applyQualifiers(v, obj, a.qualifiers)
 			if err != nil {
 				return nil, err
@@ -388,6 +403,102 @@ func (a *absoluteAttribute) Resolve(vars Activation) (any, error) {
 		attrNames.WriteString(nm)
 	}
 	return nil, missingAttribute(attrNames.String())
+}
+
+// identAttribute is a specialized, lightweight attribute for simple, single-name identifiers
+// without namespace disambiguation.
+type identAttribute struct {
+	id                     int64
+	name                   string
+	candidateNames         []string
+	qualifiers             []Qualifier
+	adapter                types.Adapter
+	provider               types.Provider
+	fac                    AttributeFactory
+	errorOnBadPresenceTest bool
+}
+
+// ID implements the Attribute interface method.
+func (a *identAttribute) ID() int64 {
+	qualCount := len(a.qualifiers)
+	if qualCount == 0 {
+		return a.id
+	}
+	return a.qualifiers[qualCount-1].ID()
+}
+
+// IsOptional returns trivially false for an attribute as the attribute represents a fully
+// qualified variable name. If the attribute is used in an optional manner, then an attrQualifier
+// is created and marks the attribute as optional.
+func (a *identAttribute) IsOptional() bool {
+	return false
+}
+
+// AddQualifier implements the Attribute interface method.
+func (a *identAttribute) AddQualifier(qual Qualifier) (Attribute, error) {
+	a.qualifiers = append(a.qualifiers, qual)
+	return a, nil
+}
+
+// CandidateVariableNames implements the NamespacedAttribute interface method.
+func (a *identAttribute) CandidateVariableNames() []string {
+	return a.candidateNames
+}
+
+// Qualifiers returns the list of Qualifier instances associated with the namespaced attribute.
+func (a *identAttribute) Qualifiers() []Qualifier {
+	return a.qualifiers
+}
+
+// Qualify is an implementation of the Qualifier interface method.
+func (a *identAttribute) Qualify(vars Activation, obj any) (any, error) {
+	return attrQualify(a.fac, vars, obj, a)
+}
+
+// QualifyIfPresent is an implementation of the Qualifier interface method.
+func (a *identAttribute) QualifyIfPresent(vars Activation, obj any, presenceOnly bool) (any, bool, error) {
+	return attrQualifyIfPresent(a.fac, vars, obj, a, presenceOnly)
+}
+
+// String implements the fmt.Stringer interface method.
+func (a *identAttribute) String() string {
+	return fmt.Sprintf("id: %v, names: %v", a.id, a.candidateNames)
+}
+
+// Resolve returns the resolved Attribute value given the Activation, or error if the Attribute
+// variable is not found, or if its Qualifiers cannot be applied successfully.
+func (a *identAttribute) Resolve(vars Activation) (any, error) {
+	obj, found := vars.ResolveName(a.name)
+	if found {
+		if celErr, ok := obj.(*types.Err); ok {
+			return nil, celErr
+		}
+		if _, isUnknown := obj.(*types.Unknown); isUnknown {
+			return obj, nil
+		}
+		if len(a.qualifiers) == 0 {
+			return obj, nil
+		}
+		obj, isOpt, err := applyQualifiers(vars, obj, a.qualifiers)
+		if err != nil {
+			return nil, err
+		}
+		if isOpt {
+			val := a.adapter.NativeToValue(obj)
+			if types.IsUnknown(val) {
+				return val, nil
+			}
+			return types.OptionalOf(val), nil
+		}
+		return obj, nil
+	}
+	typ, found := a.provider.FindIdent(a.name)
+	if found {
+		if len(a.qualifiers) == 0 {
+			return typ, nil
+		}
+	}
+	return nil, missingAttribute(a.name)
 }
 
 type conditionalAttribute struct {
@@ -621,12 +732,25 @@ func (a *relativeAttribute) QualifyIfPresent(vars Activation, obj any, presenceO
 
 // Resolve expression value and qualifier relative to the expression result.
 func (a *relativeAttribute) Resolve(vars Activation) (any, error) {
+	frame, ok := vars.(*ExecutionFrame)
+	if !ok {
+		var err error
+		frame, err = NewExecutionFrame(vars)
+		if err != nil {
+			return nil, err
+		}
+		defer frame.Close()
+		vars = frame
+	}
 	// First, evaluate the operand.
-	v := a.operand.Eval(vars)
+	v := a.operand.Exec(frame)
 	if types.IsError(v) {
 		return nil, v.(*types.Err)
 	}
 	if types.IsUnknown(v) {
+		return v, nil
+	}
+	if len(a.qualifiers) == 0 {
 		return v, nil
 	}
 	obj, isOpt, err := applyQualifiers(vars, v, a.qualifiers)
