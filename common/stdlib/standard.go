@@ -116,11 +116,13 @@ func init() {
 
 		// Comprehension short-circuiting related function
 		function(operators.NotStrictlyFalse,
+			decls.DisableTypeGuards(true),
 			decls.Overload(overloads.NotStrictlyFalse, argTypes(types.BoolType), types.BoolType,
 				decls.OverloadIsNonStrict(),
 				decls.UnaryBinding(notStrictlyFalse))),
 		// Deprecated: __not_strictly_false__
 		function(operators.OldNotStrictlyFalse,
+			decls.DisableTypeGuards(true),
 			decls.DisableDeclaration(true), // safe deprecation
 			decls.Overload(operators.OldNotStrictlyFalse, argTypes(types.BoolType), types.BoolType,
 				decls.OverloadIsNonStrict(),

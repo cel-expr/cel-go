@@ -882,13 +882,7 @@ func (o *OverloadDecl) matchesRuntimeSignature(disableTypeGuards bool, args ...r
 }
 
 func matchRuntimeArgType(nonStrict, disableTypeGuards bool, argType *types.Type, arg ref.Val) bool {
-	if disableTypeGuards {
-		return true
-	}
-	if argType.IsAssignableRuntimeType(arg) {
-		if !nonStrict && argType.IsDyn() && types.IsUnknownOrError(arg) {
-			return false
-		}
+	if disableTypeGuards || argType.IsAssignableRuntimeType(arg) {
 		return true
 	}
 	return nonStrict && types.IsUnknownOrError(arg)
