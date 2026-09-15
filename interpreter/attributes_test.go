@@ -1559,16 +1559,18 @@ func TestAttribute_StringRepresentation(t *testing.T) {
 	cont := containers.DefaultContainer
 	fac := NewAttributeFactory(cont, reg, reg)
 
-	abs := fac.AbsoluteAttribute(1, "a.b")
-	maybe := fac.MaybeAttribute(2, "c")
-	rel := fac.RelativeAttribute(3, NewConstValue(1, types.String("d")))
-	cond := fac.ConditionalAttribute(4, NewConstValue(1, types.True), abs, maybe)
+	ident := fac.AbsoluteAttribute(1, "a")
+	abs := fac.AbsoluteAttribute(2, "a.b", "b")
+	maybe := fac.MaybeAttribute(3, "c")
+	rel := fac.RelativeAttribute(4, NewConstValue(1, types.String("d")))
+	cond := fac.ConditionalAttribute(5, NewConstValue(1, types.True), abs, maybe)
 	trail := types.NewAttributeTrail("x")
 
 	tests := []struct {
 		name     string
 		stringer fmt.Stringer
 	}{
+		{name: "identAttribute", stringer: ident.(fmt.Stringer)},
 		{name: "absoluteAttribute", stringer: abs.(fmt.Stringer)},
 		{name: "maybeAttribute", stringer: maybe.(fmt.Stringer)},
 		{name: "relativeAttribute", stringer: rel.(fmt.Stringer)},
@@ -1583,3 +1585,309 @@ func TestAttribute_StringRepresentation(t *testing.T) {
 		})
 	}
 }
+
+func TestIdentAttribute(t *testing.T) {
+	reg := newTestRegistry(t)
+	cont := containers.DefaultContainer
+	fac := NewAttributeFactory(cont, reg, reg)
+
+	t.Run("factory selection", func(t *testing.T) {
+		single := fac.AbsoluteAttribute(1, "x")
+		if _, ok := single.(*identAttribute); !ok {
+			t.Fatalf("AbsoluteAttribute with single name wanted *identAttribute, got %T", single)
+		}
+		dotPrefixed := fac.AbsoluteAttribute(2, ".x")
+		if _, ok := dotPrefixed.(*absoluteAttribute); !ok {
+			t.Fatalf("AbsoluteAttribute with dot-prefixed name wanted *absoluteAttribute, got %T", dotPrefixed)
+		}
+		multi := fac.AbsoluteAttribute(3, "a", "b")
+		if _, ok := multi.(*absoluteAttribute); !ok {
+			t.Fatalf("AbsoluteAttribute with multiple names wanted *absoluteAttribute, got %T", multi)
+		}
+	})
+
+	t.Run("resolve success", func(t *testing.T) {
+		attr := fac.AbsoluteAttribute(1, "x")
+		vars, _ := NewActivation(map[string]any{"x": 42})
+		val, err := attr.Resolve(vars)
+		if err != nil {
+			t.Fatalf("attr.Resolve() failed: %v", err)
+		}
+		if val != 42 {
+			t.Errorf("got %v, wanted 42", val)
+		}
+	})
+
+	t.Run("resolve ref val", func(t *testing.T) {
+		attr := fac.AbsoluteAttribute(1, "x")
+		vars, _ := NewActivation(map[string]any{"x": types.Int(100)})
+		val, err := attr.Resolve(vars)
+		if err != nil {
+			t.Fatalf("attr.Resolve() failed: %v", err)
+		}
+		if val != types.Int(100) {
+			t.Errorf("got %v, wanted 100", val)
+		}
+	})
+
+	t.Run("resolve error", func(t *testing.T) {
+		attr := fac.AbsoluteAttribute(1, "err")
+		celErr := types.NewErr("test error").(*types.Err)
+		vars, _ := NewActivation(map[string]any{"err": celErr})
+		_, err := attr.Resolve(vars)
+		if err == nil {
+			t.Fatal("attr.Resolve() wanted error, got nil")
+		}
+		if err.Error() != celErr.Error() {
+			t.Errorf("got %v, wanted %v", err, celErr)
+		}
+	})
+
+	t.Run("resolve unknown var", func(t *testing.T) {
+		attr := fac.AbsoluteAttribute(1, "unk")
+		unk := types.NewUnknown(1, types.NewAttributeTrail("unk"))
+		vars, _ := NewActivation(map[string]any{"unk": unk})
+		val, err := attr.Resolve(vars)
+		if err != nil {
+			t.Fatalf("attr.Resolve() failed: %v", err)
+		}
+		if val != unk {
+			t.Errorf("got %v, wanted %v", val, unk)
+		}
+	})
+
+	t.Run("resolve type fallback", func(t *testing.T) {
+		attr := fac.AbsoluteAttribute(1, "int")
+		val, err := attr.Resolve(EmptyActivation())
+		if err != nil {
+			t.Fatalf("attr.Resolve() failed: %v", err)
+		}
+		if val != types.IntType {
+			t.Errorf("got %v, wanted %v", val, types.IntType)
+		}
+	})
+
+	t.Run("resolve missing", func(t *testing.T) {
+		attr := fac.AbsoluteAttribute(1, "nonexistent")
+		_, err := attr.Resolve(EmptyActivation())
+		if err == nil {
+			t.Fatal("attr.Resolve() wanted error, got nil")
+		}
+		resErr, ok := err.(*resolutionError)
+		if !ok || !resErr.isMissingAttribute() {
+			t.Errorf("expected missing attribute resolutionError, got %v (%T)", err, err)
+		}
+	})
+
+	t.Run("qualifiers", func(t *testing.T) {
+		attr := fac.AbsoluteAttribute(1, "msg")
+		qualField := makeQualifier(t, fac, nil, 2, "field")
+		_, err := attr.AddQualifier(qualField)
+		if err != nil {
+			t.Fatalf("attr.AddQualifier() failed: %v", err)
+		}
+		if attr.ID() != 2 {
+			t.Errorf("attr.ID() got %d, wanted 2", attr.ID())
+		}
+		if len(attr.Qualifiers()) != 1 {
+			t.Errorf("len(attr.Qualifiers()) got %d, wanted 1", len(attr.Qualifiers()))
+		}
+		vars, _ := NewActivation(map[string]any{
+			"msg": map[string]any{"field": "hello"},
+		})
+		val, err := attr.Resolve(vars)
+		if err != nil {
+			t.Fatalf("attr.Resolve() failed: %v", err)
+		}
+		if val != "hello" {
+			t.Errorf("got %v, wanted hello", val)
+		}
+	})
+
+	t.Run("partial activation match", func(t *testing.T) {
+		partFac := NewPartialAttributeFactory(cont, reg, reg)
+		attr := partFac.AbsoluteAttribute(10, "partVar")
+		partVars, err := NewPartialActivation(
+			map[string]any{},
+			NewAttributePattern("partVar"),
+		)
+		if err != nil {
+			t.Fatalf("NewPartialActivation() failed: %v", err)
+		}
+		val, err := attr.Resolve(partVars)
+		if err != nil {
+			t.Fatalf("attr.Resolve() failed: %v", err)
+		}
+		unk, isUnk := val.(*types.Unknown)
+		if !isUnk {
+			t.Fatalf("attr.Resolve() got %v (%T), wanted *types.Unknown", val, val)
+		}
+		wantedUnk := types.NewUnknown(10, types.NewAttributeTrail("partVar"))
+		if !reflect.DeepEqual(unk, wantedUnk) {
+			t.Errorf("got %v, wanted %v", unk, wantedUnk)
+		}
+	})
+
+	t.Run("partial activation qualified match", func(t *testing.T) {
+		partFac := NewPartialAttributeFactory(cont, reg, reg)
+		attr := partFac.AbsoluteAttribute(20, "parent")
+		qual := makeQualifier(t, partFac, nil, 21, "child")
+		attr.AddQualifier(qual)
+
+		partVars, err := NewPartialActivation(
+			map[string]any{"parent": map[string]any{"child": "data"}},
+			NewAttributePattern("parent").QualString("child"),
+		)
+		if err != nil {
+			t.Fatalf("NewPartialActivation() failed: %v", err)
+		}
+		val, err := attr.Resolve(partVars)
+		if err != nil {
+			t.Fatalf("attr.Resolve() failed: %v", err)
+		}
+		unk, isUnk := val.(*types.Unknown)
+		if !isUnk {
+			t.Fatalf("attr.Resolve() got %v (%T), wanted *types.Unknown", val, val)
+		}
+		wantedUnk := types.NewUnknown(21, types.QualifyAttribute[string](types.NewAttributeTrail("parent"), "child"))
+		if !reflect.DeepEqual(unk, wantedUnk) {
+			t.Errorf("got %v, wanted %v", unk, wantedUnk)
+		}
+	})
+
+	t.Run("partial activation miss", func(t *testing.T) {
+		partFac := NewPartialAttributeFactory(cont, reg, reg)
+		attr := partFac.AbsoluteAttribute(30, "knownVar")
+		partVars, err := NewPartialActivation(
+			map[string]any{"knownVar": "present"},
+			NewAttributePattern("otherVar"),
+		)
+		if err != nil {
+			t.Fatalf("NewPartialActivation() failed: %v", err)
+		}
+		val, err := attr.Resolve(partVars)
+		if err != nil {
+			t.Fatalf("attr.Resolve() failed: %v", err)
+		}
+		if val != "present" {
+			t.Errorf("got %v, wanted present", val)
+		}
+	})
+}
+
+func BenchmarkIdentVsOtherAttributes(b *testing.B) {
+	reg := newTestRegistry(b)
+	cont := containers.DefaultContainer
+	fac := NewAttributeFactory(cont, reg, reg)
+	nsCont, _ := containers.NewContainer(containers.Name("pkg.subpkg"))
+	nsFac := NewAttributeFactory(nsCont, reg, reg)
+
+	vars, _ := NewActivation(map[string]any{
+		"x":   42,
+		"msg": map[string]any{"field": "hello"},
+	})
+
+	identAttr := fac.AbsoluteAttribute(1, "x")
+	absSingleAttr := fac.AbsoluteAttribute(2, ".x")
+	absMultiAttr := nsFac.AbsoluteAttribute(3, "pkg.subpkg.x", "pkg.x", "x")
+	maybeNoCont := fac.MaybeAttribute(4, "x")
+	maybeWithCont := nsFac.MaybeAttribute(5, "x")
+
+	qualIdent := fac.AbsoluteAttribute(6, "msg")
+	qualIdent.AddQualifier(makeQualifier(b, fac, nil, 7, "field"))
+
+	qualMaybeNoCont := fac.MaybeAttribute(8, "msg")
+	qualMaybeNoCont.AddQualifier(makeQualifier(b, fac, nil, 9, "field"))
+
+	qualMaybeWithCont := nsFac.MaybeAttribute(10, "msg")
+	qualMaybeWithCont.AddQualifier(makeQualifier(b, nsFac, nil, 11, "field"))
+
+	b.Run("IdentAttribute_Single", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			out, err := identAttr.Resolve(vars)
+			if err != nil || out != 42 {
+				b.Fatalf("got %v, %v, want 42", out, err)
+			}
+		}
+	})
+
+	b.Run("AbsoluteAttribute_SingleDotPrefixed", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			out, err := absSingleAttr.Resolve(vars)
+			if err != nil || out != 42 {
+				b.Fatalf("got %v, %v, want 42", out, err)
+			}
+		}
+	})
+
+	b.Run("AbsoluteAttribute_Namespaced", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			out, err := absMultiAttr.Resolve(vars)
+			if err != nil || out != 42 {
+				b.Fatalf("got %v, %v, want 42", out, err)
+			}
+		}
+	})
+
+	b.Run("MaybeAttribute_NoContainer", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			out, err := maybeNoCont.Resolve(vars)
+			if err != nil || out != 42 {
+				b.Fatalf("got %v, %v, want 42", out, err)
+			}
+		}
+	})
+
+	b.Run("MaybeAttribute_WithContainer", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			out, err := maybeWithCont.Resolve(vars)
+			if err != nil || out != 42 {
+				b.Fatalf("got %v, %v, want 42", out, err)
+			}
+		}
+	})
+
+	b.Run("IdentAttribute_Qualified", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			out, err := qualIdent.Resolve(vars)
+			if err != nil || out != "hello" {
+				b.Fatalf("got %v, %v, want hello", out, err)
+			}
+		}
+	})
+
+	b.Run("MaybeAttribute_Qualified_NoContainer", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			out, err := qualMaybeNoCont.Resolve(vars)
+			if err != nil || out != "hello" {
+				b.Fatalf("got %v, %v, want hello", out, err)
+			}
+		}
+	})
+
+	b.Run("MaybeAttribute_Qualified_WithContainer", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			out, err := qualMaybeWithCont.Resolve(vars)
+			if err != nil || out != "hello" {
+				b.Fatalf("got %v, %v, want hello", out, err)
+			}
+		}
+	})
+}
+
