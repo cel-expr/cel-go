@@ -160,7 +160,7 @@ func TestLexer(t *testing.T) {
 			},
 		},
 		{
-			name: "StringsAndBytes",
+			name:  "StringsAndBytes",
 			input: "\"hello\" 'world' \"\"\" \"allowed!\" \"\"also allowed\"\" \\\"\"\"also allowed\"\"\\\" \"\"\" r\"raw\" b\"bytes\" rb'\\x00' '''multi\nsingle''' R\"raw_upper\" B\"bytes_upper\" b'''multi\nbytes''' br\"raw_bytes\" `a.b-c/d e`\n\"\\a\\b\\f\\n\\r\\t\\v\\\"\\'\\\\\\?\\` \\x1A \\u00A0 \\U0001F600 \\012\"",
 			expected: []expectedToken{
 				{kind: tokString, text: "\"hello\""},
@@ -315,8 +315,8 @@ func TestLexer(t *testing.T) {
 
 func TestLexerErrors(t *testing.T) {
 	tests := []struct {
-		name            string
-		input           string
+		name          string
+		input         string
 		expectedError string
 	}{
 		{
@@ -587,4 +587,3 @@ func BenchmarkLexer(b *testing.B) {
 		}
 	}
 }
-
