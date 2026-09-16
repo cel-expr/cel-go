@@ -550,7 +550,10 @@ func (p *prog) newExecutionFrame(input any) (*interpreter.ExecutionFrame, error)
 		return nil, err
 	}
 	if p.defaultVars != nil {
-		frame.SetDefaultVars(p.defaultVars)
+		if err := frame.SetDefaultVars(p.defaultVars); err != nil {
+			frame.Close()
+			return nil, err
+		}
 	}
 	return frame, nil
 }

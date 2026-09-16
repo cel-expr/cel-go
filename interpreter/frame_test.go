@@ -411,7 +411,9 @@ func TestFrameLifecycleAndPooling(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewActivation failed: %v", err)
 	}
-	frame.SetDefaultVars(parentAct)
+	if err := frame.SetDefaultVars(parentAct); err != nil {
+		t.Fatalf("SetDefaultVars failed: %v", err)
+	}
 
 	val, found = frame.ResolveName("c")
 	if !found || val != 3 {
@@ -531,8 +533,10 @@ func TestNewExecutionFrameGlobals(t *testing.T) {
 			if err != nil {
 				t.Fatalf("NewExecutionFrame() failed: %v", err)
 			}
-			f.SetDefaultVars(tc.globals)
 			defer f.Close()
+			if err := f.SetDefaultVars(tc.globals); err != nil {
+				t.Fatalf("SetDefaultVars() failed: %v", err)
+			}
 
 			got, found := f.ResolveName("x")
 			if !found {
@@ -562,12 +566,13 @@ func TestNewExecutionFrameGlobalsFunctionConflict(t *testing.T) {
 	input := mustFunctionVars(t, map[string]any{}, map[string]functions.LateBoundOp{"f": funcOf("input")})
 
 	f, err := NewExecutionFrame(input)
-	if err == nil {
-		f.Close()
-		t.Fatal("NewExecutionFrame() with function bindings on both layers succeeded, wanted an error")
+	if err != nil {
+		t.Fatalf("NewExecutionFrame() failed: %v", err)
 	}
-	f.SetDefaultVars(globals)
-	f.Close()
+	defer f.Close()
+	if err := f.SetDefaultVars(globals); err == nil {
+		t.Fatal("SetDefaultVars() with function bindings on both layers succeeded, wanted an error")
+	}
 }
 
 // TestNewExecutionFrameGlobalsPreservesMapInput guards the reason globals are composed inside the
@@ -585,8 +590,10 @@ func TestNewExecutionFrameGlobalsPreservesMapInput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewExecutionFrame() failed: %v", err)
 	}
-	f.SetDefaultVars(mustActivation(t, map[string]any{"y": types.Int(1)}))
 	defer f.Close()
+	if err := f.SetDefaultVars(mustActivation(t, map[string]any{"y": types.Int(1)})); err != nil {
+		t.Fatalf("SetDefaultVars() failed: %v", err)
+	}
 
 	for i := 0; i < 2; i++ {
 		got, found := f.ResolveName("x")

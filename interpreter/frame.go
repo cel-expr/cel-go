@@ -109,15 +109,26 @@ func (f *ExecutionFrame) SetScope(scope Activation) {
 
 // SetDefaultVars sets the default variables activation for the frame, composing it
 // with any existing scope activation.
-func (f *ExecutionFrame) SetDefaultVars(defaultVars Activation) {
+func (f *ExecutionFrame) SetDefaultVars(defaultVars Activation) error {
 	if defaultVars == nil {
-		return
+		return nil
+	}
+	fns, err := FindFunctionActivation(defaultVars)
+	if err != nil {
+		return err
+	}
+	if fns != nil {
+		if f.functions != nil {
+			return errNestedFunctionActivation
+		}
+		f.functions = fns
 	}
 	if f.scope != nil {
 		f.scope = NewHierarchicalActivation(defaultVars, f.scope)
 	} else {
 		f.scope = defaultVars
 	}
+	return nil
 }
 
 // NewExecutionFrame creates a new execution frame from the pool.
@@ -186,6 +197,7 @@ func (f *ExecutionFrame) Close() {
 	f.ctx = nil
 	f.parent = nil
 	f.costTracker = nil
+	f.functions = nil
 	if f.vars != nil {
 		f.vars = nil
 		clear(f.lazyVars)
