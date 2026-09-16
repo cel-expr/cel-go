@@ -129,27 +129,23 @@ type FunctionActivation = interpreter.FunctionActivation
 // closure, as the activation is not an input to the call.
 type LateBoundFunction = functions.LateBoundOp
 
-// FunctionVars returns an Activation which supplies the implementations of late-bound functions
-// in addition to the variables provided by the `vars` input.
+// FunctionVars returns a FunctionActivation combining the variable bindings from `vars` with
+// the late-bound function implementations from `funcs`. FunctionVars support late-bound function
+// definitions where the function behavior depends on the context of the evaluation. This can only
+// be accomplished by closing over state that is not otherwise exposed to the CEL author or CEL
+// runtime.
 //
-// Function bindings are held in a namespace which is separate from variables, so a function and
-// a variable may share the same qualified name.
+// - Function bindings occupy a namespace separate from variables, allowing a function and a
+// variable to share the same qualified name.
+// - The `vars` argument may be an Activation or any valid input to NewActivation (e.g. map[string]any).
+// - FunctionVars may not be nested, and only one instance of FunctionVars may be supplied to an
+// evaluation. FunctionVars returns an error if `vars` already contains function bindings.
 //
-// The `vars` value may either be an Activation or any valid input to the NewActivation call.
-//
-// Late-bound functions apply to a whole evaluation rather than to a lexical scope, so only one
-// activation may supply them. An error is returned when `vars` already does, whether directly or
-// through a partial or hierarchical activation which wraps one; supply the complete set of
-// bindings in a single call instead. The same restriction applies to the combination of Globals
-// and the activation passed to Eval, which is reported by Eval.
-//
-// Since the bindings are supplied for a single evaluation alongside the variables of that
-// evaluation, an implementation may close over state which the expression is not permitted to
-// read directly. Below, a role table is consulted by the `role` function but is never exposed as
-// a variable, so an expression can only observe the entry for the argument it asks about:
+// Function implementations can capture evaluation-scoped state via closures without exposing that
+// state directly as expression variables:
 //
 //	roles := map[string]string{"tristan": "admin"}
-//	act, err := cel.FunctionVars(map[string]any{"user": user}, map[string]cel.LateBoundFunction{
+//	act, err := cel.FunctionVars(map[string]any{"user": "tristan"}, map[string]cel.LateBoundFunction{
 //	    "role": func(overloadID string, args ...ref.Val) ref.Val {
 //	        role, found := roles[string(args[0].(types.String))]
 //	        if !found {
@@ -159,8 +155,9 @@ type LateBoundFunction = functions.LateBoundOp
 //	    },
 //	})
 //
-// The same technique supplies state which must stay fixed for the duration of an evaluation, such
-// as the timestamp that a `valid_until(x)` call compares against.
+// CEL expects that late-bound functions, like regular functions, yield the same output given the same
+// input. For example, a function comparing a validity window `valid_until(t)` could be implemented as
+// a late-bound function closed over a fixed timestamp value.
 func FunctionVars(vars any, funcs map[string]LateBoundFunction) (FunctionActivation, error) {
 	return interpreter.NewFunctionActivation(vars, funcs)
 }
