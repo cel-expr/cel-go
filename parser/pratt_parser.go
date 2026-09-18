@@ -412,7 +412,7 @@ func (p *prattParserWorker) parseExpr() ast.Expr {
 
 func (p *prattParserWorker) parseBinaryAndTernary(minPrec int) ast.Expr {
 	lhs := p.parseSelectorChain()
-	for {
+	for !p.recursionLimitExceeded && !p.isRecoveryLimitExceeded() {
 		tok := p.peekTok.kind
 		if tok == tokQuestion && minPrec <= 0 {
 			lhs = p.parseTernary(lhs)
@@ -438,13 +438,21 @@ func (p *prattParserWorker) parseBinaryAndTernary(minPrec int) ast.Expr {
 }
 
 func (p *prattParserWorker) parseTernary(lhs ast.Expr) ast.Expr {
+	if p.recursionDepth > p.maxRecursionDepth {
+		p.recursionLimitExceeded = true
+		p.errors.internalError(fmt.Sprintf("expression recursion limit exceeded: %d", p.maxRecursionDepth))
+		return lhs
+	}
+	p.recursionDepth++
 	qTok := p.nextToken()
 	opID := p.nextID(qTok)
 	trueExpr := p.parseBinaryAndTernary(1)
 	if !p.expect(tokColon, "expected ':' in conditional expression") {
+		p.recursionDepth--
 		return lhs
 	}
 	falseExpr := p.parseBinaryAndTernary(0)
+	p.recursionDepth--
 	return p.helper.newGlobalCall(opID, operators.Conditional, lhs, trueExpr, falseExpr)
 }
 

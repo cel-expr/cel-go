@@ -1324,6 +1324,14 @@ ERROR: <input>:1:34: Syntax error: expected ']'
  | .................................^`,
 	},
 	{
+		I: "a ? b : a ? b : a ? b : a ? b : a ? b : a ? b : a ? b : a ? b : " +
+			"a ? b : a ? b : a ? b : a ? b : a ? b : a ? b : a ? b : a ? b : " +
+			"a ? b : a ? b : a ? b : a ? b : a ? b : a ? b : a ? b : a ? b : " +
+			"a ? b : a ? b : a ? b : a ? b : a ? b : a ? b : a ? b : a ? b : " +
+			"a ? b : a ? b : a ? b : a ? b : a ? b : a ? b : a ? b : a ? b : c",
+		E: "ERROR: <input>:-1:0: expression recursion limit exceeded: 32",
+	},
+	{
 		I: `-[-1--1--1--1---1--1--1--0--1--1--1--1--0--2--1--1--0--1--1--1--1--0--1--1--1
 		--3-[-1--1--1--1---1--1--1--0--1--1--1--1--0--3--1--1--0--1--1--1--1--0--1--1--1
 		--3-[-1--1--1--1---1--1--1--0-/1--1--1--1--0--2--1--1--0--1--1--1--1--0--1--1--1
@@ -2854,8 +2862,34 @@ func TestRecursionLimit(t *testing.T) {
 					t.Errorf("expected recursion limit error, got none")
 				}
 			})
+
+			t.Run("DeeplyNestedTernaryLimitExceeded", func(t *testing.T) {
+				p, err := NewParser(MaxRecursionDepth(4), EnablePrattParser(pratt))
+				if err != nil {
+					t.Fatalf("NewParser() failed: %v", err)
+				}
+				_, errs := p.Parse(common.NewTextSource("a ? b : a ? b : a ? b : a ? b : a ? b : c"))
+				if len(errs.GetErrors()) == 0 {
+					t.Errorf("expected recursion limit error, got none")
+				}
+			})
 		})
 	}
+
+	t.Run("PrattDeeplyNestedTernary", func(t *testing.T) {
+		p, err := NewParser(MaxRecursionDepth(4), EnablePrattParser(true))
+		if err != nil {
+			t.Fatalf("NewParser() failed: %v", err)
+		}
+		_, errs := p.Parse(common.NewTextSource("a ? b : a ? b : a ? b : a ? b : c"))
+		if len(errs.GetErrors()) > 0 {
+			t.Errorf("unexpected recursion limit error at depth 4: %s", errs.ToDisplayString())
+		}
+		_, errs = p.Parse(common.NewTextSource("a ? b : a ? b : a ? b : a ? b : a ? b : c"))
+		if len(errs.GetErrors()) == 0 {
+			t.Errorf("expected recursion limit error at depth 5, got none")
+		}
+	})
 
 	t.Run("PrattSequentialScopesDoNotAccumulateDepth", func(t *testing.T) {
 		p, err := NewParser(MaxRecursionDepth(2), EnablePrattParser(true))
