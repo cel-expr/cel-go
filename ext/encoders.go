@@ -31,15 +31,24 @@ import (
 	"cel.dev/cel-go/common/types"
 	"cel.dev/cel-go/common/types/ref"
 	"cel.dev/cel-go/common/types/traits"
+	"go.yaml.in/yaml/v3"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
-const maxJSONSize = 10 * 1024 * 1024 // 10MB maximum allowed JSON string size
+const (
+	maxJSONSize = 10 * 1024 * 1024 // 10MB maximum allowed JSON string size
+	maxYAMLSize = 10 * 1024 * 1024 // 10MB maximum allowed YAML string size
+)
 
 // Encoders returns a cel.EnvOption to configure extended functions for string, byte, and object
 // encodings.
+//
+// Note: all functions use the 'base64', 'json', and 'yaml' namespaces.
+//
+// Version 2 of this library depends on the CEL optional type. Please ensure that the
+// cel.OptionalTypes() is enabled when using encoder extensions at version 2 or greater.
 //
 // # Base64.Decode
 //
@@ -107,7 +116,7 @@ const maxJSONSize = 10 * 1024 * 1024 // 10MB maximum allowed JSON string size
 //
 // # JSON.Parse
 //
-// Introduced at version: 1
+// Introduced at version: 2
 //
 // Parses a JSON string to a CEL value or a specific type.
 //
@@ -118,6 +127,32 @@ const maxJSONSize = 10 * 1024 * 1024 // 10MB maximum allowed JSON string size
 //
 //	json.parse('{"hello":"world"}') // return optional.of({'hello': 'world'})
 //	json.parse('123', int) // return optional.of(123)
+//
+// # YAML.Encode
+//
+// Introduced at version: 2
+//
+// Encodes a CEL value to a YAML string.
+//
+//	yaml.encode(<dyn>) -> <string>
+//
+// Examples:
+//
+//	yaml.encode({'hello': 'world'}) // return 'hello: world\n'
+//
+// # YAML.Parse
+//
+// Introduced at version: 2
+//
+// Parses a YAML string to a CEL value or a specific type.
+//
+//	yaml.parse(<string>) -> <optional_type(dyn)>
+//	yaml.parse(<string>, <type(T)>) -> <optional_type(T)>
+//
+// Examples:
+//
+//	yaml.parse('hello: world') // return optional.of({'hello': 'world'})
+//	yaml.parse('123', int) // return optional.of(123)
 func Encoders(options ...EncodersOption) cel.EnvOption {
 	l := &encoderLib{version: math.MaxUint32}
 	for _, o := range options {
@@ -161,27 +196,51 @@ func (lib *encoderLib) CompileOptions() []cel.EnvOption {
 				}))),
 	}
 	if lib.version >= 1 {
-		var adapt types.Adapter = types.DefaultTypeAdapter
-		var prov types.Provider
-		estimators := []cost.CostOption{
+		estimators := []cost.Option{
 			cost.OverloadCostEstimate("base64_decode_string", estimateDecode),
 			cost.OverloadCostEstimate("base64_encode_bytes", estimateEncode),
 			cost.OverloadCostEstimate("json_encode_dyn", estimateJSONEncode),
-			cost.OverloadCostEstimate("json_parse_string", estimateJSONParse),
-			cost.OverloadCostEstimate("json_parse_string_type", estimateJSONParse),
 		}
 		opts = append(opts,
-			cel.OptionalTypes(),
-			func(e *cel.Env) (*cel.Env, error) {
-				adapt = e.CELTypeAdapter()
-				prov = e.CELTypeProvider()
-				return e, nil
-			},
 			cel.CostEstimatorOptions(estimators...),
 			cel.Function("json.encode",
 				cel.Overload("json_encode_dyn", []*cel.Type{cel.DynType}, cel.StringType,
 					cel.UnaryBinding(func(val ref.Val) ref.Val {
 						return stringOrError(jsonEncodeValue(val))
+					}))),
+		)
+	}
+	if lib.version >= 2 {
+		estimators := []cost.Option{
+			cost.OverloadCostEstimate("base64_decode_url_string", estimateDecode),
+			cost.OverloadCostEstimate("base64_encode_url_bytes", estimateEncode),
+			cost.OverloadCostEstimate("json_parse_string", estimateJSONParse),
+			cost.OverloadCostEstimate("json_parse_string_type", estimateJSONParse),
+			cost.OverloadCostEstimate("yaml_encode_dyn", estimateYAMLEncode),
+			cost.OverloadCostEstimate("yaml_parse_string", estimateYAMLParse),
+			cost.OverloadCostEstimate("yaml_parse_string_type", estimateYAMLParse),
+		}
+
+		var adapt types.Adapter = types.DefaultTypeAdapter
+		var prov types.Provider
+		opts = append(opts, cel.CostEstimatorOptions(estimators...))
+		opts = append(opts,
+			func(e *cel.Env) (*cel.Env, error) {
+				adapt = e.CELTypeAdapter()
+				prov = e.CELTypeProvider()
+				return e, nil
+			},
+			cel.Function("base64.decodeUrl",
+				cel.Overload("base64_decode_url_string", []*cel.Type{cel.StringType}, cel.BytesType,
+					cel.UnaryBinding(func(str ref.Val) ref.Val {
+						s := str.(types.String)
+						return bytesOrError(base64DecodeURLString(string(s)))
+					}))),
+			cel.Function("base64.encodeUrl",
+				cel.Overload("base64_encode_url_bytes", []*cel.Type{cel.BytesType}, cel.StringType,
+					cel.UnaryBinding(func(bytes ref.Val) ref.Val {
+						b := bytes.(types.Bytes)
+						return stringOrError(base64EncodeURLBytes([]byte(b)))
 					}))),
 			cel.Function("json.parse",
 				cel.Overload("json_parse_string",
@@ -202,27 +261,30 @@ func (lib *encoderLib) CompileOptions() []cel.EnvOption {
 					}),
 				),
 			),
-		)
-	}
-	if lib.version >= 2 {
-		estimators := []cost.CostOption{
-			cost.OverloadCostEstimate("base64_decode_url_string", estimateDecode),
-			cost.OverloadCostEstimate("base64_encode_url_bytes", estimateEncode),
-		}
-		opts = append(opts, cel.CostEstimatorOptions(estimators...))
-		opts = append(opts,
-			cel.Function("base64.decodeUrl",
-				cel.Overload("base64_decode_url_string", []*cel.Type{cel.StringType}, cel.BytesType,
-					cel.UnaryBinding(func(str ref.Val) ref.Val {
-						s := str.(types.String)
-						return bytesOrError(base64DecodeURLString(string(s)))
+			cel.Function("yaml.encode",
+				cel.Overload("yaml_encode_dyn", []*cel.Type{cel.DynType}, cel.StringType,
+					cel.UnaryBinding(func(val ref.Val) ref.Val {
+						return stringOrError(yamlEncodeValue(val))
 					}))),
-			cel.Function("base64.encodeUrl",
-				cel.Overload("base64_encode_url_bytes", []*cel.Type{cel.BytesType}, cel.StringType,
-					cel.UnaryBinding(func(bytes ref.Val) ref.Val {
-						b := bytes.(types.Bytes)
-						return stringOrError(base64EncodeURLBytes([]byte(b)))
-					}))),
+			cel.Function("yaml.parse",
+				cel.Overload("yaml_parse_string",
+					[]*cel.Type{cel.StringType},
+					cel.OptionalType(cel.DynType),
+					cel.UnaryBinding(func(val ref.Val) ref.Val {
+						str := val.(types.String)
+						return yamlParseString(adapt, string(str))
+					}),
+				),
+				cel.Overload("yaml_parse_string_type",
+					[]*cel.Type{cel.StringType, types.NewTypeTypeWithParam(cel.TypeParamType("T"))},
+					cel.OptionalType(cel.TypeParamType("T")),
+					cel.BinaryBinding(func(strVal, typeVal ref.Val) ref.Val {
+						str := strVal.(types.String)
+						targetType := typeVal.(ref.Type)
+						return yamlParseWithType(adapt, prov, string(str), targetType)
+					}),
+				),
+			),
 		)
 	}
 	return opts
@@ -235,8 +297,6 @@ func (lib *encoderLib) ProgramOptions() []cel.ProgramOption {
 			cost.OverloadTracker("base64_decode_string", trackDecode),
 			cost.OverloadTracker("base64_encode_bytes", trackEncode),
 			cost.OverloadTracker("json_encode_dyn", trackJSONEncode),
-			cost.OverloadTracker("json_parse_string", trackJSONParse),
-			cost.OverloadTracker("json_parse_string_type", trackJSONParse),
 		}
 		opts = append(opts, cel.CostTrackerOptions(trackers...))
 	}
@@ -244,10 +304,55 @@ func (lib *encoderLib) ProgramOptions() []cel.ProgramOption {
 		trackers := []cost.TrackerOption{
 			cost.OverloadTracker("base64_decode_url_string", trackDecode),
 			cost.OverloadTracker("base64_encode_url_bytes", trackEncode),
+			cost.OverloadTracker("json_parse_string", trackJSONParse),
+			cost.OverloadTracker("json_parse_string_type", trackJSONParse),
+			cost.OverloadTracker("yaml_encode_dyn", trackYAMLEncode),
+			cost.OverloadTracker("yaml_parse_string", trackYAMLParse),
+			cost.OverloadTracker("yaml_parse_string_type", trackYAMLParse),
 		}
 		opts = append(opts, cel.CostTrackerOptions(trackers...))
 	}
 	return opts
+}
+
+// YAMLEncode encodes a CEL ref.Val to its YAML string representation.
+func YAMLEncode(val ref.Val) (string, error) {
+	return yamlEncodeValue(val)
+}
+
+// YAMLParse parses a YAML string into a dynamic CEL ref.Val using the given type adapter.
+// If adapter is nil, types.DefaultTypeAdapter is used.
+func YAMLParse(adapter types.Adapter, str string) (ref.Val, error) {
+	if adapter == nil {
+		adapter = types.DefaultTypeAdapter
+	}
+	if len(str) > maxYAMLSize {
+		return nil, fmt.Errorf("yaml parse error: string size exceeds maximum allowed limit of %d bytes", maxYAMLSize)
+	}
+	jsonStr, ok := yamlToJSON(str)
+	if !ok {
+		return nil, fmt.Errorf("yaml parse error: invalid YAML input")
+	}
+	return JSONParse(adapter, jsonStr)
+}
+
+// YAMLParseWithType parses a YAML string into a typed CEL ref.Val conforming to targetType.
+// If adapter is nil, types.DefaultTypeAdapter is used. If provider implements types.Adapter, it will be used as the adapter.
+func YAMLParseWithType(adapter types.Adapter, provider types.Provider, str string, targetType ref.Type) (ref.Val, error) {
+	if adapter == nil {
+		adapter = types.DefaultTypeAdapter
+	}
+	if provAdapter, ok := provider.(types.Adapter); ok && provAdapter != nil {
+		adapter = provAdapter
+	}
+	if len(str) > maxYAMLSize {
+		return nil, fmt.Errorf("yaml parse error: string size exceeds maximum allowed limit of %d bytes", maxYAMLSize)
+	}
+	jsonStr, ok := yamlToJSON(str)
+	if !ok {
+		return nil, fmt.Errorf("yaml parse error: failed to parse YAML to type %v", targetType)
+	}
+	return JSONParseWithType(adapter, provider, jsonStr, targetType)
 }
 
 // JSONEncode encodes a CEL ref.Val to its JSON string representation.
@@ -353,6 +458,22 @@ func estimateJSONParse(estimator cost.Estimator, target *cost.AstNode, args []co
 	return &cost.CallEstimate{CostEstimate: cost.UnknownCostEstimate(), ResultSize: &size}
 }
 
+func estimateYAMLEncode(estimator cost.Estimator, target *cost.AstNode, args []cost.AstNode) *cost.CallEstimate {
+	if len(args) != 1 {
+		return nil
+	}
+	size := cost.UnknownSizeEstimate()
+	return &cost.CallEstimate{CostEstimate: cost.UnknownCostEstimate(), ResultSize: &size}
+}
+
+func estimateYAMLParse(estimator cost.Estimator, target *cost.AstNode, args []cost.AstNode) *cost.CallEstimate {
+	if len(args) < 1 || len(args) > 2 {
+		return nil
+	}
+	size := cost.UnknownSizeEstimate()
+	return &cost.CallEstimate{CostEstimate: cost.UnknownCostEstimate(), ResultSize: &size}
+}
+
 func estimateDecode(estimator cost.Estimator, target *cost.AstNode, args []cost.AstNode) *cost.CallEstimate {
 	if len(args) != 1 {
 		return nil
@@ -375,6 +496,16 @@ func trackJSONEncode(args []ref.Val, _ ref.Val) *uint64 {
 }
 
 func trackJSONParse(args []ref.Val, _ ref.Val) *uint64 {
+	maxCost := uint64(math.MaxUint64)
+	return &maxCost
+}
+
+func trackYAMLEncode(args []ref.Val, _ ref.Val) *uint64 {
+	maxCost := uint64(math.MaxUint64)
+	return &maxCost
+}
+
+func trackYAMLParse(args []ref.Val, _ ref.Val) *uint64 {
 	maxCost := uint64(math.MaxUint64)
 	return &maxCost
 }
@@ -952,4 +1083,131 @@ func jsonParseStructNative(provider types.Provider, str string, typeName string)
 		return jsonUnmarshalNative(str, rt)
 	}
 	return nil, false
+}
+
+func yamlEncodeValue(val ref.Val) (string, error) {
+	jsonStr, err := jsonEncodeValue(val)
+	if err != nil {
+		return "", err
+	}
+	dec := json.NewDecoder(strings.NewReader(jsonStr))
+	dec.UseNumber()
+	var obj any
+	if err := dec.Decode(&obj); err != nil {
+		return "", err
+	}
+	cleaned := normalizeJSONNumber(obj)
+	yamlBytes, err := yaml.Marshal(cleaned)
+	if err != nil {
+		return "", err
+	}
+	return string(yamlBytes), nil
+}
+
+func yamlToJSON(str string) (string, bool) {
+	trimmed := strings.TrimSpace(str)
+	if len(trimmed) == 0 {
+		return "", false
+	}
+	dec := yaml.NewDecoder(strings.NewReader(str))
+	var node yaml.Node
+	if err := dec.Decode(&node); err != nil {
+		return "", false
+	}
+	if len(node.Content) == 0 {
+		return "", false
+	}
+	var extra yaml.Node
+	if err := dec.Decode(&extra); err != io.EOF {
+		return "", false
+	}
+	var obj any
+	if err := node.Decode(&obj); err != nil {
+		return "", false
+	}
+	cleaned := cleanYAMLObj(obj)
+	jsonBytes, err := json.Marshal(cleaned)
+	if err != nil {
+		return "", false
+	}
+	return string(jsonBytes), true
+}
+
+func yamlParseString(adapter types.Adapter, str string) ref.Val {
+	if len(str) > maxYAMLSize {
+		return types.NewErr("yaml parse error: string size exceeds maximum allowed limit of %d bytes", maxYAMLSize)
+	}
+	jsonStr, ok := yamlToJSON(str)
+	if !ok {
+		return types.OptionalNone
+	}
+	return jsonParseString(adapter, jsonStr)
+}
+
+func yamlParseWithType(adapter types.Adapter, provider types.Provider, str string, targetType ref.Type) ref.Val {
+	if len(str) > maxYAMLSize {
+		return types.NewErr("yaml parse error: string size exceeds maximum allowed limit of %d bytes", maxYAMLSize)
+	}
+	jsonStr, ok := yamlToJSON(str)
+	if !ok {
+		return types.OptionalNone
+	}
+	return jsonParseWithType(adapter, provider, jsonStr, targetType)
+}
+
+func cleanYAMLObj(val any) any {
+	switch v := val.(type) {
+	case map[string]any:
+		m := make(map[string]any, len(v))
+		for k, elem := range v {
+			m[k] = cleanYAMLObj(elem)
+		}
+		return m
+	case map[any]any:
+		m := make(map[string]any, len(v))
+		for k, elem := range v {
+			m[fmt.Sprint(k)] = cleanYAMLObj(elem)
+		}
+		return m
+	case []any:
+		l := make([]any, len(v))
+		for i, elem := range v {
+			l[i] = cleanYAMLObj(elem)
+		}
+		return l
+	case time.Time:
+		return v.Format(time.RFC3339Nano)
+	default:
+		return val
+	}
+}
+
+func normalizeJSONNumber(val any) any {
+	switch v := val.(type) {
+	case json.Number:
+		if i, err := v.Int64(); err == nil {
+			return i
+		}
+		if u, err := strconv.ParseUint(string(v), 10, 64); err == nil {
+			return u
+		}
+		if f, err := v.Float64(); err == nil {
+			return f
+		}
+		return string(v)
+	case map[string]any:
+		m := make(map[string]any, len(v))
+		for k, elem := range v {
+			m[k] = normalizeJSONNumber(elem)
+		}
+		return m
+	case []any:
+		l := make([]any, len(v))
+		for i, elem := range v {
+			l[i] = normalizeJSONNumber(elem)
+		}
+		return l
+	default:
+		return val
+	}
 }
