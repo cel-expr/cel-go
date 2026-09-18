@@ -922,7 +922,9 @@ func (fn *evalLateBoundFunc) Exec(frame *ExecutionFrame) ref.Val {
 		}
 	}
 	if strict && unk != nil {
-		trackCostEvalVarArgs(frame, fn.id, fn, argVals, unk)
+		if costs := frame.CostTracker(); costs != nil {
+			costs.EvalVarArgs(frame, fn.id, fn, argVals, unk)
+		}
 		return unk
 	}
 	var res ref.Val
@@ -938,13 +940,21 @@ func (fn *evalLateBoundFunc) Exec(frame *ExecutionFrame) ref.Val {
 	}
 	switch len(argVals) {
 	case 0:
-		trackCostEvalZeroArity(frame, fn.id, fn, res)
+		if costs := frame.CostTracker(); costs != nil {
+			costs.EvalZeroArity(frame, fn.id, fn, res)
+		}
 	case 1:
-		trackCostEvalUnary(frame, fn.id, fn, argVals[0], res)
+		if costs := frame.CostTracker(); costs != nil {
+			costs.EvalUnary(frame, fn.id, fn, argVals[0], res)
+		}
 	case 2:
-		trackCostEvalBinary(frame, fn.id, fn, argVals[0], argVals[1], res)
+		if costs := frame.CostTracker(); costs != nil {
+			costs.EvalBinary(frame, fn.id, fn, argVals[0], argVals[1], res)
+		}
 	default:
-		trackCostEvalVarArgs(frame, fn.id, fn, argVals, res)
+		if costs := frame.CostTracker(); costs != nil {
+			costs.EvalVarArgs(frame, fn.id, fn, argVals, res)
+		}
 	}
 	return res
 }
