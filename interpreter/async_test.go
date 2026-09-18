@@ -172,102 +172,102 @@ func TestHashCall(t *testing.T) {
 		{
 			name:     "node id 1 with string arg a",
 			input:    hashInput{1, overloads.ContainsString, []ref.Val{types.String("a")}},
-			wantHash: 13175600815575489707,
+			wantHash: 15814368891503067646,
 		},
 		{
 			name:     "node id 1 with string arg b",
 			input:    hashInput{1, overloads.ContainsString, []ref.Val{types.String("b")}},
-			wantHash: 13172731090226426672,
+			wantHash: 15814368891503067647,
 		},
 		{
 			name:     "node id 1 with bool arg true",
 			input:    hashInput{1, overloads.ContainsString, []ref.Val{types.Bool(true)}},
-			wantHash: 5368363472817480916,
+			wantHash: 15814368891503067023,
 		},
 		{
 			name:     "node id 1 with bool arg false",
 			input:    hashInput{1, overloads.ContainsString, []ref.Val{types.Bool(false)}},
-			wantHash: 5369320047933835261,
+			wantHash: 15814368891503067022,
 		},
 		{
 			name:     "node id 1 with nil args",
 			input:    hashInput{1, overloads.ContainsString, nil},
-			wantHash: 16571860343215109013,
+			wantHash: 2890365973752944208,
 		},
 		{
 			name:     "node id 2 with nil args",
 			input:    hashInput{2, overloads.ContainsString, nil},
-			wantHash: 7332562693386296450,
+			wantHash: 2890365973752944239,
 		},
 		{
 			name:     "node id 1 with overload matches_string",
 			input:    hashInput{1, overloads.MatchesString, nil},
-			wantHash: 6112375249444952169,
+			wantHash: 10829079174745334972,
 		},
 		{
 			name:     "node id 1 with overload starts_with_string",
 			input:    hashInput{1, overloads.StartsWithString, nil},
-			wantHash: 17791913581187873402,
+			wantHash: 10228231960903522011,
 		},
 		{
 			name:     "node id 1 with int arg 1",
 			input:    hashInput{1, overloads.ContainsString, []ref.Val{types.Int(1)}},
-			wantHash: 6250879603390619476,
+			wantHash: 1974807236593533186,
 		},
 		{
 			name:     "node id 1 with uint arg 1",
 			input:    hashInput{1, overloads.ContainsString, []ref.Val{types.Uint(1)}},
-			wantHash: 6250879603390619476,
+			wantHash: 1974807236593533186,
 		},
 		{
 			name:     "node id 1 with double arg 1.0",
 			input:    hashInput{1, overloads.ContainsString, []ref.Val{types.Double(1.0)}},
-			wantHash: 6250879603390619476,
+			wantHash: 1974807236593533186,
 		},
 		{
 			name:     "node id 1 with int arg 2",
 			input:    hashInput{1, overloads.ContainsString, []ref.Val{types.Int(2)}},
-			wantHash: 2269972419901218387,
+			wantHash: 1979310836220903682,
 		},
 		{
 			name:     "node id 1 with double arg 1.5",
 			input:    hashInput{1, overloads.ContainsString, []ref.Val{types.Double(1.5)}},
-			wantHash: 1181031487041842476,
+			wantHash: 1977059036407218434,
 		},
 		{
 			name:     "node id 1 with double arg 9.9",
 			input:    hashInput{1, overloads.ContainsString, []ref.Val{types.Double(9.9)}},
-			wantHash: 6763353195175059609,
+			wantHash: 1989387640387145167,
 		},
 		{
 			name:     "separation a, bc",
 			input:    hashInput{1, overloads.ContainsString, []ref.Val{types.String("a"), types.String("bc")}},
-			wantHash: 16286284200968323077,
+			wantHash: 10630089720146761712,
 		},
 		{
 			name:     "separation ab, c",
 			input:    hashInput{1, overloads.ContainsString, []ref.Val{types.String("ab"), types.String("c")}},
-			wantHash: 14974838604657976619,
+			wantHash: 10630089720146851922,
 		},
 		{
 			name:     "node id 1 with double arg NaN",
 			input:    hashInput{1, overloads.ContainsString, []ref.Val{types.Double(math.NaN())}},
-			wantHash: 4464412628189895594,
+			wantHash: 6588745054834606338,
 		},
 		{
 			name:     "node id 1 with string arg NaN",
 			input:    hashInput{1, overloads.ContainsString, []ref.Val{types.String("NaN")}},
-			wantHash: 17422508148545277865,
+			wantHash: 15814368891503145592,
 		},
 		{
 			name:     "node id 1 with double arg 0.0",
 			input:    hashInput{1, overloads.ContainsString, []ref.Val{types.Double(0.0)}},
-			wantHash: 2331193227347896467,
+			wantHash: 15814368891503067394,
 		},
 		{
 			name:     "node id 1 with double arg -0.0",
 			input:    hashInput{1, overloads.ContainsString, []ref.Val{types.Double(math.Copysign(0.0, -1.0))}},
-			wantHash: 2331193227347896467,
+			wantHash: 15814368891503067394,
 		},
 	}
 
@@ -280,6 +280,83 @@ func TestHashCall(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestHashCallInvariants(t *testing.T) {
+	// Must hash equal (the load-bearing invariant: matches() == true => hashCall agrees):
+	t.Run("cross-type numeric equal", func(t *testing.T) {
+		hInt := hashCall(1, overloads.ContainsString, []ref.Val{types.Int(1)})
+		hUint := hashCall(1, overloads.ContainsString, []ref.Val{types.Uint(1)})
+		hDouble := hashCall(1, overloads.ContainsString, []ref.Val{types.Double(1.0)})
+		if hInt != hUint || hInt != hDouble {
+			t.Errorf("expected Int(1), Uint(1), Double(1.0) to hash equal, got int=%d, uint=%d, double=%d", hInt, hUint, hDouble)
+		}
+	})
+
+	t.Run("signed zero equal", func(t *testing.T) {
+		hZero := hashCall(1, overloads.ContainsString, []ref.Val{types.Double(0.0)})
+		hNegZero := hashCall(1, overloads.ContainsString, []ref.Val{types.Double(math.Copysign(0.0, -1.0))})
+		hIntZero := hashCall(1, overloads.ContainsString, []ref.Val{types.Int(0)})
+		hUintZero := hashCall(1, overloads.ContainsString, []ref.Val{types.Uint(0)})
+		if hZero != hNegZero || hZero != hIntZero || hZero != hUintZero {
+			t.Errorf("expected 0.0, -0.0, Int(0), Uint(0) to hash equal, got 0.0=%d, -0.0=%d, int0=%d, uint0=%d", hZero, hNegZero, hIntZero, hUintZero)
+		}
+	})
+
+	t.Run("NaN payloads equal", func(t *testing.T) {
+		nan1 := types.Double(math.NaN())
+		nan2 := types.Double(math.Float64frombits(0x7ff8000000000001))
+		if hashCall(1, overloads.ContainsString, []ref.Val{nan1}) != hashCall(1, overloads.ContainsString, []ref.Val{nan2}) {
+			t.Errorf("expected different NaN payloads to hash equal")
+		}
+	})
+
+	t.Run("complex types equal", func(t *testing.T) {
+		map1 := types.DefaultTypeAdapter.NativeToValue(map[string]any{"a": 1})
+		map2 := types.DefaultTypeAdapter.NativeToValue(map[string]any{"b": 2})
+		if hashCall(1, overloads.ContainsString, []ref.Val{map1}) != hashCall(1, overloads.ContainsString, []ref.Val{map2}) {
+			t.Errorf("expected different complex types to share the same default bucket")
+		}
+	})
+
+	// Table test asserting the load-bearing invariant over a corpus of ref.Val pairs:
+	t.Run("equality implies hash equality corpus", func(t *testing.T) {
+		corpus := []ref.Val{
+			types.Int(0),
+			types.Int(1),
+			types.Int(-1),
+			types.Int(42),
+			types.Uint(0),
+			types.Uint(1),
+			types.Uint(42),
+			types.Double(0.0),
+			types.Double(math.Copysign(0.0, -1.0)),
+			types.Double(1.0),
+			types.Double(-1.0),
+			types.Double(42.0),
+			types.Bool(true),
+			types.Bool(false),
+			types.String(""),
+			types.String("0"),
+			types.String("1"),
+			types.String("42"),
+			types.String("true"),
+			types.String("NaN"),
+			types.DefaultTypeAdapter.NativeToValue(map[string]any{"x": 1}),
+		}
+		const id = int64(100)
+		for _, a := range corpus {
+			for _, b := range corpus {
+				if types.Equal(a, b) == types.True {
+					ha := hashCall(id, overloads.ContainsString, []ref.Val{a})
+					hb := hashCall(id, overloads.ContainsString, []ref.Val{b})
+					if ha != hb {
+						t.Errorf("equal values %v (%T) and %v (%T) hashed differently: %d != %d", a, a, b, b, ha, hb)
+					}
+				}
+			}
+		}
+	})
 }
 
 func TestTrackerComprehensionReuse(t *testing.T) {
