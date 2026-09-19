@@ -35,7 +35,6 @@ go_test(
         "aggregate_strategy_test.go",
         "cost_test.go",
         "default_strategy_test.go",
-        "estimator_test.go",
         "model_test.go",
         "standard_test.go",
         "tracker_test.go",

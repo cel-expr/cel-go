@@ -15,6 +15,8 @@
 package cost
 
 import (
+	"math"
+	"reflect"
 	"testing"
 
 	"cel.dev/cel-go/common/ast"
@@ -172,116 +174,99 @@ func TestAggregateSizingStrategy_EstimateSize_List(t *testing.T) {
 	}
 
 	tests := []struct {
-		name   string
-		ctx    EstimateContext
-		node   AstNode
-		wantOk bool
-		check  func(t *testing.T, sz SizeEstimate)
+		name     string
+		ctx      EstimateContext
+		node     AstNode
+		wantSize SizeEstimate
+		wantOk   bool
 	}{
 		{
-			name:   "literal_list_elements",
-			ctx:    evalCtx,
-			node:   NewAstNode(listExpr, nil, listType, nil),
-			wantOk: true,
-			check: func(t *testing.T, sz SizeEstimate) {
-				if sz.Min != 2 || sz.Max != 2 {
-					t.Errorf("got [%d, %d], want [2, 2]", sz.Min, sz.Max)
-				}
-			},
+			name:     "literal_list_elements",
+			ctx:      evalCtx,
+			node:     NewAstNode(listExpr, nil, listType, nil),
+			wantSize: ListSizeEstimate(RangedSizeEstimate(11, 13), RangedSizeEstimate(5, 6)),
+			wantOk:   true,
 		},
 		{
-			name:   "empty_literal_list",
-			ctx:    evalCtx,
-			node:   NewAstNode(emptyListExpr, nil, listType, nil),
-			wantOk: true,
-			check: func(t *testing.T, sz SizeEstimate) {
-				if sz.Min != 0 || sz.Max != 0 {
-					t.Errorf("got [%d, %d], want [0, 0]", sz.Min, sz.Max)
-				}
-			},
+			name:     "empty_literal_list",
+			ctx:      evalCtx,
+			node:     NewAstNode(emptyListExpr, nil, listType, nil),
+			wantSize: FixedSizeEstimate(1),
+			wantOk:   true,
 		},
 		{
-			name:   "add_call_list",
-			ctx:    evalCtx,
-			node:   NewAstNode(addCallExpr, nil, listType, nil),
-			wantOk: true,
-			check: func(t *testing.T, sz SizeEstimate) {
-				if sz.Min != 4 || sz.Max != 4 {
-					t.Errorf("got [%d, %d], want [4, 4]", sz.Min, sz.Max)
-				}
-			},
+			name:     "add_call_list",
+			ctx:      evalCtx,
+			node:     NewAstNode(addCallExpr, nil, listType, nil),
+			wantSize: ListSizeEstimate(RangedSizeEstimate(21, 25), RangedSizeEstimate(5, 6)),
+			wantOk:   true,
 		},
 		{
-			name:   "conditional_call_list",
-			ctx:    evalCtx,
-			node:   NewAstNode(condCallExpr, nil, listType, nil),
-			wantOk: true,
-			check: func(t *testing.T, sz SizeEstimate) {
-				if sz.Min != 0 || sz.Max != 2 {
-					t.Errorf("got [%d, %d], want [0, 2]", sz.Min, sz.Max)
-				}
-			},
+			name:     "conditional_call_list",
+			ctx:      evalCtx,
+			node:     NewAstNode(condCallExpr, nil, listType, nil),
+			wantSize: ListSizeEstimate(RangedSizeEstimate(1, 13), RangedSizeEstimate(5, 6)),
+			wantOk:   true,
 		},
 		{
-			name:   "recursive_items_path_exploration",
-			ctx:    nestedCtx,
-			node:   NewAstNode(nil, []string{"nested"}, nestedListType, nil),
+			name: "recursive_items_path_exploration",
+			ctx:  nestedCtx,
+			node: NewAstNode(nil, []string{"nested"}, nestedListType, nil),
+			wantSize: ListSizeEstimate(
+				FixedSizeEstimate(1006),
+				ListSizeEstimate(FixedSizeEstimate(201), FixedSizeEstimate(20)),
+			),
 			wantOk: true,
-			check: func(t *testing.T, sz SizeEstimate) {
-				if sz.Max != 5 || sz.Elem == nil || sz.Elem.Max != 10 || sz.Elem.Elem == nil || sz.Elem.Elem.Max != 20 {
-					t.Errorf("got %v, want Max 5, Elem.Max 10, Elem.Elem.Max 20", sz)
-				}
-			},
 		},
 		{
-			name:   "compute_type_size_element",
-			ctx:    evalCtx,
-			node:   NewAstNode(nil, nil, types.NewListType(types.IntType), nil),
-			wantOk: true,
-			check: func(t *testing.T, sz SizeEstimate) {
-				if sz.Elem == nil || sz.Elem.Max != 1 {
-					t.Errorf("got %v, want Elem.Max 1", sz)
-				}
-			},
+			name:     "compute_type_size_element",
+			ctx:      evalCtx,
+			node:     NewAstNode(nil, nil, types.NewListType(types.IntType), nil),
+			wantSize: ListSizeEstimate(UnknownSizeEstimate(), FixedSizeEstimate(1)),
+			wantOk:   true,
 		},
 		{
-			name:   "dyn_element_from_estimator",
-			ctx:    dynListCtx,
-			node:   NewAstNode(nil, []string{"dyn_list"}, types.NewListType(types.DynType), nil),
-			wantOk: true,
-			check: func(t *testing.T, sz SizeEstimate) {
-				if sz.Elem == nil || sz.Elem.Max != 8 {
-					t.Errorf("got %v, want Elem.Max 8", sz)
-				}
-			},
+			name:     "dyn_element_from_estimator",
+			ctx:      dynListCtx,
+			node:     NewAstNode(nil, []string{"dyn_list"}, types.NewListType(types.DynType), nil),
+			wantSize: ListSizeEstimate(UnknownSizeEstimate(), FixedSizeEstimate(8)),
+			wantOk:   true,
 		},
 		{
-			name:   "list_with_estimator_element_and_nested_sub_element",
-			ctx:    customEstCtx,
-			node:   NewAstNode(nil, []string{"list_with_elem_est"}, nestedListType, nil),
+			name: "list_with_estimator_element_and_nested_sub_element",
+			ctx:  customEstCtx,
+			node: NewAstNode(nil, []string{"list_with_elem_est"}, nestedListType, nil),
+			wantSize: ListSizeEstimate(
+				FixedSizeEstimate(7),
+				ListSizeEstimate(FixedSizeEstimate(2), FixedSizeEstimate(5)),
+			),
 			wantOk: true,
-			check: func(t *testing.T, sz SizeEstimate) {
-				if sz.Elem == nil || sz.Elem.Elem == nil || sz.Elem.Elem.Max != 5 {
-					t.Errorf("got %v, want Elem.Elem.Max 5", sz)
-				}
-			},
 		},
 		{
-			name:   "unknown_list_without_hints",
-			ctx:    evalCtx,
-			node:   NewAstNode(nil, []string{"unknown_list"}, types.NewListType(types.DynType), nil),
-			wantOk: false,
+			name:     "list_count_hint_unknown_string_elements",
+			ctx:      &testEvalContext{estimator: testHintsEstimator{hints: map[string]uint64{"str_list": 5}}, strategy: strat},
+			node:     NewAstNode(nil, []string{"str_list"}, types.NewListType(types.StringType), nil),
+			wantSize: RangedSizeEstimate(6, math.MaxUint64),
+			wantOk:   true,
+		},
+		{
+			name:     "unknown_list_without_hints",
+			ctx:      evalCtx,
+			node:     NewAstNode(nil, []string{"unknown_list"}, types.NewListType(types.DynType), nil),
+			wantSize: SizeEstimate{},
+			wantOk:   false,
 		},
 	}
 
 	for _, tc := range tests {
+		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			got, ok := strat.EstimateSize(tc.ctx, tc.node)
 			if ok != tc.wantOk {
 				t.Fatalf("EstimateSize() ok = %t, want %t", ok, tc.wantOk)
 			}
-			if tc.check != nil {
-				tc.check(t, got)
+			if !reflect.DeepEqual(got, tc.wantSize) {
+				t.Errorf("EstimateSize() = %v, want %v", got, tc.wantSize)
 			}
 		})
 	}
@@ -334,94 +319,89 @@ func TestAggregateSizingStrategy_EstimateSize_Map(t *testing.T) {
 	nestedMapType := types.NewMapType(types.NewListType(types.StringType), types.NewListType(types.StringType))
 
 	tests := []struct {
-		name   string
-		ctx    EstimateContext
-		node   AstNode
-		wantOk bool
-		check  func(t *testing.T, sz SizeEstimate)
+		name     string
+		ctx      EstimateContext
+		node     AstNode
+		wantSize SizeEstimate
+		wantOk   bool
 	}{
 		{
-			name:   "literal_map_single_entry",
-			ctx:    evalCtx,
-			node:   NewAstNode(mapExprSingle, nil, mapType, nil),
-			wantOk: true,
-			check: func(t *testing.T, sz SizeEstimate) {
-				if sz.Min != 1 || sz.Max != 1 {
-					t.Errorf("got [%d, %d], want [1, 1]", sz.Min, sz.Max)
-				}
-			},
+			name:     "literal_map_single_entry",
+			ctx:      evalCtx,
+			node:     NewAstNode(mapExprSingle, nil, mapType, nil),
+			wantSize: MapSizeEstimate(FixedSizeEstimate(9), FixedSizeEstimate(2), ListSizeEstimate(FixedSizeEstimate(6), FixedSizeEstimate(5))),
+			wantOk:   true,
 		},
 		{
-			name:   "literal_map_multiple_entries",
-			ctx:    evalCtx,
-			node:   NewAstNode(mapExprMulti, nil, types.NewMapType(types.StringType, types.IntType), nil),
-			wantOk: true,
-			check: func(t *testing.T, sz SizeEstimate) {
-				if sz.Min != 2 || sz.Max != 2 {
-					t.Errorf("got [%d, %d], want [2, 2]", sz.Min, sz.Max)
-				}
-			},
+			name:     "literal_map_multiple_entries",
+			ctx:      evalCtx,
+			node:     NewAstNode(mapExprMulti, nil, types.NewMapType(types.StringType, types.IntType), nil),
+			wantSize: MapSizeEstimate(FixedSizeEstimate(7), FixedSizeEstimate(2), FixedSizeEstimate(1)),
+			wantOk:   true,
 		},
 		{
-			name:   "conditional_call_map",
-			ctx:    evalCtx,
-			node:   NewAstNode(condMapExpr, nil, mapType, nil),
-			wantOk: true,
-			check: func(t *testing.T, sz SizeEstimate) {
-				if sz.Min != 0 || sz.Max != 1 {
-					t.Errorf("got [%d, %d], want [0, 1]", sz.Min, sz.Max)
-				}
-			},
+			name:     "conditional_call_map",
+			ctx:      evalCtx,
+			node:     NewAstNode(condMapExpr, nil, mapType, nil),
+			wantSize: MapSizeEstimate(RangedSizeEstimate(1, 9), FixedSizeEstimate(2), ListSizeEstimate(FixedSizeEstimate(6), FixedSizeEstimate(5))),
+			wantOk:   true,
 		},
 		{
-			name:   "recursive_keys_and_values_exploration",
-			ctx:    mapAggCtx,
-			node:   NewAstNode(nil, []string{"mm"}, mapType, nil),
+			name: "recursive_keys_and_values_exploration",
+			ctx:  mapAggCtx,
+			node: NewAstNode(nil, []string{"mm"}, mapType, nil),
+			wantSize: MapSizeEstimate(
+				FixedSizeEstimate(141),
+				FixedSizeEstimate(3),
+				ListSizeEstimate(FixedSizeEstimate(25), FixedSizeEstimate(6)),
+			),
 			wantOk: true,
-			check: func(t *testing.T, sz SizeEstimate) {
-				if sz.Max != 5 || sz.Key == nil || sz.Key.Max != 3 || sz.Elem == nil || sz.Elem.Max != 4 || sz.Elem.Elem == nil || sz.Elem.Elem.Max != 6 {
-					t.Errorf("got %v, want Max 5, Key.Max 3, Elem.Max 4 with Elem.Elem.Max 6", sz)
-				}
-			},
 		},
 		{
-			name:   "compute_type_size_key_and_val",
-			ctx:    evalCtx,
-			node:   NewAstNode(nil, nil, types.NewMapType(types.IntType, types.BoolType), nil),
-			wantOk: true,
-			check: func(t *testing.T, sz SizeEstimate) {
-				if sz.Key == nil || sz.Key.Max != 1 || sz.Elem == nil || sz.Elem.Max != 1 {
-					t.Errorf("got %v, want Key.Max 1, Elem.Max 1", sz)
-				}
-			},
+			name:     "compute_type_size_key_and_val",
+			ctx:      evalCtx,
+			node:     NewAstNode(nil, nil, types.NewMapType(types.IntType, types.BoolType), nil),
+			wantSize: MapSizeEstimate(UnknownSizeEstimate(), FixedSizeEstimate(1), FixedSizeEstimate(1)),
+			wantOk:   true,
 		},
 		{
-			name:   "dyn_key_and_val_from_estimator",
-			ctx:    dynMapCtx,
-			node:   NewAstNode(nil, []string{"dyn_map"}, types.NewMapType(types.DynType, types.DynType), nil),
-			wantOk: true,
-			check: func(t *testing.T, sz SizeEstimate) {
-				if sz.Key == nil || sz.Key.Max != 8 || sz.Elem == nil || sz.Elem.Max != 8 {
-					t.Errorf("got %v, want Key.Max 8, Elem.Max 8", sz)
-				}
-			},
+			name:     "dyn_key_and_val_from_estimator",
+			ctx:      dynMapCtx,
+			node:     NewAstNode(nil, []string{"dyn_map"}, types.NewMapType(types.DynType, types.DynType), nil),
+			wantSize: MapSizeEstimate(UnknownSizeEstimate(), FixedSizeEstimate(8), FixedSizeEstimate(8)),
+			wantOk:   true,
 		},
 		{
-			name:   "map_with_estimator_entries_and_nested_sub_items",
-			ctx:    customEstCtx,
-			node:   NewAstNode(nil, []string{"map_with_entries_est"}, nestedMapType, nil),
+			name: "map_with_estimator_entries_and_nested_sub_items",
+			ctx:  customEstCtx,
+			node: NewAstNode(nil, []string{"map_with_entries_est"}, nestedMapType, nil),
+			wantSize: MapSizeEstimate(
+				FixedSizeEstimate(31),
+				ListSizeEstimate(FixedSizeEstimate(2), FixedSizeEstimate(6)),
+				ListSizeEstimate(FixedSizeEstimate(4), FixedSizeEstimate(8)),
+			),
 			wantOk: true,
-			check: func(t *testing.T, sz SizeEstimate) {
-				if sz.Key == nil || sz.Key.Elem == nil || sz.Key.Elem.Max != 6 || sz.Elem == nil || sz.Elem.Elem == nil || sz.Elem.Elem.Max != 8 {
-					t.Errorf("got %v, want Key.Elem.Max 6, Elem.Elem.Max 8", sz)
-				}
-			},
 		},
 		{
-			name:   "unknown_map_without_hints",
-			ctx:    evalCtx,
-			node:   NewAstNode(nil, []string{"unknown_map"}, types.NewMapType(types.DynType, types.DynType), nil),
-			wantOk: false,
+			name: "map_count_hint_unknown_string_values",
+			ctx: &testEvalContext{
+				estimator: testHintsEstimator{hints: map[string]uint64{"str_map": 5, "str_map.@keys": 3}},
+				strategy:  strat,
+			},
+			node: NewAstNode(nil, []string{"str_map"}, types.NewMapType(types.StringType, types.StringType), nil),
+			wantSize: SizeEstimate{
+				Min: 21,
+				Max: math.MaxUint64,
+				Key: &SizeEstimate{Min: 3, Max: 3},
+			},
+			wantOk: true,
+		},
+		{
+			name:     "unknown_map_without_hints",
+			ctx:      evalCtx,
+			node:     NewAstNode(nil, []string{"unknown_map"}, types.NewMapType(types.DynType, types.DynType), nil),
+			wantSize: SizeEstimate{},
+			wantOk:   false,
 		},
 	}
 
@@ -431,8 +411,8 @@ func TestAggregateSizingStrategy_EstimateSize_Map(t *testing.T) {
 			if ok != tc.wantOk {
 				t.Fatalf("EstimateSize() ok = %t, want %t", ok, tc.wantOk)
 			}
-			if tc.check != nil {
-				tc.check(t, got)
+			if !reflect.DeepEqual(got, tc.wantSize) {
+				t.Errorf("EstimateSize() = %v, want %v", got, tc.wantSize)
 			}
 		})
 	}

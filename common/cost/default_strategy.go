@@ -211,6 +211,11 @@ func estimateMapExpr(ctx EstimateContext, node AstNode, keyType, valType *types.
 
 // estimateScalarOrFallback returns size estimates using custom estimator hints or primitive type sizes.
 func estimateScalarOrFallback(ctx EstimateContext, node AstNode) (SizeEstimate, bool) {
+	if node != nil && node.Expr() != nil {
+		if sz := computeExprSize(node.Expr()); sz != nil {
+			return *sz, true
+		}
+	}
 	if ctx != nil && ctx.Estimator() != nil {
 		if sz := ctx.Estimator().EstimateSize(node); sz != nil {
 			return *sz, true

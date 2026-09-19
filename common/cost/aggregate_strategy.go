@@ -15,8 +15,11 @@
 package cost
 
 import (
+	"math"
 	"slices"
 
+	"cel.dev/cel-go/common/ast"
+	"cel.dev/cel-go/common/operators"
 	"cel.dev/cel-go/common/types"
 	"cel.dev/cel-go/common/types/ref"
 )
@@ -80,6 +83,24 @@ func estimateAggregateListSize(ctx EstimateContext, node AstNode) (SizeEstimate,
 	elemType := listElemType(node.Type())
 	listSize, elemSize := estimateListExpr(ctx, node, elemType)
 
+	if node.Expr() != nil && node.Expr().Kind() == ast.CallKind && listSize != nil {
+		call := node.Expr().AsCall()
+		if call.FunctionName() == operators.Add && len(call.Args()) == 2 {
+			minVal := SafeSubtract(listSize.Min, 1)
+			if minVal == 0 {
+				minVal = 1
+			}
+			maxVal := SafeSubtract(listSize.Max, 1)
+			if maxVal == 0 {
+				maxVal = 1
+			}
+			res := RangedSizeEstimate(minVal, maxVal)
+			res.Elem = elemSize
+			return res, true
+		}
+		return *listSize, true
+	}
+
 	if listSize == nil && ctx != nil && ctx.Estimator() != nil {
 		listSize = ctx.Estimator().EstimateSize(node)
 	}
@@ -104,12 +125,36 @@ func estimateAggregateListSize(ctx EstimateContext, node AstNode) (SizeEstimate,
 	if elemSize == nil {
 		elemSize = fallbackElemSize(ctx, elemType)
 	}
-	return combineListSize(listSize, elemSize)
+	if listSize == nil {
+		if elemSize != nil {
+			res := UnknownSizeEstimate()
+			res.Elem = elemSize
+			return res, true
+		}
+		return SizeEstimate{}, false
+	}
+	minElem := uint64(1)
+	maxElem := uint64(math.MaxUint64)
+	if elemSize != nil {
+		minElem = elemSize.Min
+		maxElem = elemSize.Max
+	}
+	aggMin := SafeAdd(1, SafeMultiply(listSize.Min, minElem))
+	aggMax := SafeAdd(1, SafeMultiply(listSize.Max, maxElem))
+	return SizeEstimate{
+		Min:  aggMin,
+		Max:  aggMax,
+		Elem: elemSize,
+	}, true
 }
 
 func estimateAggregateMapSize(ctx EstimateContext, node AstNode) (SizeEstimate, bool) {
 	keyType, valType := mapKeyValueTypes(node.Type())
 	mapSize, keySize, valSize := estimateMapExpr(ctx, node, keyType, valType)
+
+	if node.Expr() != nil && node.Expr().Kind() == ast.CallKind && mapSize != nil {
+		return *mapSize, true
+	}
 
 	if mapSize == nil && ctx != nil && ctx.Estimator() != nil {
 		mapSize = ctx.Estimator().EstimateSize(node)
@@ -152,7 +197,33 @@ func estimateAggregateMapSize(ctx EstimateContext, node AstNode) (SizeEstimate, 
 	if valSize == nil {
 		valSize = fallbackElemSize(ctx, valType)
 	}
-	return combineMapSize(mapSize, keySize, valSize)
+	if mapSize == nil {
+		if keySize != nil || valSize != nil {
+			res := UnknownSizeEstimate()
+			res.Key = keySize
+			res.Elem = valSize
+			return res, true
+		}
+		return SizeEstimate{}, false
+	}
+	minKey, maxKey := uint64(1), uint64(math.MaxUint64)
+	if keySize != nil {
+		minKey, maxKey = keySize.Min, keySize.Max
+	}
+	minVal, maxVal := uint64(1), uint64(math.MaxUint64)
+	if valSize != nil {
+		minVal, maxVal = valSize.Min, valSize.Max
+	}
+	entryMin := SafeAdd(minKey, minVal)
+	entryMax := SafeAdd(maxKey, maxVal)
+	aggMin := SafeAdd(1, SafeMultiply(mapSize.Min, entryMin))
+	aggMax := SafeAdd(1, SafeMultiply(mapSize.Max, entryMax))
+	return SizeEstimate{
+		Min:  aggMin,
+		Max:  aggMax,
+		Key:  keySize,
+		Elem: valSize,
+	}, true
 }
 
 func isContainerKind(kind types.Kind) bool {
