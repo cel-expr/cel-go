@@ -19,8 +19,10 @@ import (
 	"fmt"
 	"maps"
 	"reflect"
+	"sync"
 	"sync/atomic"
 	"time"
+	"unsafe"
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -697,9 +699,29 @@ func (p *Registry) NativeToValue(value any) ref.Val {
 		return Bytes(v)
 	// specializations for common lists types.
 	case []string:
-		return NewStringList(p, v)
+		return NewList(p, v)
 	case []ref.Val:
-		return NewRefValList(p, v)
+		return NewList(p, v)
+	case []int:
+		return NewList(p, v)
+	case []int64:
+		return NewList(p, v)
+	case []int32:
+		return NewList(p, v)
+	case []uint:
+		return NewList(p, v)
+	case []uint64:
+		return NewList(p, v)
+	case []uint32:
+		return NewList(p, v)
+	case []float64:
+		return NewList(p, v)
+	case []float32:
+		return NewList(p, v)
+	case []bool:
+		return NewList(p, v)
+	case []any:
+		return NewList(p, v)
 	// specializations for common map types.
 	case map[string]string:
 		return NewStringStringMap(p, v)
@@ -1038,6 +1060,120 @@ func unsupportedTypeConversionError(field *pb.FieldDescription, val ref.Val) err
 func fieldTypeConversionError(field *pb.FieldDescription, err error) error {
 	msgName := field.Descriptor().ContainingMessage().FullName()
 	return fmt.Errorf("field type conversion error for %v.%v value type: %v", msgName, field.Name(), err)
+}
+
+// emptyInterface mirrors Go runtime's internal eface representation:
+//
+//	type eface struct {
+//	    _type *_type
+//	    data  unsafe.Pointer
+//	}
+//
+// It is used exclusively for zero-copy qualification and direct type extraction.
+type emptyInterface struct {
+	typ unsafe.Pointer
+	ptr unsafe.Pointer
+}
+
+// isDirectIface determines whether a type's values fit directly into an interface's data word
+// according to Go runtime conventions (pointers, single-pointer structs/arrays, maps, funcs, chans).
+func isDirectIface(t reflect.Type) bool {
+	switch t.Kind() {
+	case reflect.Pointer, reflect.UnsafePointer, reflect.Chan, reflect.Map, reflect.Func:
+		return true
+	case reflect.Struct:
+		return t.NumField() == 1 && isDirectIface(t.Field(0).Type)
+	case reflect.Array:
+		return t.Len() == 1 && isDirectIface(t.Elem())
+	default:
+		return false
+	}
+}
+
+type unsafeSlice struct {
+	Data unsafe.Pointer
+	Len  int
+	Cap  int
+}
+
+type dynamicSliceMeta struct {
+	sliceType     reflect.Type
+	sliceTypePtr  unsafe.Pointer
+	elemTypePtr   unsafe.Pointer
+	elemStride    uintptr
+	qualifyRawVal bool
+	isPtrElem     bool
+	supported     bool
+}
+
+var dynamicSliceMetaCache sync.Map
+
+func isQualifyRawStruct[T any]() bool {
+	return isQualifyRawStructType(reflect.TypeFor[T]())
+}
+
+func isQualifyRawStructType(rt reflect.Type) bool {
+	if rt == nil || rt.Implements(reflect.TypeFor[ref.Val]()) || rt.Implements(reflect.TypeFor[protoreflect.ProtoMessage]()) {
+		return false
+	}
+	if rt.Kind() == reflect.Struct {
+		return rt != reflect.TypeFor[time.Time]()
+	}
+	if rt.Kind() == reflect.Ptr && rt.Elem().Kind() == reflect.Struct {
+		return rt.Elem() != reflect.TypeFor[time.Time]()
+	}
+	return false
+}
+
+var unsupportedDynamicSliceMeta = &dynamicSliceMeta{supported: false}
+
+func getDynamicSliceMeta(rt reflect.Type) *dynamicSliceMeta {
+	if rt == nil || rt.Kind() != reflect.Slice {
+		return unsupportedDynamicSliceMeta
+	}
+	if v, ok := dynamicSliceMetaCache.Load(rt); ok {
+		return v.(*dynamicSliceMeta)
+	}
+	zeroSlice := reflect.Zero(rt).Interface()
+	sliceTypPtr := (*emptyInterface)(unsafe.Pointer(&zeroSlice)).typ
+	elemType := rt.Elem()
+	var meta *dynamicSliceMeta
+	switch elemType.Kind() {
+	case reflect.Pointer:
+		zeroElem := reflect.Zero(elemType).Interface()
+		meta = &dynamicSliceMeta{
+			sliceType:     rt,
+			sliceTypePtr:  sliceTypPtr,
+			elemTypePtr:   (*emptyInterface)(unsafe.Pointer(&zeroElem)).typ,
+			qualifyRawVal: isQualifyRawStructType(elemType),
+			isPtrElem:     true,
+			supported:     true,
+		}
+	case reflect.Struct:
+		if elemType.Size() > 0 && isQualifyRawStructType(elemType) {
+			var elemTyp unsafe.Pointer
+			if isDirectIface(elemType) {
+				zeroPtr := reflect.Zero(reflect.PointerTo(elemType)).Interface()
+				elemTyp = (*emptyInterface)(unsafe.Pointer(&zeroPtr)).typ
+			} else {
+				zeroVal := reflect.Zero(elemType).Interface()
+				elemTyp = (*emptyInterface)(unsafe.Pointer(&zeroVal)).typ
+			}
+			meta = &dynamicSliceMeta{
+				sliceType:     rt,
+				sliceTypePtr:  sliceTypPtr,
+				elemTypePtr:   elemTyp,
+				elemStride:    elemType.Size(),
+				qualifyRawVal: true,
+				supported:     true,
+			}
+		}
+	}
+	if meta != nil && meta.supported {
+		dynamicSliceMetaCache.Store(rt, meta)
+		return meta
+	}
+	return unsupportedDynamicSliceMeta
 }
 
 var (

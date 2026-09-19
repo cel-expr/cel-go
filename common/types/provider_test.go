@@ -24,6 +24,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unsafe"
 
 	"cel.dev/cel-go/common/types/ref"
 	"cel.dev/cel-go/common/types/traits"
@@ -2808,4 +2809,106 @@ func TestParseStructTag(t *testing.T) {
 		})
 	}
 }
+
+func TestIsDirectIface(t *testing.T) {
+	type directPtrStruct struct {
+		P *int
+	}
+	type directUnsafePtrStruct struct {
+		P unsafe.Pointer
+	}
+	type directChanStruct struct {
+		C chan int
+	}
+	type directMapStruct struct {
+		M map[string]int
+	}
+	type directFuncStruct struct {
+		F func()
+	}
+	type directNestedStruct struct {
+		S directPtrStruct
+	}
+	type directArrayStruct struct {
+		A [1]*int
+	}
+	type directNestedArrayStruct struct {
+		A [1]directPtrStruct
+	}
+	type nonDirectIntStruct struct {
+		I int
+	}
+	type nonDirectMultiFieldStruct struct {
+		P *int
+		Q *int
+	}
+	type emptyStruct struct{}
+
+	tests := []struct {
+		name string
+		typ  reflect.Type
+		want bool
+	}{
+		// Pointers & direct pointer-like types
+		{"pointer", reflect.TypeFor[*int](), true},
+		{"unsafe_pointer", reflect.TypeFor[unsafe.Pointer](), true},
+		{"chan", reflect.TypeFor[chan int](), true},
+		{"map", reflect.TypeFor[map[string]int](), true},
+		{"func", reflect.TypeFor[func()](), true},
+
+		// Single-field direct structs
+		{"struct_pointer", reflect.TypeFor[directPtrStruct](), true},
+		{"struct_unsafe_pointer", reflect.TypeFor[directUnsafePtrStruct](), true},
+		{"struct_chan", reflect.TypeFor[directChanStruct](), true},
+		{"struct_map", reflect.TypeFor[directMapStruct](), true},
+		{"struct_func", reflect.TypeFor[directFuncStruct](), true},
+		{"struct_nested_direct", reflect.TypeFor[directNestedStruct](), true},
+
+		// Structs that are not direct iface
+		{"struct_non_direct_int", reflect.TypeFor[nonDirectIntStruct](), false},
+		{"struct_multi_field", reflect.TypeFor[nonDirectMultiFieldStruct](), false},
+		{"struct_empty", reflect.TypeFor[emptyStruct](), false},
+
+		// Arrays
+		{"array_1_pointer", reflect.TypeFor[[1]*int](), true},
+		{"array_1_nested_direct", reflect.TypeFor[[1]directPtrStruct](), true},
+		{"array_1_nested_array_struct", reflect.TypeFor[directNestedArrayStruct](), true},
+		{"array_1_int", reflect.TypeFor[[1]int](), false},
+		{"array_2_pointer", reflect.TypeFor[[2]*int](), false},
+		{"array_0_pointer", reflect.TypeFor[[0]*int](), false},
+
+		// Primitives and slices (default case)
+		{"int", reflect.TypeFor[int](), false},
+		{"string", reflect.TypeFor[string](), false},
+		{"bool", reflect.TypeFor[bool](), false},
+		{"float64", reflect.TypeFor[float64](), false},
+		{"slice_int", reflect.TypeFor[[]int](), false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := isDirectIface(tc.typ)
+			if got != tc.want {
+				t.Errorf("isDirectIface(%v) = %v, want %v", tc.typ, got, tc.want)
+			}
+		})
+	}
+
+	// Test getDynamicSliceMeta direct-iface vs non-direct-iface paths
+	metaDirect := getDynamicSliceMeta(reflect.TypeFor[[]directPtrStruct]())
+	if !metaDirect.supported || metaDirect.elemTypePtr == nil {
+		t.Errorf("getDynamicSliceMeta(directPtrStruct) failed: %+v", metaDirect)
+	}
+
+	metaDirectArray := getDynamicSliceMeta(reflect.TypeFor[[]directArrayStruct]())
+	if !metaDirectArray.supported || metaDirectArray.elemTypePtr == nil {
+		t.Errorf("getDynamicSliceMeta(directArrayStruct) failed: %+v", metaDirectArray)
+	}
+
+	metaNonDirect := getDynamicSliceMeta(reflect.TypeFor[[]nonDirectIntStruct]())
+	if !metaNonDirect.supported || metaNonDirect.elemTypePtr == nil {
+		t.Errorf("getDynamicSliceMeta(nonDirectIntStruct) failed: %+v", metaNonDirect)
+	}
+}
+
 

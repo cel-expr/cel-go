@@ -20,6 +20,7 @@ import (
 	"math"
 	"reflect"
 	"testing"
+	"time"
 
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
@@ -994,3 +995,806 @@ func TestListCalculateSize(t *testing.T) {
 		})
 	}
 }
+
+func TestMaybeSliceList(t *testing.T) {
+	adapter := DefaultTypeAdapter
+
+	t.Run("nil_list", func(t *testing.T) {
+		if _, ok := MaybeSliceList(adapter, nil, 0, 0); ok {
+			t.Errorf("expected ok = false for nil list")
+		}
+	})
+
+	t.Run("out_of_bounds", func(t *testing.T) {
+		l := NewStringList(adapter, []string{"a", "b", "c"})
+		bounds := [][2]int{
+			{-1, 2},
+			{0, 4},
+			{2, 1},
+			{0, -1},
+		}
+		for _, b := range bounds {
+			if _, ok := MaybeSliceList(adapter, l, b[0], b[1]); ok {
+				t.Errorf("MaybeSliceList(l, %d, %d) expected ok = false", b[0], b[1])
+			}
+		}
+	})
+
+	t.Run("string_slice", func(t *testing.T) {
+		l := NewStringList(adapter, []string{"a", "b", "c", "d"})
+		sub, ok := MaybeSliceList(adapter, l, 1, 3)
+		if !ok {
+			t.Fatalf("MaybeSliceList failed")
+		}
+		if sub.Size() != Int(2) {
+			t.Errorf("got size %v, want 2", sub.Size())
+		}
+		want := []string{"b", "c"}
+		if !reflect.DeepEqual(sub.Value(), want) {
+			t.Errorf("got value %v, want %v", sub.Value(), want)
+		}
+	})
+
+	t.Run("int_slice", func(t *testing.T) {
+		l := NewDynamicList(adapter, []int{10, 20, 30, 40})
+		sub, ok := MaybeSliceList(adapter, l, 0, 2)
+		if !ok {
+			t.Fatalf("MaybeSliceList failed")
+		}
+		want := []int{10, 20}
+		if !reflect.DeepEqual(sub.Value(), want) {
+			t.Errorf("got value %v, want %v", sub.Value(), want)
+		}
+	})
+
+	t.Run("ref_val_slice", func(t *testing.T) {
+		l := NewRefValList(adapter, []ref.Val{String("first"), String("second"), String("third")})
+		sub, ok := MaybeSliceList(adapter, l, 1, 2)
+		if !ok {
+			t.Fatalf("MaybeSliceList failed")
+		}
+		want := []ref.Val{String("second")}
+		if !reflect.DeepEqual(sub.Value(), want) {
+			t.Errorf("got value %v, want %v", sub.Value(), want)
+		}
+	})
+}
+
+func TestMaybeReverseList(t *testing.T) {
+	adapter := DefaultTypeAdapter
+
+	t.Run("nil_list", func(t *testing.T) {
+		if _, ok := MaybeReverseList(adapter, nil); ok {
+			t.Errorf("expected ok = false for nil list")
+		}
+	})
+
+	t.Run("empty_and_single", func(t *testing.T) {
+		empty := NewStringList(adapter, []string{})
+		revEmpty, ok := MaybeReverseList(adapter, empty)
+		if !ok || revEmpty.Size() != Int(0) {
+			t.Errorf("MaybeReverseList failed on empty list")
+		}
+
+		single := NewStringList(adapter, []string{"single"})
+		revSingle, ok := MaybeReverseList(adapter, single)
+		if !ok || revSingle.Size() != Int(1) {
+			t.Errorf("MaybeReverseList failed on single-element list")
+		}
+	})
+
+	t.Run("string_slice", func(t *testing.T) {
+		l := NewStringList(adapter, []string{"a", "b", "c"})
+		rev, ok := MaybeReverseList(adapter, l)
+		if !ok {
+			t.Fatalf("MaybeReverseList failed")
+		}
+		want := []string{"c", "b", "a"}
+		if !reflect.DeepEqual(rev.Value(), want) {
+			t.Errorf("got value %v, want %v", rev.Value(), want)
+		}
+	})
+
+	t.Run("int_slice", func(t *testing.T) {
+		l := NewDynamicList(adapter, []int{1, 2, 3, 4})
+		rev, ok := MaybeReverseList(adapter, l)
+		if !ok {
+			t.Fatalf("MaybeReverseList failed")
+		}
+		want := []int{4, 3, 2, 1}
+		if !reflect.DeepEqual(rev.Value(), want) {
+			t.Errorf("got value %v, want %v", rev.Value(), want)
+		}
+	})
+
+	t.Run("ref_val_slice", func(t *testing.T) {
+		l := NewRefValList(adapter, []ref.Val{Int(100), Int(200)})
+		rev, ok := MaybeReverseList(adapter, l)
+		if !ok {
+			t.Fatalf("MaybeReverseList failed")
+		}
+		want := []ref.Val{Int(200), Int(100)}
+		if !reflect.DeepEqual(rev.Value(), want) {
+			t.Errorf("got value %v, want %v", rev.Value(), want)
+		}
+	})
+}
+
+type int64Indexer interface {
+	GetInt64Index(int64) (any, bool)
+}
+
+type dummyAggregateSizer struct{}
+
+func (dummyAggregateSizer) AggregateSize(any) uint32 {
+	return 1
+}
+
+type mockCustomList struct {
+	traits.Lister
+	val any
+}
+
+func (m mockCustomList) Value() any {
+	return m.val
+}
+
+type mockContainsErrList struct {
+	traits.Lister
+	err ref.Val
+}
+
+func (m mockContainsErrList) Contains(ref.Val) ref.Val {
+	return m.err
+}
+
+func (m mockContainsErrList) Size() ref.Val {
+	return Int(1)
+}
+
+func (m mockContainsErrList) Get(ref.Val) ref.Val {
+	return m.err
+}
+
+type customOnePtrStruct struct {
+	P *int
+}
+
+type customMultiWordStruct struct {
+	A int
+	B string
+}
+
+type customZeroStruct struct{}
+
+func TestList_ComprehensiveCoverage(t *testing.T) {
+	adapter := DefaultTypeAdapter
+
+	t.Run("NewDynamicList_AllSpecializations", func(t *testing.T) {
+		// nil
+		nl := NewDynamicList(adapter, nil)
+		if nl.Size() != IntZero {
+			t.Errorf("expected size 0 for nil, got %v", nl.Size())
+		}
+
+		// all slice types
+		now := time.Now()
+		dur := time.Minute
+
+		vString := NewDynamicList(adapter, []string{"a", "b"})
+		vRefVal := NewDynamicList(adapter, []ref.Val{Int(1), String("x")})
+		vInt := NewDynamicList(adapter, []int{1, 2})
+		vInt64 := NewDynamicList(adapter, []int64{1, 2})
+		vInt32 := NewDynamicList(adapter, []int32{1, 2})
+		vInt16 := NewDynamicList(adapter, []int16{1, 2})
+		vInt8 := NewDynamicList(adapter, []int8{1, 2})
+		vUint := NewDynamicList(adapter, []uint{1, 2})
+		vUint64 := NewDynamicList(adapter, []uint64{1, 2})
+		vUint32 := NewDynamicList(adapter, []uint32{1, 2})
+		vUint16 := NewDynamicList(adapter, []uint16{1, 2})
+		vUint8 := NewDynamicList(adapter, []uint8{1, 2})
+		vFloat64 := NewDynamicList(adapter, []float64{1.0, 2.0})
+		vFloat32 := NewDynamicList(adapter, []float32{1.0, 2.0})
+		vBool := NewDynamicList(adapter, []bool{true, false})
+		vAny := NewDynamicList(adapter, []any{1, "two"})
+		vBytes := NewDynamicList(adapter, [][]byte{[]byte("hi"), []byte("bye")})
+		vTime := NewDynamicList(adapter, []time.Time{now, now.Add(time.Hour)})
+		vDuration := NewDynamicList(adapter, []time.Duration{dur, dur * 2})
+
+		allLists := []traits.Lister{
+			vString, vRefVal, vInt, vInt64, vInt32, vInt16, vInt8,
+			vUint, vUint64, vUint32, vUint16, vUint8,
+			vFloat64, vFloat32, vBool, vAny, vBytes, vTime, vDuration,
+		}
+		for _, l := range allLists {
+			if l.Size() != Int(2) {
+				t.Errorf("list %T has unexpected size %v", l, l.Size())
+			}
+		}
+
+		// Dynamic slice meta: slice of structs
+		sVal := []customMultiWordStruct{{1, "a"}, {2, "b"}}
+		vStruct := NewDynamicList(adapter, sVal)
+		if vStruct.Size() != Int(2) {
+			t.Errorf("vStruct size got %v, want 2", vStruct.Size())
+		}
+		if str := vStruct.(fmt.Stringer).String(); str == "" {
+			t.Errorf("vStruct string was empty")
+		}
+		// ConvertToNative on dynamic slice
+		if nativeVal, err := vStruct.ConvertToNative(reflect.TypeOf([]customMultiWordStruct{})); err != nil || !reflect.DeepEqual(nativeVal, sVal) {
+			t.Errorf("vStruct ConvertToNative got %v, %v", nativeVal, err)
+		}
+
+		// Dynamic slice meta: slice of pointers
+		pVal := []*customMultiWordStruct{{1, "a"}, nil, {2, "b"}}
+		vPtrStruct := NewDynamicList(adapter, pVal)
+		if vPtrStruct.Size() != Int(3) {
+			t.Errorf("vPtrStruct size got %v, want 3", vPtrStruct.Size())
+		}
+		if vPtrStruct.Get(Int(1)) != NullValue {
+			t.Errorf("vPtrStruct[1] got %v, want NullValue", vPtrStruct.Get(Int(1)))
+		}
+		if raw, ok := vPtrStruct.(int64Indexer).GetInt64Index(1); !ok || raw != NullValue {
+			t.Errorf("GetInt64Index(1) got %v, %v", raw, ok)
+		}
+		if raw, ok := vPtrStruct.(int64Indexer).GetInt64Index(0); !ok || raw == nil {
+			t.Errorf("GetInt64Index(0) got %v, %v", raw, ok)
+		}
+		// Fold on slice of pointers
+		var pFoldCount int
+		vPtrStruct.(traits.Foldable).Fold(&testListFolder{foldLimit: 10, folds: 0})
+		vPtrStruct.(traits.Foldable).Fold(&testFuncFolder{fn: func(k, v any) bool {
+			pFoldCount++
+			return true
+		}})
+		if pFoldCount != 3 {
+			t.Errorf("vPtrStruct fold count got %d, want 3", pFoldCount)
+		}
+		// Fold early break on slice of pointers
+		vPtrStruct.(traits.Foldable).Fold(&testFuncFolder{fn: func(k, v any) bool {
+			return false
+		}})
+		// Fold with null pointer early break
+		vPtrStruct.(traits.Foldable).Fold(&testFuncFolder{fn: func(k, v any) bool {
+			if v == NullValue {
+				return false
+			}
+			return true
+		}})
+
+		// Nil and empty dynamic slices
+		var nilPtrSlice []*customMultiWordStruct
+		vNilPtrSlice := NewDynamicList(adapter, nilPtrSlice)
+		if vNilPtrSlice.Size() != IntZero || !vNilPtrSlice.(traits.Zeroer).IsZeroValue() {
+			t.Errorf("vNilPtrSlice expected zero size")
+		}
+		if vNilPtrSlice.Value() == nil {
+			// nativeSliceValue when isNilSlice
+		}
+		emptyPtrSlice := []*customMultiWordStruct{}
+		vEmptyPtrSlice := NewDynamicList(adapter, emptyPtrSlice)
+		if vEmptyPtrSlice.Size() != IntZero {
+			t.Errorf("vEmptyPtrSlice expected zero size")
+		}
+		_ = vEmptyPtrSlice.Value()
+
+		var nilStructSlice []customMultiWordStruct
+		vNilStructSlice := NewDynamicList(adapter, nilStructSlice)
+		_ = vNilStructSlice.Value()
+
+		emptyStructSlice := []customMultiWordStruct{}
+		vEmptyStructSlice := NewDynamicList(adapter, emptyStructSlice)
+		_ = vEmptyStructSlice.Value()
+
+		// Dynamic slice of struct fold & GetInt64Index
+		var structFoldCount int
+		vStruct.(traits.Foldable).Fold(&testFuncFolder{fn: func(k, v any) bool {
+			structFoldCount++
+			return true
+		}})
+		if structFoldCount != 2 {
+			t.Errorf("structFoldCount got %d, want 2", structFoldCount)
+		}
+		vStruct.(traits.Foldable).Fold(&testFuncFolder{fn: func(k, v any) bool {
+			return false
+		}})
+		if raw, ok := vStruct.(int64Indexer).GetInt64Index(0); !ok || raw == nil {
+			t.Errorf("vStruct GetInt64Index(0) got %v, %v", raw, ok)
+		}
+
+		// Fallback baseList from NewDynamicList (e.g. array)
+		arr := [2]int{10, 20}
+		vArr := NewDynamicList(adapter, arr)
+		if vArr.Size() != Int(2) {
+			t.Errorf("vArr size got %v, want 2", vArr.Size())
+		}
+		if vArr.Get(Int(0)) != Int(10) {
+			t.Errorf("vArr[0] got %v, want 10", vArr.Get(Int(0)))
+		}
+	})
+
+	t.Run("MaybeSliceList_And_MaybeReverseList_Edges", func(t *testing.T) {
+		// MaybeSliceList
+		if _, ok := MaybeSliceList(adapter, mockCustomList{val: nil}, 0, 0); ok {
+			t.Errorf("MaybeSliceList on nil value expected false")
+		}
+		if _, ok := MaybeSliceList(adapter, mockCustomList{val: 123}, 0, 0); ok {
+			t.Errorf("MaybeSliceList on non-slice value expected false")
+		}
+
+		// MaybeReverseList
+		if _, ok := MaybeReverseList(adapter, mockCustomList{val: nil}); ok {
+			t.Errorf("MaybeReverseList on nil value expected false")
+		}
+		if _, ok := MaybeReverseList(adapter, mockCustomList{val: 123}); ok {
+			t.Errorf("MaybeReverseList on non-slice value expected false")
+		}
+	})
+
+	t.Run("ElemTypePtrFor_And_StructSlices", func(t *testing.T) {
+		// zeroStruct
+		zList := NewList(adapter, []customZeroStruct{{}})
+		if zList.Size() != Int(1) {
+			t.Errorf("zList size got %v", zList.Size())
+		}
+		_ = zList.Get(Int(0))
+
+		// onePtrStruct (direct interface)
+		val := 42
+		opList := NewList(adapter, []customOnePtrStruct{{P: &val}, {P: nil}})
+		if opList.Size() != Int(2) {
+			t.Errorf("opList size got %v", opList.Size())
+		}
+		_ = opList.Get(Int(0))
+		if raw, ok := opList.(int64Indexer).GetInt64Index(0); !ok || raw == nil {
+			t.Errorf("opList GetInt64Index(0) got %v, %v", raw, ok)
+		}
+		var opFolds int
+		opList.(traits.Foldable).Fold(&testFuncFolder{fn: func(k, v any) bool {
+			opFolds++
+			return true
+		}})
+		if opFolds != 2 {
+			t.Errorf("opList folds got %d, want 2", opFolds)
+		}
+		opList.(traits.Foldable).Fold(&testFuncFolder{fn: func(k, v any) bool {
+			return false
+		}})
+
+		// multiWordStruct (indirect interface)
+		mwList := NewList(adapter, []customMultiWordStruct{{1, "a"}, {2, "b"}})
+		if mwList.Size() != Int(2) {
+			t.Errorf("mwList size got %v", mwList.Size())
+		}
+		_ = mwList.Get(Int(0))
+		if raw, ok := mwList.(int64Indexer).GetInt64Index(0); !ok || raw == nil {
+			t.Errorf("mwList GetInt64Index(0) got %v, %v", raw, ok)
+		}
+		var mwFolds int
+		mwList.(traits.Foldable).Fold(&testFuncFolder{fn: func(k, v any) bool {
+			mwFolds++
+			return true
+		}})
+		if mwFolds != 2 {
+			t.Errorf("mwList folds got %d, want 2", mwFolds)
+		}
+		mwList.(traits.Foldable).Fold(&testFuncFolder{fn: func(k, v any) bool {
+			return false
+		}})
+		// AggregateSize with elemTypePtr != nil
+		mwList.(AggregateSizeVisitor).AggregateSize(NewSizeCalculator())
+		mwList.(AggregateSizeVisitor).AggregateSize(NewSizeCalculator())
+	})
+
+	t.Run("BaseList_Full", func(t *testing.T) {
+		arr := [3]any{10, "hello", 20.5}
+		bl := NewDynamicList(adapter, arr)
+		// Add non-lister
+		if !IsError(bl.Add(String("err"))) {
+			t.Errorf("baseList.Add non-lister expected error")
+		}
+		// Add lister
+		added := bl.Add(NewDynamicList(adapter, [1]any{30}))
+		if added.(traits.Lister).Size() != Int(4) {
+			t.Errorf("baseList.Add lister size got %v", added.(traits.Lister).Size())
+		}
+
+		// ConvertToNative
+		if anyNative, err := bl.ConvertToNative(reflect.TypeFor[any]()); err != nil || len(anyNative.([]any)) != 3 {
+			t.Errorf("ConvertToNative any got %v, %v", anyNative, err)
+		}
+		if blNative, err := bl.ConvertToNative(reflect.TypeOf(bl)); err != nil || blNative != bl {
+			t.Errorf("ConvertToNative baseList got %v, %v", blNative, err)
+		}
+		if _, err := bl.ConvertToNative(reflect.TypeOf(123)); err == nil {
+			t.Errorf("ConvertToNative non-slice non-array expected error")
+		}
+		// Convert to array
+		arrType := reflect.ArrayOf(3, reflect.TypeFor[any]())
+		if arrVal, err := bl.ConvertToNative(arrType); err != nil || arrVal == nil {
+			t.Errorf("ConvertToNative array got %v, %v", arrVal, err)
+		}
+		// Convert with element error
+		if _, err := bl.ConvertToNative(reflect.TypeOf([]int{})); err == nil {
+			t.Errorf("ConvertToNative with incompatible element expected error")
+		}
+
+		// ConvertToType
+		if bl.ConvertToType(ListType) != bl {
+			t.Errorf("ConvertToType(ListType) failed")
+		}
+		if bl.ConvertToType(TypeType) != ListType {
+			t.Errorf("ConvertToType(TypeType) failed")
+		}
+		if !IsError(bl.ConvertToType(MapType)) {
+			t.Errorf("ConvertToType(MapType) expected error")
+		}
+
+		// Equal
+		if bl.Equal(String("not list")) != False {
+			t.Errorf("baseList.Equal non-lister want false")
+		}
+		if bl.Equal(NewDynamicList(adapter, [1]any{10})) != False {
+			t.Errorf("baseList.Equal different size want false")
+		}
+		if bl.Equal(NewDynamicList(adapter, [3]any{10, "world", 20.5})) != False {
+			t.Errorf("baseList.Equal different element want false")
+		}
+		if bl.Equal(NewDynamicList(adapter, [3]any{10, "hello", 20.5})) != True {
+			t.Errorf("baseList.Equal identical want true")
+		}
+
+		// Fold
+		var blFolds int
+		bl.(traits.Foldable).Fold(&testFuncFolder{fn: func(k, v any) bool {
+			blFolds++
+			return true
+		}})
+		if blFolds != 3 {
+			t.Errorf("baseList fold got %d, want 3", blFolds)
+		}
+		bl.(traits.Foldable).Fold(&testFuncFolder{fn: func(k, v any) bool {
+			return false
+		}})
+
+		// AggregateSize
+		bl.(AggregateSizeVisitor).AggregateSize(NewSizeCalculator())
+		// Memoized hit
+		bl.(AggregateSizeVisitor).AggregateSize(NewSizeCalculator())
+		// Non-cacheable sizer
+		bl.(AggregateSizeVisitor).AggregateSize(dummyAggregateSizer{})
+
+		// AggregateSize with value == nil
+		nilBL := &baseList{Adapter: adapter, value: nil, size: 0}
+		nilBL.AggregateSize(NewSizeCalculator())
+
+		// AggregateSize with value as slice and memoization
+		blSlice := &baseList{Adapter: adapter, value: []int{1, 2}, size: 2, get: func(i int) any { return i + 1 }}
+		szCalc := NewSizeCalculator()
+		szCalc.AggregateSize(blSlice)
+		szCalc.AggregateSize(blSlice)
+
+		// ConvertToNative errors for anyValueType and JSONValueType
+		badList := NewList(adapter, []any{make(chan int)})
+		if _, err := badList.ConvertToNative(anyValueType); err == nil {
+			t.Errorf("expected error converting chan list to anyValueType")
+		}
+		if _, err := badList.ConvertToNative(JSONValueType); err == nil {
+			t.Errorf("expected error converting chan list to JSONValueType")
+		}
+
+		// Type, String, format, Format
+		if bl.Type() != ListType {
+			t.Errorf("baseList.Type() got %v", bl.Type())
+		}
+		if bl.(fmt.Stringer).String() != "[10, hello, 20.5]" {
+			t.Errorf("baseList.String() got %v", bl.(fmt.Stringer).String())
+		}
+		if formatted := Format(bl); formatted != `[10, "hello", 20.5]` {
+			t.Errorf("Format(bl) got %v", formatted)
+		}
+	})
+
+	t.Run("MutableList_Full", func(t *testing.T) {
+		m1 := NewMutableList(adapter)
+		m2 := NewMutableList(adapter)
+		m2.Add(NewRefValList(adapter, []ref.Val{Int(1), Int(2)}))
+
+		// Add *mutableList
+		m1.Add(m2)
+		if m1.Size() != Int(2) {
+			t.Errorf("m1.Size() after adding mutableList got %v", m1.Size())
+		}
+
+		// Add traits.Lister
+		m1.Add(NewRefValList(adapter, []ref.Val{Int(3)}))
+		if m1.Size() != Int(3) {
+			t.Errorf("m1.Size() after adding Lister got %v", m1.Size())
+		}
+
+		// Add non-lister
+		if !IsError(m1.Add(String("err"))) {
+			t.Errorf("m1.Add non-lister expected error")
+		}
+
+		// ToImmutableList
+		imm := m1.ToImmutableList()
+		if imm.Size() != Int(3) {
+			t.Errorf("imm.Size() got %v", imm.Size())
+		}
+	})
+
+	t.Run("ConcatList_Full", func(t *testing.T) {
+		c1 := NewRefValList(adapter, []ref.Val{Int(1), Int(2)})
+		c2 := NewRefValList(adapter, []ref.Val{Int(3), Int(4)})
+		concat := c1.Add(c2).(*concatList)
+
+		// Add non-lister
+		if !IsError(concat.Add(String("err"))) {
+			t.Errorf("concatList.Add non-lister expected error")
+		}
+
+		// Contains with error in prev
+		errList := mockContainsErrList{err: NewErr("prev err")}
+		concatWithErr := newConcatList(adapter, errList, c2).(*concatList)
+		if !IsError(concatWithErr.Contains(Int(99))) {
+			t.Errorf("concatList.Contains with error in prev expected error")
+		}
+
+		// Equal with non-lister, different size, error element
+		if concat.Equal(String("err")) != False {
+			t.Errorf("concat.Equal non-lister want false")
+		}
+		if concat.Equal(c1) != False {
+			t.Errorf("concat.Equal different size want false")
+		}
+		errConcat1 := newConcatList(adapter, errList, c2).(*concatList)
+		errConcat2 := newConcatList(adapter, errList, c2).(*concatList)
+		if !IsError(errConcat1.Equal(errConcat2)) {
+			t.Errorf("concat.Equal with error element expected error")
+		}
+
+		// Get with error index
+		if !IsError(concat.Get(String("bad_index"))) {
+			t.Errorf("concat.Get with bad index type expected error")
+		}
+
+		// IsZeroValue
+		if concat.IsZeroValue() {
+			t.Errorf("concat with 4 elems IsZeroValue want false")
+		}
+
+		// Fold
+		var cFolds int
+		concat.Fold(&testFuncFolder{fn: func(k, v any) bool {
+			cFolds++
+			return true
+		}})
+		if cFolds != 4 {
+			t.Errorf("concat folds got %d, want 4", cFolds)
+		}
+		concat.Fold(&testFuncFolder{fn: func(k, v any) bool {
+			return false
+		}})
+
+		// AggregateSize memoization
+		szCalc := NewSizeCalculator()
+		szCalc.AggregateSize(concat)
+		szCalc.AggregateSize(concat)
+
+		// Type, Format
+		if concat.Type() != ListType {
+			t.Errorf("concat.Type() got %v", concat.Type())
+		}
+		if formatted := Format(concat); formatted != "[1, 2, 3, 4]" {
+			t.Errorf("Format(concat) got %v", formatted)
+		}
+	})
+
+	t.Run("SliceList_AllTypes_Operations", func(t *testing.T) {
+		// Test sliceList for all integer / uint / float / bool / time types
+		testSliceListType(t, adapter, []string{"hello", "world"}, String("hello"), String("nope"), String("hello"), String("hello"))
+		testSliceListType(t, adapter, []int{10, 20}, Int(10), Int(99), Uint(10), Int(10))
+		testSliceListType(t, adapter, []int64{10, 20}, Int(10), Int(99), Uint(10), Int(10))
+		testSliceListType(t, adapter, []int32{10, 20}, Int(10), Int(99), Uint(10), Int(10))
+		testSliceListType(t, adapter, []int16{10, 20}, Int(10), Int(99), Uint(10), Int(10))
+		testSliceListType(t, adapter, []int8{10, 20}, Int(10), Int(99), Uint(10), Int(10))
+		testSliceListType(t, adapter, []uint{10, 20}, Uint(10), Uint(99), Int(10), Uint(10))
+		testSliceListType(t, adapter, []uint64{10, 20}, Uint(10), Uint(99), Int(10), Uint(10))
+		testSliceListType(t, adapter, []uint32{10, 20}, Uint(10), Uint(99), Int(10), Uint(10))
+		testSliceListType(t, adapter, []uint16{10, 20}, Uint(10), Uint(99), Int(10), Uint(10))
+		testSliceListType(t, adapter, []uint8{10, 20}, Uint(10), Uint(99), Int(10), Uint(10))
+		testSliceListType(t, adapter, []float64{10.0, 20.0}, Double(10.0), Double(99.0), Int(10), Double(10.0))
+		testSliceListType(t, adapter, []float32{10.0, 20.0}, Double(10.0), Double(99.0), Int(10), Double(10.0))
+		testSliceListType(t, adapter, []bool{true, false}, True, String("nope"), True, True)
+		testSliceListType(t, adapter, [][]byte{[]byte("a"), []byte("b")}, Bytes("a"), Bytes("z"), Bytes("a"), Bytes("a"))
+		now := time.Unix(1000, 0)
+		testSliceListType(t, adapter, []time.Time{now, now.Add(time.Second)}, Timestamp{Time: now}, Timestamp{Time: now.Add(time.Hour)}, Timestamp{Time: now}, Timestamp{Time: now})
+		testSliceListType(t, adapter, []time.Duration{time.Second, time.Minute}, Duration{Duration: time.Second}, Duration{Duration: time.Hour}, Duration{Duration: time.Second}, Duration{Duration: time.Second})
+
+		// bool Contains mismatch with False on [true]
+		lBoolOnlyTrue := NewList(adapter, []bool{true})
+		if lBoolOnlyTrue.Contains(False) != False {
+			t.Errorf("lBoolOnlyTrue Contains False want false")
+		}
+
+		// int32 out of range Int contains check
+		lInt32 := NewList(adapter, []int32{10, 20})
+		if lInt32.Contains(Int(math.MaxInt64)) != False {
+			t.Errorf("lInt32 Contains MaxInt64 want false")
+		}
+
+		// sliceList Add non-lister
+		lStr := NewList(adapter, []string{"hello"})
+		if !IsError(lStr.Add(String("err"))) {
+			t.Errorf("sliceList.Add non-lister expected error")
+		}
+
+		// sliceList Equal non-lister and different slice types
+		if lStr.Equal(String("err")) != False {
+			t.Errorf("sliceList.Equal non-lister want false")
+		}
+		if lStr.Equal(NewList(adapter, []any{"hello"})) != True {
+			t.Errorf("sliceList.Equal different sliceList type want true")
+		}
+		if lStr.Equal(NewList(adapter, []any{"bye"})) != False {
+			t.Errorf("sliceList.Equal different sliceList type mismatch want false")
+		}
+
+		// sliceList ConvertToType
+		if lStr.ConvertToType(ListType) != lStr {
+			t.Errorf("ConvertToType(ListType) failed")
+		}
+		if lStr.ConvertToType(TypeType) != ListType {
+			t.Errorf("ConvertToType(TypeType) failed")
+		}
+		if !IsError(lStr.ConvertToType(MapType)) {
+			t.Errorf("ConvertToType(MapType) expected error")
+		}
+
+		// sliceList GetInt64Index out of bounds & qualifyRawVal
+		indexer := lStr.(int64Indexer)
+		if _, ok := indexer.GetInt64Index(-1); ok {
+			t.Errorf("GetInt64Index(-1) want ok=false")
+		}
+		if _, ok := indexer.GetInt64Index(5); ok {
+			t.Errorf("GetInt64Index(5) want ok=false")
+		}
+		if raw, ok := indexer.GetInt64Index(0); !ok || raw != String("hello") {
+			t.Errorf("GetInt64Index(0) got %v, %v", raw, ok)
+		}
+
+		// GetInt64Index on pointer struct list (isQualifyRawStruct = true, elemTypePtr = nil)
+		ptrList := NewList(adapter, []*customMultiWordStruct{{A: 1, B: "a"}})
+		if raw, ok := ptrList.(int64Indexer).GetInt64Index(0); !ok || raw == nil {
+			t.Errorf("GetInt64Index on pointer struct list failed")
+		}
+
+		// sliceList generic fallback (e.g. complex128)
+		lComplex := NewList(adapter, []complex128{complex(1, 2), complex(3, 4)})
+		if lComplex.Size() != Int(2) {
+			t.Errorf("lComplex size got %v", lComplex.Size())
+		}
+		if raw, ok := lComplex.(int64Indexer).GetInt64Index(0); !ok || raw == nil {
+			t.Errorf("lComplex GetInt64Index(0) got %v, %v", raw, ok)
+		}
+		var cplxFolds int
+		lComplex.(traits.Foldable).Fold(&testFuncFolder{fn: func(k, v any) bool {
+			cplxFolds++
+			return true
+		}})
+		if cplxFolds != 2 {
+			t.Errorf("lComplex folds got %d, want 2", cplxFolds)
+		}
+		lComplex.(traits.Foldable).Fold(&testFuncFolder{fn: func(k, v any) bool {
+			return false
+		}})
+		lComplex.(AggregateSizeVisitor).AggregateSize(NewSizeCalculator())
+		lComplex.(AggregateSizeVisitor).AggregateSize(NewSizeCalculator())
+
+		// Format
+		if formatted := Format(lStr); formatted != `["hello"]` {
+			t.Errorf("Format(lStr) got %v", formatted)
+		}
+	})
+}
+
+type testFuncFolder struct {
+	fn func(k, v any) bool
+}
+
+func (f *testFuncFolder) FoldEntry(k, v any) bool {
+	return f.fn(k, v)
+}
+
+func testSliceListType[T any](t *testing.T, adapter Adapter, slice []T, matchVal, mismatchVal, altMatchVal, get0Val ref.Val) {
+	t.Helper()
+	l := NewList(adapter, slice)
+
+	// Size, IsZeroValue
+	if l.Size() != Int(len(slice)) {
+		t.Errorf("Size() got %v, want %d", l.Size(), len(slice))
+	}
+	if l.(traits.Zeroer).IsZeroValue() {
+		t.Errorf("IsZeroValue() got true, want false")
+	}
+
+	// Get & GetInt64Index
+	if Equal(l.Get(Int(0)), get0Val) != True {
+		t.Errorf("Get(0) got %v, want %v", l.Get(Int(0)), get0Val)
+	}
+	if raw, ok := l.(int64Indexer).GetInt64Index(0); !ok || raw == nil {
+		t.Errorf("GetInt64Index(0) got %v, %v", raw, ok)
+	}
+
+	// Contains
+	if l.Contains(matchVal) != True {
+		t.Errorf("Contains(%v) got false, want true", matchVal)
+	}
+	if l.Contains(mismatchVal) != False {
+		t.Errorf("Contains(%v) got true, want false", mismatchVal)
+	}
+	if altMatchVal != nil && l.Contains(altMatchVal) != True {
+		t.Errorf("Contains(%v) alt got false, want true", altMatchVal)
+	}
+
+	// Fold
+	var folds int
+	l.(traits.Foldable).Fold(&testFuncFolder{fn: func(k, v any) bool {
+		folds++
+		return true
+	}})
+	if folds != len(slice) {
+		t.Errorf("Fold() count got %d, want %d", folds, len(slice))
+	}
+	// Early break fold
+	l.(traits.Foldable).Fold(&testFuncFolder{fn: func(k, v any) bool {
+		return false
+	}})
+
+	// Equal
+	if l.Equal(l) != True {
+		t.Errorf("Equal(l) got false, want true")
+	}
+	lSame := NewList(adapter, slice)
+	if l.Equal(lSame) != True {
+		t.Errorf("Equal(lSame) got false, want true")
+	}
+	if len(slice) > 1 {
+		diffSlice := make([]T, len(slice))
+		copy(diffSlice, slice)
+		diffSlice[0], diffSlice[1] = diffSlice[1], diffSlice[0]
+		lDiff := NewList(adapter, diffSlice)
+		if l.Equal(lDiff) != False {
+			t.Errorf("Equal(lDiff) got true, want false")
+		}
+	}
+
+	// AggregateSize
+	if sizer, ok := l.(AggregateSizeVisitor); ok {
+		sizer.AggregateSize(NewSizeCalculator())
+		sizer.AggregateSize(NewSizeCalculator())
+	}
+
+	// ConvertToNative
+	if native, err := l.ConvertToNative(reflect.TypeOf(slice)); err != nil || !reflect.DeepEqual(native, slice) {
+		t.Errorf("ConvertToNative got %v, %v", native, err)
+	}
+
+	// Iterator
+	it := l.Iterator()
+	var itCount int
+	for it.HasNext() == True {
+		_ = it.Next()
+		itCount++
+	}
+	if itCount != len(slice) {
+		t.Errorf("Iterator count got %d, want %d", itCount, len(slice))
+	}
+	if it.Next() != nil {
+		t.Errorf("Iterator Next past end returned non-nil")
+	}
+}
+
+

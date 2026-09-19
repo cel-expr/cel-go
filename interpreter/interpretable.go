@@ -1361,18 +1361,26 @@ func (fold *evalFold) Exec(frame *ExecutionFrame) ref.Val {
 	}
 
 	// Otherwise, attempt a two variable fold.
-	if fold.iterVar2 != "" {
-		var foldable traits.Foldable
-		switch r := foldRange.(type) {
-		case traits.Foldable:
-			foldable = r
-		case traits.Mapper:
-			foldable = types.ToFoldableMap(r)
-		case traits.Lister:
-			foldable = types.ToFoldableList(r)
-		default:
+	var foldable traits.Foldable
+	switch r := foldRange.(type) {
+	case traits.Foldable:
+		foldable = r
+		if fold.iterVar2 == "" {
+			_, f.listV1Fold = foldRange.(traits.Lister)
+		}
+	case traits.Mapper:
+		foldable = types.ToFoldableMap(r)
+	case traits.Lister:
+		if fold.iterVar2 == "" {
+			f.listV1Fold = true
+		}
+		foldable = types.ToFoldableList(r)
+	default:
+		if fold.iterVar2 != "" {
 			return types.NewErrWithNodeID(fold.ID(), "unsupported comprehension range type: %T", foldRange)
 		}
+	}
+	if foldable != nil {
 		foldable.Fold(f)
 		res := f.evalResult()
 		releaseFolder(f)
@@ -1947,6 +1955,7 @@ type folder struct {
 	mutableValue  bool
 	interrupted   bool
 	computeResult bool
+	listV1Fold    bool
 }
 
 func (f *folder) foldIterable(iterable traits.Iterable) ref.Val {
@@ -1971,12 +1980,21 @@ func (f *folder) foldIterable(iterable traits.Iterable) ref.Val {
 	return f.evalResult()
 }
 
+// FoldKeyOnly reports whether the folder only consumes the entry key (e.g. 1-variable map
+// comprehensions where iterVar2 is empty and listV1Fold is false).
+func (f *folder) FoldKeyOnly() bool {
+	return f.iterVar2 == "" && !f.listV1Fold
+}
+
 // FoldEntry will either fold comprehension v1 style macros if iterVar2 is unset, or comprehension v2 style
 // macros if both the iterVar and iterVar2 are set to non-empty strings.
 func (f *folder) FoldEntry(key, val any) bool {
-	// Default to referencing both values.
-	f.iterVar1Val = key
-	f.iterVar2Val = val
+	if f.listV1Fold {
+		f.iterVar1Val = val
+	} else {
+		f.iterVar1Val = key
+		f.iterVar2Val = val
+	}
 
 	// Terminate evaluation if evaluation is interrupted or the condition is not true and exhaustive
 	// eval is not enabled.
@@ -2020,17 +2038,9 @@ func (f *folder) ResolveName(name string) (any, bool) {
 	}
 	if !f.computeResult {
 		if name == f.iterVar {
-			if v, ok := f.iterVar1Val.(ref.Val); ok {
-				return v, true
-			}
-			f.iterVar1Val = f.adapter.NativeToValue(f.iterVar1Val)
 			return f.iterVar1Val, true
 		}
 		if name == f.iterVar2 {
-			if v, ok := f.iterVar2Val.(ref.Val); ok {
-				return v, true
-			}
-			f.iterVar2Val = f.adapter.NativeToValue(f.iterVar2Val)
 			return f.iterVar2Val, true
 		}
 	}
@@ -2116,6 +2126,7 @@ func (f *folder) reset() {
 	f.mutableValue = false
 	f.interrupted = false
 	f.computeResult = false
+	f.listV1Fold = false
 }
 
 // InterruptError is a specialized error type used to signal that program evaluation should check

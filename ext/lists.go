@@ -567,17 +567,20 @@ func genRange(n types.Int, maxSize int64) (ref.Val, error) {
 	if maxSize > 0 && int64(n) > maxSize {
 		return nil, fmt.Errorf("lists.range: size %d exceeds maximum allowed (%d)", n, maxSize)
 	}
-	newList := make([]ref.Val, 0, n)
-	for i := types.Int(0); i < n; i++ {
+	newList := make([]int, 0, n)
+	for i := range int(n) {
 		newList = append(newList, i)
 	}
 	return types.DefaultTypeAdapter.NativeToValue(newList), nil
 }
 
 func reverseList(list traits.Lister) (ref.Val, error) {
-	var newList []ref.Val
+	if reversed, ok := types.MaybeReverseList(types.DefaultTypeAdapter, list); ok {
+		return reversed, nil
+	}
 	listLength := list.Size().(types.Int)
-	for i := types.Int(0); i < listLength; i++ {
+	newList := make([]ref.Val, 0, listLength)
+	for i := range listLength {
 		val := list.Get(listLength - i - 1)
 		newList = append(newList, val)
 	}
@@ -596,7 +599,11 @@ func slice(list traits.Lister, start, end types.Int) (ref.Val, error) {
 		return nil, fmt.Errorf("cannot slice(%d, %d), list is length %d", start, end, listLength)
 	}
 
-	var newList []ref.Val
+	if sliced, ok := types.MaybeSliceList(types.DefaultTypeAdapter, list, int(start), int(end)); ok {
+		return sliced, nil
+	}
+
+	newList := make([]ref.Val, 0, end-start)
 	for i := types.Int(start); i < end; i++ {
 		val := list.Get(i)
 		newList = append(newList, val)
@@ -609,27 +616,30 @@ func flatten(list traits.Lister, depth int64) ([]ref.Val, error) {
 		return nil, fmt.Errorf("level must be non-negative")
 	}
 
-	var newList []ref.Val
-	iter := list.Iterator()
+	listLength := list.Size().(types.Int)
+	newList := make([]ref.Val, 0, listLength)
+	return flattenInto(newList, list, depth)
+}
 
-	for iter.HasNext() == types.True {
-		val := iter.Next()
-		nestedList, isList := val.(traits.Lister)
-
-		if !isList || depth == 0 {
-			newList = append(newList, val)
+func flattenInto(dst []ref.Val, list traits.Lister, depth int64) ([]ref.Val, error) {
+	listLength := list.Size().(types.Int)
+	for i := range listLength {
+		val := list.Get(i)
+		if depth == 0 {
+			dst = append(dst, val)
 			continue
-		} else {
-			flattenedList, err := flatten(nestedList, depth-1)
+		}
+		if nestedList, isList := val.(traits.Lister); isList {
+			var err error
+			dst, err = flattenInto(dst, nestedList, depth-1)
 			if err != nil {
 				return nil, err
 			}
-
-			newList = append(newList, flattenedList...)
+		} else {
+			dst = append(dst, val)
 		}
 	}
-
-	return newList, nil
+	return dst, nil
 }
 
 func sortList(list traits.Lister) (ref.Val, error) {
