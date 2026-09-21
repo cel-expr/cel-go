@@ -169,6 +169,9 @@ func MaybeSliceList(adapter Adapter, list traits.Lister, start, end int) (traits
 	if list == nil {
 		return nil, false
 	}
+	if _, isConcat := list.(*concatList); isConcat {
+		return nil, false
+	}
 	val := list.Value()
 	if val == nil {
 		return nil, false
@@ -188,6 +191,9 @@ func MaybeSliceList(adapter Adapter, list traits.Lister, start, end int) (traits
 // preserving the original element type. If the underlying representation is not a slice, it returns (nil, false).
 func MaybeReverseList(adapter Adapter, list traits.Lister) (traits.Lister, bool) {
 	if list == nil {
+		return nil, false
+	}
+	if _, isConcat := list.(*concatList); isConcat {
 		return nil, false
 	}
 	val := list.Value()
@@ -302,7 +308,7 @@ func convertListToNative(l traits.Lister, val any, typeDesc reflect.Type) (any, 
 		return anypb.New(json.(proto.Message))
 	case JSONValueType, JSONListType:
 		jsonValues, err :=
-			l.ConvertToNative(reflect.TypeOf([]*structpb.Value{}))
+			l.ConvertToNative(reflect.TypeFor[[]*structpb.Value]())
 		if err != nil {
 			return nil, err
 		}
@@ -327,7 +333,7 @@ func convertListToNative(l traits.Lister, val any, typeDesc reflect.Type) (any, 
 	} else {
 		nativeList = reflect.MakeSlice(typeDesc, elemCount, elemCount)
 	}
-	for i := 0; i < elemCount; i++ {
+	for i := range elemCount {
 		elem := l.Get(Int(i))
 		nativeElemVal, err := elem.ConvertToNative(otherElemType)
 		if err != nil {
@@ -563,7 +569,7 @@ func (l *concatList) Contains(elem ref.Val) ref.Val {
 
 // ConvertToNative implements the ref.Val interface method.
 func (l *concatList) ConvertToNative(typeDesc reflect.Type) (any, error) {
-	combined := NewDynamicList(l.Adapter, l.Value().([]any))
+	combined := NewDynamicList(l.Adapter, l.Value())
 	return combined.ConvertToNative(typeDesc)
 }
 
@@ -677,14 +683,14 @@ func (l *concatList) Type() ref.Type {
 // Value implements the ref.Val interface method.
 func (l *concatList) Value() any {
 	l.valueOnce.Do(func() {
-		merged := make([]any, l.Size().(Int))
+		merged := make([]ref.Val, l.Size().(Int))
 		prevLen := l.prevList.Size().(Int)
 		for i := Int(0); i < prevLen; i++ {
-			merged[i] = l.prevList.Get(i).Value()
+			merged[i] = l.prevList.Get(i)
 		}
 		nextLen := l.nextList.Size().(Int)
 		for j := Int(0); j < nextLen; j++ {
-			merged[prevLen+j] = l.nextList.Get(j).Value()
+			merged[prevLen+j] = l.nextList.Get(j)
 		}
 		l.value = merged
 	})

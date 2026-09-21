@@ -145,11 +145,30 @@ func TestLists(t *testing.T) {
 		{expr: `[ext.TestNestedType{NestedCustomName: 'a'}, ext.TestNestedType{NestedCustomName: 'b'}, ext.TestNestedType{NestedCustomName: 'c'}].reverse() == [ext.TestNestedType{NestedCustomName: 'c'}, ext.TestNestedType{NestedCustomName: 'b'}, ext.TestNestedType{NestedCustomName: 'a'}]`},
 		{expr: `[ext.TestNestedType{NestedCustomName: 'a'}, ext.TestNestedType{NestedCustomName: 'b'}].reverse().reverse() == [ext.TestNestedType{NestedCustomName: 'a'}, ext.TestNestedType{NestedCustomName: 'b'}]`},
 		{expr: `[ext.TestNestedType{NestedCustomName: 'a'}].reverse() == [ext.TestNestedType{NestedCustomName: 'a'}]`},
-		{expr: `[ext.TestAllTypes{Int32Val: 10}, ext.TestAllTypes{Int32Val: 20}].slice(1, 2) == [ext.TestAllTypes{Int32Val: 20}]`},
-		{expr: `[ext.TestAllTypes{Int32Val: 10}, ext.TestAllTypes{Int32Val: 20}].reverse() == [ext.TestAllTypes{Int32Val: 20}, ext.TestAllTypes{Int32Val: 10}]`},
+		// Slice and reverse of optional values (via cel.OptionalTypes)
+		{expr: `[optional.of(1), optional.of(2), optional.none()].slice(0, 3) == [optional.of(1), optional.of(2), optional.none()]`},
+		{expr: `[optional.of(1), optional.of(2), optional.none()].slice(0, 2) == [optional.of(1), optional.of(2)]`},
+		{expr: `[optional.of(1), optional.of(2), optional.none()].slice(1, 3) == [optional.of(2), optional.none()]`},
+		{expr: `[optional.of(1), optional.of(2), optional.none()].slice(1, 1) == []`},
+		{expr: `[optional.of(1), optional.of(2), optional.none()].reverse() == [optional.none(), optional.of(2), optional.of(1)]`},
+		{expr: `[optional.of(1), optional.of(2), optional.none()].reverse().reverse() == [optional.of(1), optional.of(2), optional.none()]`},
+		{expr: `[optional.of(1)].reverse() == [optional.of(1)]`},
+		{expr: `[optional.none()].reverse() == [optional.none()]`},
+		{expr: `[optional.of('a'), optional.none(), optional.of('b')].slice(0, 2).reverse() == [optional.none(), optional.of('a')]`},
+
+		// Slice and reverse of concatList (list + list)
+		{expr: `([1, 2, 3] + [4, 5, 6]).slice(0, 6) == [1, 2, 3, 4, 5, 6]`},
+		{expr: `([1, 2, 3] + [4, 5, 6]).slice(1, 5) == [2, 3, 4, 5]`},
+		{expr: `([1, 2, 3] + [4, 5, 6]).slice(0, 0) == []`},
+		{expr: `([1, 2, 3] + [4, 5, 6]).slice(3, 3) == []`},
+		{expr: `([1, 2, 3] + [4, 5, 6]).reverse() == [6, 5, 4, 3, 2, 1]`},
+		{expr: `([1, 2, 3] + [4, 5, 6]).reverse().reverse() == [1, 2, 3, 4, 5, 6]`},
+		{expr: `([1, 2, 3] + [4, 5, 6]).slice(1, 5).reverse() == [5, 4, 3, 2]`},
+		{expr: `([optional.of(1), optional.none()] + [optional.of(2)]).slice(1, 3) == [optional.none(), optional.of(2)]`},
+		{expr: `([optional.of(1), optional.none()] + [optional.of(2)]).reverse() == [optional.of(2), optional.none(), optional.of(1)]`},
 	}
 
-	env := testListsEnv(t, 0)
+	env := testListsEnv(t, 0, cel.OptionalTypes())
 	for i, tst := range listsTests {
 		tc := tst
 		t.Run(fmt.Sprintf("%d", i), func(t *testing.T) {
@@ -192,6 +211,7 @@ func TestLists(t *testing.T) {
 func TestListsSliceAndReverseNativeAndProto(t *testing.T) {
 	env, err := cel.NewEnv(
 		Lists(),
+		cel.OptionalTypes(),
 		cel.Types(
 			&proto2pb.TestAllTypes{},
 			&proto3pb.TestAllTypes{},
@@ -204,6 +224,15 @@ func TestListsSliceAndReverseNativeAndProto(t *testing.T) {
 		cel.Variable("proto3_list", cel.ListType(cel.ObjectType("google.expr.proto3.test.TestAllTypes"))),
 		cel.Variable("native_nested_list", cel.ListType(cel.ObjectType("ext.TestNestedType"))),
 		cel.Variable("native_all_list", cel.ListType(cel.ObjectType("ext.TestAllTypes"))),
+		cel.Variable("string_list", cel.ListType(cel.StringType)),
+		cel.Variable("int_list", cel.ListType(cel.IntType)),
+		cel.Variable("uint_list", cel.ListType(cel.UintType)),
+		cel.Variable("double_list", cel.ListType(cel.DoubleType)),
+		cel.Variable("bool_list", cel.ListType(cel.BoolType)),
+		cel.Variable("bytes_list", cel.ListType(cel.BytesType)),
+		cel.Variable("dyn_list", cel.ListType(cel.DynType)),
+		cel.Variable("optional_int_list", cel.ListType(cel.OptionalType(cel.IntType))),
+		cel.Variable("optional_string_list", cel.ListType(cel.OptionalType(cel.StringType))),
 	)
 	if err != nil {
 		t.Fatalf("cel.NewEnv() failed: %v", err)
@@ -239,6 +268,15 @@ func TestListsSliceAndReverseNativeAndProto(t *testing.T) {
 		{Int32Val: 20, StringVal: "second"},
 		{Int32Val: 30, StringVal: "third"},
 	}
+	stringVal := []string{"first", "second", "third"}
+	intVal := []int64{10, 20, 30}
+	uintVal := []uint64{10, 20, 30}
+	doubleVal := []float64{1.5, 2.5, 3.5}
+	boolVal := []bool{true, false, true}
+	bytesVal := [][]byte{[]byte("first"), []byte("second"), []byte("third")}
+	dynVal := []any{"first", int64(20), true}
+	optionalIntVal := []any{types.OptionalOf(types.Int(10)), types.OptionalOf(types.Int(20)), types.OptionalNone}
+	optionalStringVal := []any{types.OptionalOf(types.String("first")), types.OptionalNone, types.OptionalOf(types.String("third"))}
 
 	tests := []struct {
 		name string
@@ -306,6 +344,70 @@ func TestListsSliceAndReverseNativeAndProto(t *testing.T) {
 		{name: "native_all_values_reverse", expr: `native_all_list.reverse()[0].Int32Val == 30 && native_all_list.reverse()[2].Int32Val == 10`, vars: map[string]any{"native_all_list": nativeAllValues}},
 		{name: "native_all_values_reverse_double", expr: `native_all_list.reverse().reverse() == native_all_list`, vars: map[string]any{"native_all_list": nativeAllValues}},
 		{name: "native_all_values_slice_and_reverse", expr: `native_all_list.slice(0, 2).reverse()[0].Int32Val == 20`, vars: map[string]any{"native_all_list": nativeAllValues}},
+
+		// Concrete primitive types: string, int, uint, double, bool, bytes, dyn
+		{name: "string_list_slice", expr: `string_list.slice(1, 3) == ['second', 'third']`, vars: map[string]any{"string_list": stringVal}},
+		{name: "string_list_reverse", expr: `string_list.reverse() == ['third', 'second', 'first']`, vars: map[string]any{"string_list": stringVal}},
+		{name: "string_list_reverse_double", expr: `string_list.reverse().reverse() == string_list`, vars: map[string]any{"string_list": stringVal}},
+
+		{name: "int_list_slice", expr: `int_list.slice(0, 2) == [10, 20]`, vars: map[string]any{"int_list": intVal}},
+		{name: "int_list_reverse", expr: `int_list.reverse() == [30, 20, 10]`, vars: map[string]any{"int_list": intVal}},
+		{name: "int_list_reverse_double", expr: `int_list.reverse().reverse() == int_list`, vars: map[string]any{"int_list": intVal}},
+
+		{name: "uint_list_slice", expr: `uint_list.slice(1, 3) == [20u, 30u]`, vars: map[string]any{"uint_list": uintVal}},
+		{name: "uint_list_reverse", expr: `uint_list.reverse() == [30u, 20u, 10u]`, vars: map[string]any{"uint_list": uintVal}},
+		{name: "uint_list_reverse_double", expr: `uint_list.reverse().reverse() == uint_list`, vars: map[string]any{"uint_list": uintVal}},
+
+		{name: "double_list_slice", expr: `double_list.slice(0, 2) == [1.5, 2.5]`, vars: map[string]any{"double_list": doubleVal}},
+		{name: "double_list_reverse", expr: `double_list.reverse() == [3.5, 2.5, 1.5]`, vars: map[string]any{"double_list": doubleVal}},
+
+		{name: "bool_list_slice", expr: `bool_list.slice(0, 2) == [true, false]`, vars: map[string]any{"bool_list": boolVal}},
+		{name: "bool_list_reverse", expr: `bool_list.reverse() == [true, false, true]`, vars: map[string]any{"bool_list": boolVal}},
+
+		{name: "bytes_list_slice", expr: `bytes_list.slice(0, 2) == [b'first', b'second']`, vars: map[string]any{"bytes_list": bytesVal}},
+		{name: "bytes_list_reverse", expr: `bytes_list.reverse() == [b'third', b'second', b'first']`, vars: map[string]any{"bytes_list": bytesVal}},
+
+		{name: "dyn_list_slice", expr: `dyn_list.slice(1, 3) == [20, true]`, vars: map[string]any{"dyn_list": dynVal}},
+		{name: "dyn_list_reverse", expr: `dyn_list.reverse() == [true, 20, 'first']`, vars: map[string]any{"dyn_list": dynVal}},
+
+		// Optional values within lists (variables)
+		{name: "optional_int_slice_all", expr: `optional_int_list.slice(0, 3).size() == 3`, vars: map[string]any{"optional_int_list": optionalIntVal}},
+		{name: "optional_int_slice_sub", expr: `optional_int_list.slice(0, 2) == [optional.of(10), optional.of(20)]`, vars: map[string]any{"optional_int_list": optionalIntVal}},
+		{name: "optional_int_slice_none", expr: `optional_int_list.slice(1, 3) == [optional.of(20), optional.none()]`, vars: map[string]any{"optional_int_list": optionalIntVal}},
+		{name: "optional_int_slice_empty", expr: `optional_int_list.slice(1, 1) == []`, vars: map[string]any{"optional_int_list": optionalIntVal}},
+		{name: "optional_int_reverse", expr: `optional_int_list.reverse() == [optional.none(), optional.of(20), optional.of(10)]`, vars: map[string]any{"optional_int_list": optionalIntVal}},
+		{name: "optional_int_reverse_double", expr: `optional_int_list.reverse().reverse() == optional_int_list`, vars: map[string]any{"optional_int_list": optionalIntVal}},
+		{name: "optional_int_slice_and_reverse", expr: `optional_int_list.slice(0, 2).reverse() == [optional.of(20), optional.of(10)]`, vars: map[string]any{"optional_int_list": optionalIntVal}},
+		{name: "optional_int_reverse_value_access", expr: `optional_int_list.slice(0, 2).reverse()[0].value() == 20 && !optional_int_list.reverse()[0].hasValue()`, vars: map[string]any{"optional_int_list": optionalIntVal}},
+		{name: "optional_string_reverse", expr: `optional_string_list.reverse() == [optional.of('third'), optional.none(), optional.of('first')]`, vars: map[string]any{"optional_string_list": optionalStringVal}},
+		{name: "optional_int_slice_invalid_order", expr: `optional_int_list.slice(2, 1)`, vars: map[string]any{"optional_int_list": optionalIntVal}, err: "start index must be less than or equal to end index"},
+		{name: "optional_int_slice_out_of_bounds", expr: `optional_int_list.slice(0, 4)`, vars: map[string]any{"optional_int_list": optionalIntVal}, err: "list is length 3"},
+
+		// ConcatList cases generated by list + list
+		{name: "concat_int_slice_all", expr: `(int_list + int_list).slice(0, 6).size() == 6`, vars: map[string]any{"int_list": intVal}},
+		{name: "concat_int_slice_sub", expr: `(int_list + int_list).slice(1, 5) == [20, 30, 10, 20]`, vars: map[string]any{"int_list": intVal}},
+		{name: "concat_int_slice_empty", expr: `(int_list + int_list).slice(2, 2) == []`, vars: map[string]any{"int_list": intVal}},
+		{name: "concat_int_reverse", expr: `(int_list + int_list).reverse() == [30, 20, 10, 30, 20, 10]`, vars: map[string]any{"int_list": intVal}},
+		{name: "concat_int_reverse_double", expr: `(int_list + int_list).reverse().reverse() == int_list + int_list`, vars: map[string]any{"int_list": intVal}},
+		{name: "concat_int_slice_and_reverse", expr: `(int_list + int_list).slice(1, 5).reverse() == [20, 10, 30, 20]`, vars: map[string]any{"int_list": intVal}},
+
+		{name: "concat_string_slice", expr: `(string_list + string_list).slice(2, 4) == ['third', 'first']`, vars: map[string]any{"string_list": stringVal}},
+		{name: "concat_string_reverse", expr: `(string_list + string_list).reverse() == ['third', 'second', 'first', 'third', 'second', 'first']`, vars: map[string]any{"string_list": stringVal}},
+
+		{name: "concat_proto2_slice", expr: `(proto2_list + proto2_list).slice(1, 5).size() == 4 && (proto2_list + proto2_list).slice(1, 5)[0].single_int32 == 20`, vars: map[string]any{"proto2_list": proto2Val}},
+		{name: "concat_proto2_reverse", expr: `(proto2_list + proto2_list).reverse().size() == 6 && (proto2_list + proto2_list).reverse()[0].single_int32 == 30`, vars: map[string]any{"proto2_list": proto2Val}},
+
+		{name: "concat_proto3_slice", expr: `(proto3_list + proto3_list).slice(1, 5).size() == 4 && (proto3_list + proto3_list).slice(1, 5)[0].single_int32 == 20`, vars: map[string]any{"proto3_list": proto3Val}},
+		{name: "concat_proto3_reverse", expr: `(proto3_list + proto3_list).reverse().size() == 6 && (proto3_list + proto3_list).reverse()[0].single_int32 == 30`, vars: map[string]any{"proto3_list": proto3Val}},
+
+		{name: "concat_native_nested_slice", expr: `(native_nested_list + native_nested_list).slice(1, 4).size() == 3 && (native_nested_list + native_nested_list).slice(1, 4)[0].NestedCustomName == 'second'`, vars: map[string]any{"native_nested_list": nativeNestedPtrs}},
+		{name: "concat_native_nested_reverse", expr: `(native_nested_list + native_nested_list).reverse()[0].NestedCustomName == 'third'`, vars: map[string]any{"native_nested_list": nativeNestedPtrs}},
+
+		{name: "concat_optional_int_slice", expr: `(optional_int_list + optional_int_list).slice(1, 4) == [optional.of(20), optional.none(), optional.of(10)]`, vars: map[string]any{"optional_int_list": optionalIntVal}},
+		{name: "concat_optional_int_reverse", expr: `(optional_int_list + optional_int_list).reverse() == [optional.none(), optional.of(20), optional.of(10), optional.none(), optional.of(20), optional.of(10)]`, vars: map[string]any{"optional_int_list": optionalIntVal}},
+
+		{name: "nested_concat_int_slice", expr: `((int_list + int_list) + int_list).slice(2, 7) == [30, 10, 20, 30, 10]`, vars: map[string]any{"int_list": intVal}},
+		{name: "nested_concat_int_reverse", expr: `((int_list + int_list) + int_list).reverse().size() == 9`, vars: map[string]any{"int_list": intVal}},
 	}
 
 	for _, tst := range tests {

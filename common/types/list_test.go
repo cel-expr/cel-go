@@ -325,13 +325,13 @@ func TestConcatListAdd(t *testing.T) {
 	listA := NewDynamicList(reg, []float32{1.0, 2.0})
 	listB := NewStringList(reg, []string{"3"})
 	list := listA.Add(listB).(traits.Lister).Add(listA).
-		Value().([]any)
-	expected := []any{
-		float64(1.0),
-		float64(2.0),
-		string("3"),
-		float64(1.0),
-		float64(2.0)}
+		Value().([]ref.Val)
+	expected := []ref.Val{
+		Double(1.0),
+		Double(2.0),
+		String("3"),
+		Double(1.0),
+		Double(2.0)}
 	if len(list) != len(expected) {
 		t.Errorf("Got '%v', expected '%v'", list, expected)
 	} else {
@@ -1796,5 +1796,3 @@ func testSliceListType[T any](t *testing.T, adapter Adapter, slice []T, matchVal
 		t.Errorf("Iterator Next past end returned non-nil")
 	}
 }
-
-
