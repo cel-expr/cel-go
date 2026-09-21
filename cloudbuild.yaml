@@ -24,7 +24,7 @@ steps:
         - name: 'golang:1.23.0'
           # check the integrity of the vendor directory
           args: ['scripts/verify-vendor.sh']
-        - name: 'gcr.io/cloud-builders/bazel:7.3.2'
+        - name: 'gcr.io/cel-analysis/cel-go-bazelisk:latest'
           entrypoint: bazel
           args:
           - 'test'
