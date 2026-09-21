@@ -276,7 +276,13 @@ func (lib listsLib) CompileOptions() []cel.EnvOption {
 	listType := cel.ListType(cel.TypeParamType("T"))
 	listListType := cel.ListType(listType)
 	listDyn := cel.ListType(cel.DynType)
+	var adapt func() types.Adapter
+	captureAdapt := func(e *cel.Env) (*cel.Env, error) {
+		adapt = e.CELTypeAdapter
+		return e, nil
+	}
 	opts := []cel.EnvOption{
+		captureAdapt,
 		cel.Function("slice",
 			cel.MemberOverload("list_slice",
 				[]*cel.Type{listType, cel.IntType, cel.IntType}, listType,
@@ -284,7 +290,7 @@ func (lib listsLib) CompileOptions() []cel.EnvOption {
 					list := args[0].(traits.Lister)
 					start := args[1].(types.Int)
 					end := args[2].(types.Int)
-					result, err := slice(list, start, end)
+					result, err := slice(adapt(), list, start, end)
 					if err != nil {
 						return types.WrapErr(err)
 					}
@@ -309,7 +315,7 @@ func (lib listsLib) CompileOptions() []cel.EnvOption {
 							return types.WrapErr(err)
 						}
 
-						return types.DefaultTypeAdapter.NativeToValue(flatList)
+						return adapt().NativeToValue(flatList)
 					}),
 				),
 				cel.MemberOverload("list_flatten_int",
@@ -329,7 +335,7 @@ func (lib listsLib) CompileOptions() []cel.EnvOption {
 							return types.WrapErr(err)
 						}
 
-						return types.DefaultTypeAdapter.NativeToValue(flatList)
+						return adapt().NativeToValue(flatList)
 					}),
 				),
 				// To handle the case where a variable of just `list(T)` is provided at runtime
@@ -352,7 +358,7 @@ func (lib listsLib) CompileOptions() []cel.EnvOption {
 					func(arg ref.Val) ref.Val {
 						// validated by type-guards
 						list := arg.(traits.Lister)
-						sorted, err := sortList(list)
+						sorted, err := sortList(adapt(), list)
 						if err != nil {
 							return types.WrapErr(err)
 						}
@@ -379,7 +385,7 @@ func (lib listsLib) CompileOptions() []cel.EnvOption {
 						// validated by type-guards
 						list := arg1.(traits.Lister)
 						keys := arg2.(traits.Lister)
-						sorted, err := sortListByAssociatedKeys(list, keys)
+						sorted, err := sortListByAssociatedKeys(adapt(), list, keys)
 						if err != nil {
 							return types.WrapErr(err)
 						}
@@ -397,7 +403,7 @@ func (lib listsLib) CompileOptions() []cel.EnvOption {
 			cel.Overload("lists_range",
 				[]*cel.Type{cel.IntType}, cel.ListType(cel.IntType),
 				cel.UnaryBinding(func(n ref.Val) ref.Val {
-					result, err := genRange(n.(types.Int), maxRange)
+					result, err := genRange(adapt(), n.(types.Int), maxRange)
 					if err != nil {
 						return types.WrapErr(err)
 					}
@@ -409,7 +415,7 @@ func (lib listsLib) CompileOptions() []cel.EnvOption {
 			cel.MemberOverload("list_reverse",
 				[]*cel.Type{listType}, listType,
 				cel.UnaryBinding(func(list ref.Val) ref.Val {
-					result, err := reverseList(list.(traits.Lister))
+					result, err := reverseList(adapt(), list.(traits.Lister))
 					if err != nil {
 						return types.WrapErr(err)
 					}
@@ -421,7 +427,7 @@ func (lib listsLib) CompileOptions() []cel.EnvOption {
 			cel.MemberOverload("list_distinct",
 				[]*cel.Type{listType}, listType,
 				cel.UnaryBinding(func(list ref.Val) ref.Val {
-					result, err := distinctList(list.(traits.Lister))
+					result, err := distinctList(adapt(), list.(traits.Lister))
 					if err != nil {
 						return types.WrapErr(err)
 					}
@@ -560,7 +566,7 @@ func (lib *listsLib) ProgramOptions() []cel.ProgramOption {
 	return opts
 }
 
-func genRange(n types.Int, maxSize int64) (ref.Val, error) {
+func genRange(adapt types.Adapter, n types.Int, maxSize int64) (ref.Val, error) {
 	if n < 0 {
 		return nil, fmt.Errorf("lists.range: size must be non-negative, got %d", n)
 	}
@@ -571,11 +577,11 @@ func genRange(n types.Int, maxSize int64) (ref.Val, error) {
 	for i := range int(n) {
 		newList = append(newList, i)
 	}
-	return types.DefaultTypeAdapter.NativeToValue(newList), nil
+	return adapt.NativeToValue(newList), nil
 }
 
-func reverseList(list traits.Lister) (ref.Val, error) {
-	if reversed, ok := types.MaybeReverseList(types.DefaultTypeAdapter, list); ok {
+func reverseList(adapt types.Adapter, list traits.Lister) (ref.Val, error) {
+	if reversed, ok := types.MaybeReverseList(adapt, list); ok {
 		return reversed, nil
 	}
 	listLength := list.Size().(types.Int)
@@ -584,10 +590,10 @@ func reverseList(list traits.Lister) (ref.Val, error) {
 		val := list.Get(listLength - i - 1)
 		newList = append(newList, val)
 	}
-	return types.DefaultTypeAdapter.NativeToValue(newList), nil
+	return adapt.NativeToValue(newList), nil
 }
 
-func slice(list traits.Lister, start, end types.Int) (ref.Val, error) {
+func slice(adapt types.Adapter, list traits.Lister, start, end types.Int) (ref.Val, error) {
 	listLength := list.Size().(types.Int)
 	if start < 0 || end < 0 {
 		return nil, fmt.Errorf("cannot slice(%d, %d), negative indexes not supported", start, end)
@@ -599,7 +605,7 @@ func slice(list traits.Lister, start, end types.Int) (ref.Val, error) {
 		return nil, fmt.Errorf("cannot slice(%d, %d), list is length %d", start, end, listLength)
 	}
 
-	if sliced, ok := types.MaybeSliceList(types.DefaultTypeAdapter, list, int(start), int(end)); ok {
+	if sliced, ok := types.MaybeSliceList(adapt, list, int(start), int(end)); ok {
 		return sliced, nil
 	}
 
@@ -608,7 +614,7 @@ func slice(list traits.Lister, start, end types.Int) (ref.Val, error) {
 		val := list.Get(i)
 		newList = append(newList, val)
 	}
-	return types.DefaultTypeAdapter.NativeToValue(newList), nil
+	return adapt.NativeToValue(newList), nil
 }
 
 func flatten(list traits.Lister, depth int64) ([]ref.Val, error) {
@@ -642,8 +648,8 @@ func flattenInto(dst []ref.Val, list traits.Lister, depth int64) ([]ref.Val, err
 	return dst, nil
 }
 
-func sortList(list traits.Lister) (ref.Val, error) {
-	return sortListByAssociatedKeys(list, list)
+func sortList(adapt types.Adapter, list traits.Lister) (ref.Val, error) {
+	return sortListByAssociatedKeys(adapt, list, list)
 }
 
 // Internal function used for the implementation of sort() and sortBy().
@@ -658,7 +664,7 @@ func sortList(list traits.Lister) (ref.Val, error) {
 // Example:
 //
 //	["foo", "bar", "baz"].@sortByAssociatedKeys([3, 1, 2]) // return ["bar", "baz", "foo"]
-func sortListByAssociatedKeys(list, keys traits.Lister) (ref.Val, error) {
+func sortListByAssociatedKeys(adapt types.Adapter, list, keys traits.Lister) (ref.Val, error) {
 	listLength := list.Size().(types.Int)
 	keysLength := keys.Size().(types.Int)
 	if listLength != keysLength {
@@ -699,7 +705,7 @@ func sortListByAssociatedKeys(list, keys traits.Lister) (ref.Val, error) {
 	for _, sortedIdx := range sortedIndices {
 		sorted = append(sorted, list.Get(sortedIdx))
 	}
-	return types.DefaultTypeAdapter.NativeToValue(sorted), nil
+	return adapt.NativeToValue(sorted), nil
 }
 
 // sortByMacro transforms an expression like:
@@ -748,7 +754,7 @@ func sortByMacro(meh cel.MacroExprFactory, target ast.Expr, args []ast.Expr) (as
 	return bindExpr, nil
 }
 
-func distinctList(list traits.Lister) (ref.Val, error) {
+func distinctList(adapt types.Adapter, list traits.Lister) (ref.Val, error) {
 	listLength := list.Size().(types.Int)
 	if listLength == 0 {
 		return list, nil
@@ -772,7 +778,7 @@ func distinctList(list traits.Lister) (ref.Val, error) {
 		}
 	}
 
-	return types.DefaultTypeAdapter.NativeToValue(uniqueList), nil
+	return adapt.NativeToValue(uniqueList), nil
 }
 
 // listHasOnly returns true if every element of the target list is contained within the argument list.
