@@ -546,8 +546,8 @@ func TestStringListAdd_Heterogenous(t *testing.T) {
 	reg := newTestRegistry(t)
 	listA := NewStringList(reg, []string{"hello"})
 	listB := NewDynamicList(reg, []int32{1, 2, 3})
-	list := listA.Add(listB).(traits.Lister).Value().([]any)
-	expected := []any{"hello", int64(1), int64(2), int64(3)}
+	list := listA.Add(listB).(traits.Lister).Value().([]ref.Val)
+	expected := []ref.Val{String("hello"), Int(1), Int(2), Int(3)}
 	if len(list) != len(expected) {
 		t.Errorf("Unexpected list size. Got '%d', expected 4", len(list))
 	}
@@ -577,7 +577,7 @@ func TestStringListAdd_StringLists(t *testing.T) {
 func TestStringListConvertToNative(t *testing.T) {
 	reg := newTestRegistry(t)
 	list := NewStringList(reg, []string{"h", "e", "l", "p"})
-	val, err := list.ConvertToNative(reflect.TypeOf([]string{}))
+	val, err := list.ConvertToNative(reflect.TypeFor[[]string]())
 	if err != nil {
 		t.Error("Unable to convert string list to itself.")
 	}
@@ -589,7 +589,7 @@ func TestStringListConvertToNative(t *testing.T) {
 func TestStringListConvertToNative_ListInterface(t *testing.T) {
 	reg := newTestRegistry(t)
 	list := NewStringList(reg, []string{"h", "e", "l", "p"})
-	val, err := list.ConvertToNative(reflect.TypeOf([]any{}))
+	val, err := list.ConvertToNative(reflect.TypeFor[[]any]())
 	if err != nil {
 		t.Error("Unable to convert string list to itself.")
 	}
