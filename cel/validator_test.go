@@ -263,7 +263,7 @@ func TestValidateRegexProgramSizeLimitToConfig(t *testing.T) {
 func TestValidateRegexProgramSizeLimitFactory(t *testing.T) {
 	val := ValidateRegexProgramSizeLimit(5)
 	cfg := val.(ConfigurableASTValidator).ToConfig()
-	fac, ok := astValidatorFactories[regexProgramSizeLimitValidatorName]
+	fac, ok := astValidatorFactories()[regexProgramSizeLimitValidatorName]
 	if !ok {
 		t.Fatalf("missing factory for %s", regexProgramSizeLimitValidatorName)
 	}

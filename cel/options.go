@@ -701,7 +701,7 @@ func configToEnvOptions(config *env.Config, provider types.Provider, optFactorie
 
 	// Configure validators
 	for _, val := range config.Validators {
-		if fac, found := astValidatorFactories[val.Name]; found {
+		if fac, found := astValidatorFactories()[val.Name]; found {
 			envOpts = append(envOpts, func(e *Env) (*Env, error) {
 				validator, err := fac(val)
 				if err != nil {

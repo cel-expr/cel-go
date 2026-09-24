@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"reflect"
 	"regexp"
+	"sync"
 
 	"cel.dev/cel-go/common/ast"
 	"cel.dev/cel-go/common/env"
@@ -45,7 +46,17 @@ const (
 )
 
 var (
-	astValidatorFactories = map[string]ASTValidatorFactory{
+	astValidatorFactoriesOnce sync.Once
+	astValidatorFactoriesMap  map[string]ASTValidatorFactory
+)
+
+func astValidatorFactories() map[string]ASTValidatorFactory {
+	astValidatorFactoriesOnce.Do(initASTValidatorFactories)
+	return astValidatorFactoriesMap
+}
+
+func initASTValidatorFactories() {
+	astValidatorFactoriesMap = map[string]ASTValidatorFactory{
 		nestingLimitValidatorName: func(val *env.Validator) (ASTValidator, error) {
 			limit, err := validatorIntConfig(val, "limit")
 			if err != nil {
@@ -80,7 +91,7 @@ var (
 			return ValidateHomogeneousAggregateLiterals(), nil
 		},
 	}
-)
+}
 
 // ASTValidatorFactory creates an ASTValidator as configured by the input map
 type ASTValidatorFactory func(*env.Validator) (ASTValidator, error)
