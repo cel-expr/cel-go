@@ -855,7 +855,7 @@ func TestStringCostTracking(t *testing.T) {
 		name          string
 		expr          string
 		estimatedCost cost.CostEstimate
-		// estimatedCostV0 is the estimate under cost.0, set only where the revision moved it.
+		// estimatedCostV0 is the estimate under cost.ModelVersion0, set only where the revision moved it.
 		estimatedCostV0 *cost.CostEstimate
 		actualCost      uint64
 	}{
@@ -890,10 +890,11 @@ func TestStringCostTracking(t *testing.T) {
 			actualCost:    7,
 		},
 		{
-			name:          "replace",
-			expr:          `"hello world".replace("world", "CEL")`,
-			estimatedCost: cost.RangedCostEstimate(11, 55),
-			actualCost:    16,
+			name:            "replace",
+			expr:            `"hello world".replace("world", "CEL")`,
+			estimatedCost:   cost.RangedCostEstimate(10, 55),
+			estimatedCostV0: costV0(11, 55),
+			actualCost:      16,
 		},
 		{
 			name:          "replace_exponential_growth",
@@ -902,10 +903,11 @@ func TestStringCostTracking(t *testing.T) {
 			actualCost:    268,
 		},
 		{
-			name:          "split",
-			expr:          `"a,b,c,d,e".split(",")`,
-			estimatedCost: cost.RangedCostEstimate(12, 21),
-			actualCost:    17,
+			name:            "split",
+			expr:            `"a,b,c,d,e".split(",")`,
+			estimatedCost:   cost.RangedCostEstimate(12, 22),
+			estimatedCostV0: costV0(12, 21),
+			actualCost:      17,
 		},
 		{
 			name:          "substring",
