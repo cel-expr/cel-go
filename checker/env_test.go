@@ -21,6 +21,7 @@ import (
 	"cel.dev/cel-go/common"
 	"cel.dev/cel-go/common/containers"
 	"cel.dev/cel-go/common/decls"
+	"cel.dev/cel-go/common/env"
 	"cel.dev/cel-go/common/stdlib"
 	"cel.dev/cel-go/common/types"
 	"cel.dev/cel-go/parser"
@@ -98,3 +99,107 @@ func newTestRegistry(t testing.TB) *types.Registry {
 	}
 	return reg
 }
+
+func TestEnterExitScope(t *testing.T) {
+	cat := env.NewCatalog(&env.CatalogSymbol{Name: "test_fn", Kind: env.FunctionKind})
+	parent, err := NewEnv(
+		containers.DefaultContainer,
+		newTestRegistry(t),
+		CrossTypeNumericComparisons(true),
+		JSONFieldNames(true),
+		Catalog(func() *env.Catalog { return cat }),
+	)
+	if err != nil {
+		t.Fatalf("NewEnv() failed: %v", err)
+	}
+
+	child := parent.enterScope()
+	if child.jsonFieldNames != true {
+		t.Errorf("child.jsonFieldNames = %v, want true", child.jsonFieldNames)
+	}
+	if len(child.filteredOverloadIDs) != 0 {
+		t.Errorf("child.filteredOverloadIDs = %v, want empty", child.filteredOverloadIDs)
+	}
+	if child.Catalog() != cat {
+		t.Errorf("child.Catalog() = %v, want %v", child.Catalog(), cat)
+	}
+
+	grandchild := child.enterScope()
+	if grandchild.jsonFieldNames != true {
+		t.Errorf("grandchild.jsonFieldNames = %v, want true", grandchild.jsonFieldNames)
+	}
+	if grandchild.Catalog() != cat {
+		t.Errorf("grandchild.Catalog() = %v, want %v", grandchild.Catalog(), cat)
+	}
+
+	exitedChild := grandchild.exitScope()
+	if exitedChild.jsonFieldNames != true {
+		t.Errorf("exitedChild.jsonFieldNames = %v, want true", exitedChild.jsonFieldNames)
+	}
+	if exitedChild.Catalog() != cat {
+		t.Errorf("exitedChild.Catalog() = %v, want %v", exitedChild.Catalog(), cat)
+	}
+
+	exitedParent := exitedChild.exitScope()
+	if exitedParent.jsonFieldNames != true {
+		t.Errorf("exitedParent.jsonFieldNames = %v, want true", exitedParent.jsonFieldNames)
+	}
+	if exitedParent.Catalog() != cat {
+		t.Errorf("exitedParent.Catalog() = %v, want %v", exitedParent.Catalog(), cat)
+	}
+}
+
+func TestTypeErrorsCheckUndeclared(t *testing.T) {
+	src := common.NewTextSource("test")
+	errs := &typeErrors{errs: common.NewErrors(src)}
+
+	// nil env checks
+	if errs.checkUndeclaredIdent(nil, 1, common.NoLocation, "a", "b") {
+		t.Errorf("checkUndeclaredIdent(nil, ...) = true, want false")
+	}
+	if errs.checkUndeclaredFunction(nil, 1, common.NoLocation, "a", "b") {
+		t.Errorf("checkUndeclaredFunction(nil, ...) = true, want false")
+	}
+	if errs.hasDeclaredPrefix(nil, "a") {
+		t.Errorf("hasDeclaredPrefix(nil, ...) = true, want false")
+	}
+
+	// env without catalog
+	noCatEnv, err := NewEnv(containers.DefaultContainer, newTestRegistry(t))
+	if err != nil {
+		t.Fatalf("NewEnv() failed: %v", err)
+	}
+	if errs.checkUndeclaredIdent(noCatEnv, 1, common.NoLocation, "a", "b") {
+		t.Errorf("checkUndeclaredIdent(noCatEnv, ...) = true, want false")
+	}
+	if errs.checkUndeclaredFunction(noCatEnv, 1, common.NoLocation, "a", "b") {
+		t.Errorf("checkUndeclaredFunction(noCatEnv, ...) = true, want false")
+	}
+
+	// env with catalog and declared prefix
+	cat := env.NewCatalog(&env.CatalogSymbol{Name: "a.b", Kind: env.FunctionKind})
+	catEnv, err := NewEnv(
+		containers.DefaultContainer,
+		newTestRegistry(t),
+		Catalog(func() *env.Catalog { return cat }),
+	)
+	if err != nil {
+		t.Fatalf("NewEnv() failed: %v", err)
+	}
+	catEnv.AddIdents(decls.NewVariable("a", types.IntType))
+
+	// "a" is declared, so "a.b" has declared prefix "a"
+	if errs.checkUndeclaredIdent(catEnv, 1, common.NoLocation, "a", "b") {
+		t.Errorf("checkUndeclaredIdent(catEnv with 'a' declared, ...) = true, want false")
+	}
+	if errs.checkUndeclaredFunction(catEnv, 1, common.NoLocation, "a", "b") {
+		t.Errorf("checkUndeclaredFunction(catEnv with 'a' declared, ...) = true, want false")
+	}
+
+	// single qualifier
+	if errs.checkUndeclaredIdent(catEnv, 1, common.NoLocation, "single") {
+		t.Errorf("checkUndeclaredIdent with single qualifier = true, want false")
+	}
+}
+
+

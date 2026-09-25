@@ -126,7 +126,7 @@ func TestIssues(t *testing.T) {
 		t.Errorf("iss.Errors() got %v, wanted 3 errors", iss.Errors())
 	}
 
-	wantIss := `ERROR: <input>:1:1: undeclared reference to 'b' (in container '')
+	wantIss := `ERROR: <input>:1:1: undeclared reference to 'b'
  | -
  | ^
 ERROR: <input>:1:2: Syntax error: no viable alternative at input '-'
@@ -1498,5 +1498,250 @@ func TestDeclareContextProto_Duplicate(t *testing.T) {
 	_, err = DeclareContextProto(desc)(env)
 	if err == nil {
 		t.Error("DeclareContextProto() twice should fail")
+	}
+}
+
+func TestCatalogSuggestions(t *testing.T) {
+	tests := []struct {
+		name             string
+		opts             []EnvOption
+		expr             string
+		wantErr          string
+		wantNoSuggestion bool
+	}{
+		// 1. Un-enabled library symbols
+		{
+			name:    "un-enabled optional.of",
+			expr:    "optional.of('hello')",
+			wantErr: "undeclared reference to 'optional.of' (enable with `cel.OptionalTypes()`)",
+		},
+		{
+			name:    "un-enabled optional.none",
+			expr:    "optional.none()",
+			wantErr: "undeclared reference to 'optional.none' (enable with `cel.OptionalTypes()`)",
+		},
+		{
+			name:    "un-enabled optional_type",
+			expr:    "optional_type",
+			wantErr: "undeclared reference to 'optional_type' (enable with `cel.OptionalTypes()`)",
+		},
+		{
+			name:    "un-enabled optional.ofNonZeroValue",
+			expr:    "optional.ofNonZeroValue(1)",
+			wantErr: "undeclared reference to 'optional.ofNonZeroValue' (enable with `cel.OptionalTypes()`)",
+		},
+		{
+			name:    "un-enabled optional typo",
+			expr:    "optioanl.of('hello')",
+			wantErr: "undeclared reference to 'optioanl.of' (did you mean 'optional.of'?, enable with `cel.OptionalTypes()`)",
+		},
+
+		// 2. Standard function typos (global and member)
+		{
+			name:    "standard function typo - size",
+			expr:    "siz('hello')",
+			wantErr: "undeclared reference to 'siz' (did you mean 'size'?)",
+		},
+		{
+			name:    "standard member function typo - contains",
+			expr:    "'hello'.contians('h')",
+			wantErr: "undeclared reference to 'contians' (did you mean 'contains'?)",
+		},
+		{
+			name:    "standard member function typo - startsWith",
+			expr:    "'hello'.stratsWith('h')",
+			wantErr: "undeclared reference to 'stratsWith' (did you mean 'startsWith'?)",
+		},
+		{
+			name:    "standard member function typo - endsWith",
+			expr:    "'hello'.ensdWith('h')",
+			wantErr: "undeclared reference to 'ensdWith' (did you mean 'endsWith'?)",
+		},
+
+		// 3. Macro typos
+		{
+			name:    "macro typo - filter",
+			expr:    "[1, 2].flter(x, x > 1)",
+			wantErr: "undeclared reference to 'flter' (did you mean 'filter'?)",
+		},
+		{
+			name:    "macro typo - exists",
+			expr:    "[1, 2].exsits(x, x > 1)",
+			wantErr: "undeclared reference to 'exsits' (did you mean 'exists'?)",
+		},
+		{
+			name:    "macro typo - all",
+			expr:    "[1, 2].al(x, x > 1)",
+			wantErr: "undeclared reference to 'al' (did you mean 'all'?)",
+		},
+
+		// 4. Type identifier typos
+		{
+			name:    "type typo - int",
+			expr:    "type(1) == inte",
+			wantErr: "undeclared reference to 'inte' (did you mean 'int'?)",
+		},
+		{
+			name:    "type typo - string",
+			expr:    "type('a') == strng",
+			wantErr: "undeclared reference to 'strng' (did you mean 'string'?)",
+		},
+		{
+			name:    "type typo - double",
+			expr:    "type(1.0) == doubel",
+			wantErr: "undeclared reference to 'doubel' (did you mean 'double'?)",
+		},
+		{
+			name:    "type typo - bytes",
+			expr:    "type(b'a') == byts",
+			wantErr: "undeclared reference to 'byts' (did you mean 'bytes'?)",
+		},
+		{
+			name:    "type typo - bool",
+			expr:    "type(true) == bol",
+			wantErr: "undeclared reference to 'bol' (did you mean 'bool'?)",
+		},
+
+		// 5. Variable typos (simple and namespaced)
+		{
+			name: "simple variable typo",
+			opts: []EnvOption{
+				Variable("user_name", StringType),
+			},
+			expr:    "user_nam == 'alice'",
+			wantErr: "undeclared reference to 'user_nam' (did you mean 'user_name'?)",
+		},
+		{
+			name: "namespaced variable typo",
+			opts: []EnvOption{
+				Variable("auth.user_id", StringType),
+			},
+			expr:    "auth.usr_id == '123'",
+			wantErr: "undeclared reference to 'auth.usr_id' (did you mean 'auth.user_id'?)",
+		},
+		{
+			name: "namespaced variable in container typo",
+			opts: []EnvOption{
+				Container("my.app"),
+				Variable("my.app.account_number", StringType),
+			},
+			expr:    "my.app.accout_number == '123'",
+			wantErr: "undeclared reference to 'my.app.accout_number' (in container 'my.app') (did you mean 'my.app.account_number'?)",
+		},
+		{
+			name: "receiver call on variable with member typo",
+			opts: []EnvOption{
+				Variable("msg", StringType),
+			},
+			expr:    "msg.contians('h')",
+			wantErr: "undeclared reference to 'contians' (did you mean 'contains'?)",
+		},
+
+		// 6. Enabled library with typos
+		{
+			name: "enabled optional with typo - optional.off",
+			opts: []EnvOption{
+				OptionalTypes(),
+			},
+			expr:    "optional.off('hello')",
+			wantErr: "undeclared reference to 'optional.off' (did you mean 'optional.of'?)",
+		},
+		{
+			name: "enabled optional with typo - optional.non",
+			opts: []EnvOption{
+				OptionalTypes(),
+			},
+			expr:    "optional.non()",
+			wantErr: "undeclared reference to 'optional.non' (did you mean 'optional.none'?)",
+		},
+		{
+			name: "enabled optional with typo - optional.ofNonZeroValu",
+			opts: []EnvOption{
+				OptionalTypes(),
+			},
+			expr:    "optional.ofNonZeroValu(1)",
+			wantErr: "undeclared reference to 'optional.ofNonZeroValu' (did you mean 'optional.ofNonZeroValue'?)",
+		},
+		{
+			name: "enabled optional with typo - optional.ofNonZero",
+			opts: []EnvOption{
+				OptionalTypes(),
+			},
+			expr:    "optional.ofNonZero(1)",
+			wantErr: "undeclared reference to 'optional.ofNonZero' (did you mean 'optional.ofNonZeroValue'?)",
+		},
+		{
+			name: "two suggestions for variable typo",
+			opts: []EnvOption{
+				Variable("my_var_a", IntType),
+				Variable("my_var_b", IntType),
+			},
+			expr:    "my_var_c + 1",
+			wantErr: "undeclared reference to 'my_var_c' (did you mean 'my_var_a' or 'my_var_b'?)",
+		},
+
+		// 7. No suggestions when edit distance / relevance threshold is exceeded:
+		//    - length <= 3: max distance 1
+		//    - 4 <= length <= 8: max distance 2
+		//    - length > 8: max distance length / 3
+		//    - namespaced queries only match namespaced symbols
+		{
+			name:             "no suggestion - completely unknown identifier",
+			expr:             "completely_unknown_variable == 1",
+			wantErr:          "undeclared reference to 'completely_unknown_variable'",
+			wantNoSuggestion: true,
+		},
+		{
+			name:             "no suggestion - short identifier beyond threshold",
+			expr:             "sz('hello')",
+			wantErr:          "undeclared reference to 'sz'",
+			wantNoSuggestion: true,
+		},
+		{
+			name:             "no suggestion - completely unknown function",
+			expr:             "foobar_custom_fn(123)",
+			wantErr:          "undeclared reference to 'foobar_custom_fn'",
+			wantNoSuggestion: true,
+		},
+		{
+			name:             "no suggestion - completely unknown namespaced ident",
+			expr:             "custom.unknown.namespace.variable == 1",
+			wantErr:          "undeclared reference to 'custom'",
+			wantNoSuggestion: true,
+		},
+		{
+			name: "no suggestion - unknown namespaced call with enabled optional",
+			opts: []EnvOption{
+				OptionalTypes(),
+			},
+			expr:             "optional.unknownFunction(1)",
+			wantErr:          "undeclared reference to 'unknownFunction'",
+			wantNoSuggestion: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			e, err := NewEnv(tc.opts...)
+			if err != nil {
+				t.Fatalf("NewEnv() failed: %v", err)
+			}
+			pAst, iss := e.Parse(tc.expr)
+			if iss.Err() != nil {
+				t.Fatalf("Parse(%q) failed: %v", tc.expr, iss.Err())
+			}
+			_, iss = e.Check(pAst)
+			if iss.Err() == nil {
+				t.Fatalf("Check(%q) succeeded, wanted error containing %q", tc.expr, tc.wantErr)
+			}
+			if !strings.Contains(iss.Err().Error(), tc.wantErr) {
+				t.Errorf("Check(%q) error = %q, want %q", tc.expr, iss.Err().Error(), tc.wantErr)
+			}
+			if tc.wantNoSuggestion {
+				if strings.Contains(iss.Err().Error(), "did you mean") || strings.Contains(iss.Err().Error(), "enable with") {
+					t.Errorf("Check(%q) error unexpectedly contained suggestion: %q", tc.expr, iss.Err().Error())
+				}
+			}
+		})
 	}
 }

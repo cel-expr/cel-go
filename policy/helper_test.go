@@ -271,7 +271,7 @@ var (
 ERROR: testdata/errors/policy.yaml:20:12: error configuring import: invalid qualified name: bad import, wanted name of the form 'qualified.name'
  |   - name: "bad import"
  | ...........^
-ERROR: testdata/errors/policy.yaml:24:19: undeclared reference to 'spec' (in container '')
+ERROR: testdata/errors/policy.yaml:24:19: undeclared reference to 'spec'
  |       expression: spec.labels
  | ..................^
 ERROR: testdata/errors/policy.yaml:25:7: invalid variable declaration: overlapping identifier for name 'variables.want'
@@ -289,7 +289,7 @@ ERROR: testdata/errors/policy.yaml:30:27: Syntax error: mismatched input '2' exp
 ERROR: testdata/errors/policy.yaml:38:75: Syntax error: extraneous input ']' expecting ')'
  |         "missing one or more required labels: %s".format(variables.missing])
  | ..........................................................................^
-ERROR: testdata/errors/policy.yaml:41:67: undeclared reference to 'format' (in container '')
+ERROR: testdata/errors/policy.yaml:41:67: undeclared reference to 'format'
  |         "invalid values provided on one or more labels: %s".format([variables.invalid])
  | ..................................................................^
 ERROR: testdata/errors/policy.yaml:45:16: incompatible output types: block has output type string, but previous outputs have type bool

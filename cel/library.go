@@ -93,6 +93,11 @@ type LibraryVersioner interface {
 	LibraryVersion() uint32
 }
 
+// LibraryCataloguer provides catalog symbols exported by the library when it is not enabled.
+type LibraryCataloguer interface {
+	CatalogSymbols() []*env.CatalogSymbol
+}
+
 // Lib creates an EnvOption out of a Library, allowing libraries to be provided as functional args,
 // and to be linked to each other.
 func Lib(l Library) EnvOption {
@@ -446,6 +451,60 @@ func (*optionalLib) LibraryAlias() string {
 // LibraryVersion returns the version of the library.
 func (lib *optionalLib) LibraryVersion() uint32 {
 	return lib.version
+}
+
+// CatalogSymbols implements the LibraryCataloguer interface method.
+func (*optionalLib) CatalogSymbols() []*env.CatalogSymbol {
+	return []*env.CatalogSymbol{
+		{
+			Name:    "optional",
+			Kind:    env.NamespaceKind,
+			Library: "cel.lib.optional",
+			Option:  "cel.OptionalTypes()",
+		},
+		{
+			Name:    "optional_type",
+			Kind:    env.TypeKind,
+			Library: "cel.lib.optional",
+			Option:  "cel.OptionalTypes()",
+		},
+		{
+			Name:    optionalNoneFunc,
+			Kind:    env.FunctionKind,
+			Library: "cel.lib.optional",
+			Option:  "cel.OptionalTypes()",
+		},
+		{
+			Name:    optionalOfFunc,
+			Kind:    env.FunctionKind,
+			Library: "cel.lib.optional",
+			Option:  "cel.OptionalTypes()",
+		},
+		{
+			Name:    optionalOfNonZeroValueFunc,
+			Kind:    env.FunctionKind,
+			Library: "cel.lib.optional",
+			Option:  "cel.OptionalTypes()",
+		},
+		{
+			Name:    optMapMacro,
+			Kind:    env.MacroKind,
+			Library: "cel.lib.optional",
+			Option:  "cel.OptionalTypes()",
+		},
+		{
+			Name:    optFlatMapMacro,
+			Kind:    env.MacroKind,
+			Library: "cel.lib.optional",
+			Option:  "cel.OptionalTypes()",
+		},
+		{
+			Name:    "optSelect",
+			Kind:    env.MacroKind,
+			Library: "cel.lib.optional",
+			Option:  "cel.OptionalTypes()",
+		},
+	}
 }
 
 // CompileOptions implements the Library interface method.

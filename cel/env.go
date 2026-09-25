@@ -273,8 +273,14 @@ func (e *Env) ToConfig(name string) (*env.Config, error) {
 		// Track the options which have been configured by a library and
 		// then diff the library version against the configured function
 		// to detect incremental overloads or rewrites.
-		libEnv, _ := NewCustomEnv()
-		libEnv, _ = Lib(lib)(libEnv)
+		libEnv, err := NewCustomEnv()
+		if err != nil {
+			return nil, err
+		}
+		libEnv, err = Lib(lib)(libEnv)
+		if err != nil {
+			return nil, err
+		}
 		for fnName, fnDecl := range libEnv.Functions() {
 			if len(fnDecl.OverloadDecls()) == 0 {
 				continue
@@ -1038,6 +1044,39 @@ func (e *Env) initChecker() (*checker.Env, error) {
 				e.HasFeature(featureCrossTypeNumericComparisons)))
 		chkOpts = append(chkOpts,
 			checker.JSONFieldNames(e.HasFeature(featureJSONFieldNames)))
+
+		chkOpts = append(chkOpts, checker.Catalog(func() *env.Catalog {
+			conf, err := e.ToConfig("")
+			if err != nil {
+				return env.NewCatalog()
+			}
+			cat := conf.ToCatalog()
+			for _, f := range e.functions {
+				cat.Add(&env.CatalogSymbol{
+					Name: f.Name(),
+					Kind: env.FunctionKind,
+				})
+			}
+			for _, t := range stdlib.Types() {
+				cat.Add(&env.CatalogSymbol{
+					Name: t.Name(),
+					Kind: env.TypeKind,
+				})
+			}
+			for _, m := range e.macros {
+				cat.Add(&env.CatalogSymbol{
+					Name: m.Function(),
+					Kind: env.MacroKind,
+				})
+			}
+			// TODO: Come up with a better mechanism to dynamically populate catalog symbols
+			// for un-enabled libraries (e.g. leaning on the introspection and serialization
+			// properties used by ToConfig).
+			if !e.HasLibrary("cel.lib.optional") {
+				cat.Add((&optionalLib{}).CatalogSymbols()...)
+			}
+			return cat
+		}))
 
 		if e.parent != nil && e.funcsShared {
 			parentChk, err := e.parent.initChecker()

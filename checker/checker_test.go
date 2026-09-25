@@ -25,6 +25,7 @@ import (
 	"cel.dev/cel-go/common/containers"
 	"cel.dev/cel-go/common/debug"
 	"cel.dev/cel-go/common/decls"
+	"cel.dev/cel-go/common/env"
 	"cel.dev/cel-go/common/stdlib"
 	"cel.dev/cel-go/common/types"
 	"cel.dev/cel-go/parser"
@@ -147,7 +148,7 @@ func testCases(t testing.TB) []testInfo {
 			out:     `foo~!error!`,
 			outType: types.ErrorType,
 			err: `
-ERROR: <input>:1:1: undeclared reference to 'foo' (in container '')
+ERROR: <input>:1:1: undeclared reference to 'foo'
 | foo
 | ^`,
 		},
@@ -869,7 +870,7 @@ ERROR: <input>:1:16: found no matching overload for '_!=_' applied to '(int, nul
 					decls.NewVariable("x", types.NewObjectType("google.expr.proto3.test.TestAllTypes")),
 				},
 			},
-			err: `ERROR: <input>:1:39: undeclared reference to 'y' (in container '')
+			err: `ERROR: <input>:1:39: undeclared reference to 'y'
 		| x.repeated_int64.exists(y, y > 10) && y < 5
 		| ......................................^`,
 		},
@@ -1040,7 +1041,7 @@ ERROR: <input>:1:10: expected type 'bool' but found 'int'
 		{
 			in: `1 + x`,
 			err: `
-ERROR: <input>:1:5: undeclared reference to 'x' (in container '')
+ERROR: <input>:1:5: undeclared reference to 'x'
  | 1 + x
  | ....^`,
 		},
@@ -1607,7 +1608,7 @@ _&&_(_==_(list~type(list(dyn))^list,
 		{
 			in: `Msg{}`,
 			err: `
-		ERROR: <input>:1:4: undeclared reference to 'Msg' (in container '')
+		ERROR: <input>:1:4: undeclared reference to 'Msg'
 		 | Msg{}
 		 | ...^
 		`,
@@ -1615,7 +1616,7 @@ _&&_(_==_(list~type(list(dyn))^list,
 		{
 			in: `fun()`,
 			err: `
-		ERROR: <input>:1:4: undeclared reference to 'fun' (in container '')
+		ERROR: <input>:1:4: undeclared reference to 'fun'
 		 | fun()
 		 | ...^
 		`,
@@ -1623,7 +1624,7 @@ _&&_(_==_(list~type(list(dyn))^list,
 		{
 			in: `'string'.fun()`,
 			err: `
-		ERROR: <input>:1:13: undeclared reference to 'fun' (in container '')
+		ERROR: <input>:1:13: undeclared reference to 'fun'
 		 | 'string'.fun()
 		 | ............^
 		`,
@@ -2203,13 +2204,13 @@ _&&_(_==_(list~type(list(dyn))^list,
 		},
 		{
 			in: `undef`,
-			err: `ERROR: <input>:1:1: undeclared reference to 'undef' (in container '')
+			err: `ERROR: <input>:1:1: undeclared reference to 'undef'
 			| undef
 			| ^`,
 		},
 		{
 			in: `undef()`,
-			err: `ERROR: <input>:1:6: undeclared reference to 'undef' (in container '')
+			err: `ERROR: <input>:1:6: undeclared reference to 'undef'
 			| undef()
 			| .....^`,
 		},
@@ -2230,7 +2231,7 @@ _&&_(_==_(list~type(list(dyn))^list,
 					decls.NewVariable("NotAMessage", types.NewNullableType(types.IntType)),
 				},
 			},
-			err: `ERROR: <input>:1:12: undeclared reference to 'NotAMessage' (in container '')
+			err: `ERROR: <input>:1:12: undeclared reference to 'NotAMessage'
              | NotAMessage{}
              | ...........^`,
 		},
@@ -2917,3 +2918,245 @@ func TestVarsInheritance(t *testing.T) {
 		t.Errorf("got result type %v, wanted %v", gotType, wantType)
 	}
 }
+
+func TestLazyCatalogSupplier(t *testing.T) {
+	supplierCalled := 0
+	supplier := func() *env.Catalog {
+		supplierCalled++
+		return env.NewCatalog(&env.CatalogSymbol{
+			Name:   "optional.of",
+			Kind:   env.FunctionKind,
+			Option: "cel.OptionalTypes()",
+		})
+	}
+
+	chkEnv, err := NewEnv(containers.DefaultContainer, newTestRegistry(t), Catalog(supplier))
+	if err != nil {
+		t.Fatalf("NewEnv(Catalog) failed: %v", err)
+	}
+	err = chkEnv.AddFunctions(stdlib.Functions()...)
+	if err != nil {
+		t.Fatalf("AddFunctions() failed: %v", err)
+	}
+
+	p, err := parser.NewParser(parser.Macros(parser.AllMacros...))
+	if err != nil {
+		t.Fatalf("NewParser() failed: %v", err)
+	}
+
+	// 1. Valid expression: supplier should not be called.
+	srcValid := common.NewTextSource("1 + 2 == 3")
+	parsedValid, iss := p.Parse(srcValid)
+	if len(iss.GetErrors()) > 0 {
+		t.Fatalf("Parse() failed: %v", iss.ToDisplayString())
+	}
+	_, iss = Check(parsedValid, srcValid, chkEnv)
+	if len(iss.GetErrors()) > 0 {
+		t.Fatalf("Check() failed: %v", iss.ToDisplayString())
+	}
+	if supplierCalled != 0 {
+		t.Errorf("Catalog supplier called %d times on valid expression, want 0", supplierCalled)
+	}
+
+	// 2. Invalid expression: supplier should be called lazily.
+	srcInvalid := common.NewTextSource("optional.of('hello')")
+	parsedInvalid, iss := p.Parse(srcInvalid)
+	if len(iss.GetErrors()) > 0 {
+		t.Fatalf("Parse() failed: %v", iss.ToDisplayString())
+	}
+	_, iss = Check(parsedInvalid, srcInvalid, chkEnv)
+	if len(iss.GetErrors()) == 0 {
+		t.Fatal("Check() succeeded on invalid expression, want error")
+	}
+	if supplierCalled != 1 {
+		t.Errorf("Catalog supplier called %d times on invalid expression, want 1", supplierCalled)
+	}
+	if !strings.Contains(iss.ToDisplayString(), "cel.OptionalTypes()") {
+		t.Errorf("Check() error = %q, want suggestion with cel.OptionalTypes()", iss.ToDisplayString())
+	}
+}
+
+func TestEnvCatalog(t *testing.T) {
+	var nilEnv *Env
+	if nilEnv.Catalog() != nil {
+		t.Errorf("nilEnv.Catalog() = %v, want nil", nilEnv.Catalog())
+	}
+	emptyEnv, err := NewEnv(containers.DefaultContainer, newTestRegistry(t))
+	if err != nil {
+		t.Fatalf("NewEnv() failed: %v", err)
+	}
+	if emptyEnv.Catalog() != nil {
+		t.Errorf("emptyEnv.Catalog() = %v, want nil", emptyEnv.Catalog())
+	}
+}
+
+func TestFormatSuggestionSuffix(t *testing.T) {
+	tests := []struct {
+		name string
+		syms []*env.CatalogSymbol
+		want string
+	}{
+		{
+			name: "empty",
+			syms: nil,
+			want: "",
+		},
+		{
+			name: "exact_match_with_option",
+			syms: []*env.CatalogSymbol{
+				{Name: "exact_match_with_option", Option: "cel.OptionalTypes()"},
+			},
+			want: " (enable with `cel.OptionalTypes()`)",
+		},
+		{
+			name: "exact_match_without_option",
+			syms: []*env.CatalogSymbol{
+				{Name: "exact_match_without_option", Option: ""},
+			},
+			want: "",
+		},
+		{
+			name: "single_suggestion_with_option",
+			syms: []*env.CatalogSymbol{
+				{Name: "suggested", Option: "cel.OptionalTypes()"},
+			},
+			want: " (did you mean 'suggested'?, enable with `cel.OptionalTypes()`)",
+		},
+		{
+			name: "single_suggestion_without_option",
+			syms: []*env.CatalogSymbol{
+				{Name: "suggested", Option: ""},
+			},
+			want: " (did you mean 'suggested'?)",
+		},
+		{
+			name: "multiple_suggestions",
+			syms: []*env.CatalogSymbol{
+				{Name: "first", Option: "ext.Strings()"},
+				{Name: "second", Option: "ext.Strings()"},
+			},
+			want: " (did you mean 'first' or 'second'?)",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := formatSuggestionSuffix(tc.name, tc.syms)
+			if got != tc.want {
+				t.Errorf("formatSuggestionSuffix(%q, ...) = %q, want %q", tc.name, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestTypeErrorsCatalog(t *testing.T) {
+	var nilErrs *typeErrors
+	if nilErrs.getCatalog() != nil {
+		t.Errorf("nilErrs.getCatalog() = %v, want nil", nilErrs.getCatalog())
+	}
+	errsWithoutEnv := &typeErrors{errs: common.NewErrors(common.NewTextSource(""))}
+	if errsWithoutEnv.getCatalog() != nil {
+		t.Errorf("errsWithoutEnv.getCatalog() = %v, want nil", errsWithoutEnv.getCatalog())
+	}
+
+	cat := env.NewCatalog(
+		&env.CatalogSymbol{Name: "MyType", Option: "cel.MyTypes()"},
+	)
+	chkEnv, err := NewEnv(containers.DefaultContainer, newTestRegistry(t), Catalog(func() *env.Catalog {
+		return cat
+	}))
+	if err != nil {
+		t.Fatalf("NewEnv() failed: %v", err)
+	}
+
+	src := common.NewTextSource("MyType")
+	errs := &typeErrors{errs: common.NewErrors(src), env: chkEnv}
+	errs.notAType(1, common.NoLocation, "MyType")
+	errList := errs.errs.GetErrors()
+	if len(errList) != 1 {
+		t.Fatalf("got %d errors, want 1", len(errList))
+	}
+	if !strings.Contains(errList[0].Message, "'MyType' is not a type (enable with `cel.MyTypes()`)") {
+		t.Errorf("notAType error = %q, want option suggestion", errList[0].Message)
+	}
+
+	// undeclaredReference with container
+	errs.undeclaredReference(2, common.NoLocation, "my.pkg", "MyType")
+	errList = errs.errs.GetErrors()
+	if len(errList) != 2 {
+		t.Fatalf("got %d errors, want 2", len(errList))
+	}
+	if !strings.Contains(errList[1].Message, "undeclared reference to 'MyType' (in container 'my.pkg') (enable with `cel.MyTypes()`)") {
+		t.Errorf("undeclaredReference error = %q, want container and suggestion", errList[1].Message)
+	}
+}
+
+func TestCatalogSuggestionsInChecker(t *testing.T) {
+	cat := env.NewCatalog(
+		&env.CatalogSymbol{Name: "math.pi", Kind: env.VariableKind, Option: "cel.Math()"},
+		&env.CatalogSymbol{Name: "string.join", Kind: env.FunctionKind, Option: "cel.Strings()"},
+	)
+	supplier := func() *env.Catalog {
+		return cat
+	}
+
+	// 1. checkSelect with catalog symbol (e.g. math.pi)
+	chkEnv, err := NewEnv(containers.DefaultContainer, newTestRegistry(t), Catalog(supplier))
+	if err != nil {
+		t.Fatalf("NewEnv() failed: %v", err)
+	}
+	p, err := parser.NewParser(parser.Macros(parser.AllMacros...))
+	if err != nil {
+		t.Fatalf("NewParser() failed: %v", err)
+	}
+
+	srcSelect := common.NewTextSource("math.pi")
+	parsedSelect, iss := p.Parse(srcSelect)
+	if len(iss.GetErrors()) > 0 {
+		t.Fatalf("Parse() failed: %v", iss.ToDisplayString())
+	}
+	_, iss = Check(parsedSelect, srcSelect, chkEnv)
+	if len(iss.GetErrors()) == 0 {
+		t.Fatal("Check() succeeded on un-enabled select, want error")
+	}
+	if !strings.Contains(iss.ToDisplayString(), "undeclared reference to 'math.pi' (enable with `cel.Math()`)") {
+		t.Errorf("got error %q, want suggestion for math.pi", iss.ToDisplayString())
+	}
+
+	// 2. Select with declared prefix (e.g., var math exists, then math.pi is regular field selection)
+	chkEnvWithVar, err := NewEnv(containers.DefaultContainer, newTestRegistry(t), Catalog(supplier))
+	if err != nil {
+		t.Fatalf("NewEnv() failed: %v", err)
+	}
+	err = chkEnvWithVar.AddIdents(decls.NewVariable("math", types.IntType))
+	if err != nil {
+		t.Fatalf("AddIdents() failed: %v", err)
+	}
+	srcWithVar := common.NewTextSource("math.pi")
+	parsedWithVar, iss := p.Parse(srcWithVar)
+	if len(iss.GetErrors()) > 0 {
+		t.Fatalf("Parse() failed: %v", iss.ToDisplayString())
+	}
+	_, iss = Check(parsedWithVar, srcWithVar, chkEnvWithVar)
+	if len(iss.GetErrors()) == 0 {
+		t.Fatal("Check() succeeded on int field selection, want error")
+	}
+	// It should NOT suggest cel.Math() because 'math' is a declared prefix!
+	if strings.Contains(iss.ToDisplayString(), "cel.Math()") {
+		t.Errorf("got error %q, did not want suggestion for declared prefix", iss.ToDisplayString())
+	}
+
+	// 3. Select with catalog configured, but qualified name is not in catalog.
+	srcUnrelated := common.NewTextSource("unknown_pkg.unknown_field")
+	parsedUnrelated, iss := p.Parse(srcUnrelated)
+	if len(iss.GetErrors()) > 0 {
+		t.Fatalf("Parse() failed: %v", iss.ToDisplayString())
+	}
+	_, iss = Check(parsedUnrelated, srcUnrelated, chkEnv)
+	if len(iss.GetErrors()) == 0 {
+		t.Fatal("Check() succeeded on unrelated qualified field selection, want error")
+	}
+	if strings.Contains(iss.ToDisplayString(), "enable with") {
+		t.Errorf("got error %q, did not want enable suggestion for unrelated symbol", iss.ToDisplayString())
+	}
+}
+

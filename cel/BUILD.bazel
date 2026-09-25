@@ -68,6 +68,7 @@ go_test(
         "cost_test.go",
         "cost_k8s_test.go",
         "decls_test.go",
+        "env_ext_test.go",
         "env_test.go",
         "fieldpaths_test.go",
         "folding_test.go",
