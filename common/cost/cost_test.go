@@ -176,7 +176,7 @@ func TestSafeTrunc(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := SafeTrunc(tc.x); got != tc.want {
+			if got := cost.SafeTrunc(tc.x); got != tc.want {
 				t.Errorf("SafeTrunc(%f) got %d, want %d", tc.x, got, tc.want)
 			}
 		})
@@ -203,7 +203,7 @@ func TestSafeMultiplyByFactorTrunc(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := SafeMultiplyByFactorTrunc(tc.x, tc.factor); got != tc.want {
+			if got := cost.SafeMultiplyByFactorTrunc(tc.x, tc.factor); got != tc.want {
 				t.Errorf("SafeMultiplyByFactorTrunc(%d, %f) got %d, want %d", tc.x, tc.factor, got, tc.want)
 			}
 		})
@@ -218,7 +218,7 @@ func TestSafeMultiplyByFactorTruncMatchesUnchecked(t *testing.T) {
 	for _, f := range factors {
 		for _, sz := range sizes {
 			want := uint64(float64(sz) * f)
-			if got := SafeMultiplyByFactorTrunc(sz, f); got != want {
+			if got := cost.SafeMultiplyByFactorTrunc(sz, f); got != want {
 				t.Errorf("SafeMultiplyByFactorTrunc(%d, %f) got %d, want %d", sz, f, got, want)
 			}
 		}
