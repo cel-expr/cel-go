@@ -539,6 +539,30 @@ func testData(t testing.TB) []testCase {
 			expr: `{1: 'hello', 2: 'world'}[dyn(2u)] == 'world'`,
 		},
 		{
+			name: "map_literal_repeated_key",
+			expr: `{true: 1, false: 2, true: 3}[true]`,
+			err:  "insert failed: key true already exists",
+		},
+		{
+			name: "map_literal_repeated_key_string",
+			expr: `{'k': 'x', 'k': 'y'}['k']`,
+			err:  "insert failed: key k already exists",
+		},
+		{
+			name: "map_literal_repeated_key_heterogeneous",
+			expr: `{0: 1, 0u: 2}[0.0]`,
+			err:  "insert failed: key 0 already exists",
+		},
+		{
+			name: "map_literal_repeated_key_computed",
+			expr: `{('rol' + 'e'): 'admin', 'role': 'guest'}['role']`,
+			err:  "insert failed: key role already exists",
+		},
+		{
+			name: "map_literal_distinct_heterogeneous_keys",
+			expr: `{1: 'a', 2u: 'b'}[dyn(2u)] == 'b'`,
+		},
+		{
 			name: "index_cross_type_bad_qualifier",
 			expr: `{1: 'hello', 2: 'world'}[x] == 'world'`,
 			vars: []*decls.VariableDecl{
