@@ -1975,7 +1975,7 @@ func TestCustomInterpreterDecoratorV2(t *testing.T) {
 // TestEstimateCostAndRuntimeCost sanity checks that the cost systems are usable from the program API.
 func TestEstimateCostAndRuntimeCost(t *testing.T) {
 	intList := ListType(IntType)
-	zeroCost := cost.CostEstimate{}
+	zeroCost := cost.FixedCostEstimate(0)
 	cases := []struct {
 		name  string
 		expr  string
@@ -1994,7 +1994,7 @@ func TestEstimateCostAndRuntimeCost(t *testing.T) {
 			name:  "identity",
 			expr:  `input`,
 			decls: []EnvOption{Variable("input", intList)},
-			want:  cost.CostEstimate{Min: 1, Max: 1},
+			want:  cost.FixedCostEstimate(1),
 			in:    map[string]any{"input": []int{1, 2}},
 		},
 		{
@@ -2005,7 +2005,7 @@ func TestEstimateCostAndRuntimeCost(t *testing.T) {
 				Variable("str2", StringType),
 			},
 			hints: map[string]uint64{"str1": 10, "str2": 10},
-			want:  cost.CostEstimate{Min: 2, Max: 6},
+			want:  cost.RangedCostEstimate(2, 6),
 			in:    map[string]any{"str1": "val1111111", "str2": "val2222222"},
 		},
 	}
@@ -4056,7 +4056,7 @@ func TestOptionalHasValueCost(t *testing.T) {
 				"optStr": types.OptionalOf(types.String("val1111111")),
 				"str":    "val2222222",
 			},
-			wantEst:    cost.CostEstimate{Min: 3, Max: 3},
+			wantEst:    cost.FixedCostEstimate(3),
 			wantActual: 3,
 		},
 		{
@@ -4066,7 +4066,7 @@ func TestOptionalHasValueCost(t *testing.T) {
 				"optStr": types.OptionalOf(types.String(longStr)),
 				"str":    longStr,
 			},
-			wantEst:    cost.CostEstimate{Min: 3, Max: 1002},
+			wantEst:    cost.RangedCostEstimate(3, 1002),
 			wantActual: 1002,
 		},
 		{
@@ -4077,7 +4077,7 @@ func TestOptionalHasValueCost(t *testing.T) {
 				"optStr": types.OptionalOf(types.String(longStr)),
 				"str":    "val2222222",
 			},
-			wantEst:    cost.CostEstimate{Min: 3, Max: 3},
+			wantEst:    cost.FixedCostEstimate(3),
 			wantActual: 3,
 		},
 		{
@@ -4089,7 +4089,7 @@ func TestOptionalHasValueCost(t *testing.T) {
 				"optOptStr": types.OptionalOf(types.OptionalOf(types.String(longStr))),
 				"optStr":    types.OptionalOf(types.String(longStr)),
 			},
-			wantEst:    cost.CostEstimate{Min: 3, Max: 1002},
+			wantEst:    cost.RangedCostEstimate(3, 1002),
 			wantActual: 1002,
 		},
 		{
@@ -4100,7 +4100,7 @@ func TestOptionalHasValueCost(t *testing.T) {
 				"optStr": types.OptionalNone,
 				"str":    longStr,
 			},
-			wantEst:    cost.CostEstimate{Min: 3, Max: 1002},
+			wantEst:    cost.RangedCostEstimate(3, 1002),
 			wantActual: 3,
 		},
 	}
@@ -4289,31 +4289,31 @@ func TestOptionalMapCost(t *testing.T) {
 		{
 			name:       "string equality optMap",
 			expr:       `optional.of('a').optMap(v, v == 'value').hasValue()`,
-			v3Est:      cost.CostEstimate{Min: 4, Max: 18},
+			v3Est:      cost.RangedCostEstimate(4, 18),
 			v3Actual:   18,
-			v4Est:      cost.CostEstimate{Min: 15, Max: 29},
+			v4Est:      cost.RangedCostEstimate(15, 29),
 			v4Actual:   29,
-			latestEst:  cost.CostEstimate{Min: 15, Max: 29},
+			latestEst:  cost.RangedCostEstimate(15, 29),
 			latestCost: 29,
 		},
 		{
 			name:       "string size optMap",
 			expr:       `optional.of('abcdefgabcdefg').optMap(v, v.size()).hasValue()`,
-			v3Est:      cost.CostEstimate{Min: 4, Max: 18},
+			v3Est:      cost.RangedCostEstimate(4, 18),
 			v3Actual:   18,
-			v4Est:      cost.CostEstimate{Min: 15, Max: 29},
+			v4Est:      cost.RangedCostEstimate(15, 29),
 			v4Actual:   29,
-			latestEst:  cost.CostEstimate{Min: 15, Max: 29},
+			latestEst:  cost.RangedCostEstimate(15, 29),
 			latestCost: 29,
 		},
 		{
 			name:       "list size optMap",
 			expr:       `optional.of([1, 2, 3, 4, 5]).optMap(v, v.size()).hasValue()`,
-			v3Est:      cost.CostEstimate{Min: 14, Max: 38},
+			v3Est:      cost.RangedCostEstimate(14, 38),
 			v3Actual:   38,
-			v4Est:      cost.CostEstimate{Min: 25, Max: 39},
+			v4Est:      cost.RangedCostEstimate(25, 39),
 			v4Actual:   39,
-			latestEst:  cost.CostEstimate{Min: 25, Max: 39},
+			latestEst:  cost.RangedCostEstimate(25, 39),
 			latestCost: 39,
 		},
 		{
@@ -4322,11 +4322,11 @@ func TestOptionalMapCost(t *testing.T) {
 			in: map[string]any{
 				"self": map[string]any{"l": []string{"a"}},
 			},
-			v3Est:      cost.CostEstimate{Min: 6, Max: 22},
+			v3Est:      cost.RangedCostEstimate(6, 22),
 			v3Actual:   22,
-			v4Est:      cost.CostEstimate{Min: 17, Max: 31},
+			v4Est:      cost.RangedCostEstimate(17, 31),
 			v4Actual:   31,
-			latestEst:  cost.CostEstimate{Min: 17, Max: 31},
+			latestEst:  cost.RangedCostEstimate(17, 31),
 			latestCost: 31,
 		},
 	}
@@ -5055,7 +5055,8 @@ type testCostEstimator struct {
 
 func (tc testCostEstimator) EstimateSize(element cost.AstNode) *cost.SizeEstimate {
 	if l, ok := tc.hints[strings.Join(element.Path(), ".")]; ok {
-		return &cost.SizeEstimate{Min: 0, Max: l}
+		est := cost.RangedSizeEstimate(0, l)
+		return &est
 	}
 	return nil
 }
@@ -5065,7 +5066,7 @@ func (tc testCostEstimator) EstimateCallCost(function, overloadID string, target
 }
 
 func estimateTimestampToYear(estimator cost.Estimator, target *cost.AstNode, args []cost.AstNode) *cost.CallEstimate {
-	return &cost.CallEstimate{CostEstimate: cost.CostEstimate{Min: 7, Max: 7}}
+	return &cost.CallEstimate{CostEstimate: cost.FixedCostEstimate(7)}
 }
 
 type testRuntimeCostEstimator struct{}
@@ -5662,6 +5663,73 @@ func TestCostModel(t *testing.T) {
 	actualCost := *valDetails.ActualCost()
 	if actualCost == 0 {
 		t.Errorf("expected non-zero actual cost, got %d", actualCost)
+	}
+}
+
+func TestCostModelVersion(t *testing.T) {
+	// A model built on Min is exactly what a revision changes, so this also covers the env
+	// compiling user-supplied models at the pinned revision rather than at the latest one.
+	model := cost.MemberOverload(overloads.StartsWithString,
+		cost.EvalCost(cost.Min(cost.Target(), cost.Arg(0))),
+	)
+	const expr = `"abcdef".startsWith("abcdef")`
+
+	tests := []struct {
+		name string
+		opts []EnvOption
+		want cost.CostEstimate
+	}{
+		{
+			name: "latest by default",
+			want: cost.FixedCostEstimate(6),
+		},
+		{
+			// 0 reports a floor of 1 regardless of the operands' lower bounds.
+			name: "pinned to v0",
+			opts: []EnvOption{CostModelVersion(0)},
+			want: cost.RangedCostEstimate(1, 6),
+		},
+		{
+			name: "pinned to v1",
+			opts: []EnvOption{CostModelVersion(1)},
+			want: cost.FixedCostEstimate(6),
+		},
+	}
+	var runtimeCosts []uint64
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			env, err := NewEnv(append([]EnvOption{CostModel(model)}, tc.opts...)...)
+			if err != nil {
+				t.Fatalf("NewEnv() failed: %v", err)
+			}
+			ast, iss := env.Compile(expr)
+			if iss.Err() != nil {
+				t.Fatalf("env.Compile(%q) failed: %v", expr, iss.Err())
+			}
+			est, err := env.EstimateCost(ast, nil)
+			if err != nil {
+				t.Fatalf("env.EstimateCost() failed: %v", err)
+			}
+			if est != tc.want {
+				t.Errorf("env.EstimateCost() got %v, wanted %v", est, tc.want)
+			}
+			prg, err := env.Program(ast, CostTracking(nil))
+			if err != nil {
+				t.Fatalf("env.Program() failed: %v", err)
+			}
+			_, det, err := prg.Eval(NoVars())
+			if err != nil {
+				t.Fatalf("prg.Eval() failed: %v", err)
+			}
+			runtimeCosts = append(runtimeCosts, *det.ActualCost())
+		})
+	}
+	// Revisions are an estimation concern only; none of them may move what is actually charged.
+	for i, got := range runtimeCosts {
+		if got != runtimeCosts[0] {
+			t.Errorf("runtime cost for %q was %d, wanted %d as under every other revision",
+				tests[i].name, got, runtimeCosts[0])
+		}
 	}
 }
 func TestLateBoundFunctions(t *testing.T) {

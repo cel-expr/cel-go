@@ -35,7 +35,9 @@ func TestSets(t *testing.T) {
 		in            map[string]any
 		hints         map[string]uint64
 		estimatedCost cost.CostEstimate
-		actualCost    uint64
+		// estimatedCostV0 is the estimate under cost.ModelVersion0, set only where the revision moved it.
+		estimatedCostV0 *cost.CostEstimate
+		actualCost      uint64
 	}{
 		// set containment
 		{
@@ -45,7 +47,7 @@ func TestSets(t *testing.T) {
 			hints: map[string]uint64{"x": 10},
 			// min cost is input 'x' length 0, 10 for list creation, 2 for arg costs
 			// max cost is input 'x' length 10, 10 for list creation, 2 for arg costs
-			estimatedCost: cost.CostEstimate{Min: 12, Max: 42},
+			estimatedCost: cost.RangedCostEstimate(12, 42),
 			// actual cost is 'x' length 5 * list literal length 3, 10 for list creation, 2 for arg cost
 			actualCost: 27,
 		},
@@ -55,7 +57,7 @@ func TestSets(t *testing.T) {
 			in:   map[string]any{"x": []int64{5, 4, 3, 2, 1}},
 			// min cost is input 'x' length 0, 10 for list creation, 2 for arg costs
 			// max cost is effectively infinite due to missing size hint for 'x'
-			estimatedCost: cost.CostEstimate{Min: 12, Max: math.MaxUint64},
+			estimatedCost: cost.RangedCostEstimate(12, math.MaxUint64),
 			// actual cost is 'x' length 5 * list literal length 5, 10 for list creation, 2 for arg cost
 			actualCost: 37,
 		},
@@ -291,7 +293,7 @@ func TestSets(t *testing.T) {
 				t.Fatalf("env.Check(%v) failed: %v", tc.expr, iss.Err())
 			}
 
-			testCheckCost(t, env, cAst, tc.hints, tc.estimatedCost)
+			testCheckCost(t, env, cAst, tc.hints, tc.estimatedCost, tc.estimatedCostV0)
 			asts = append(asts, cAst)
 			for _, ast := range asts {
 				testEvalWithCost(t, env, ast, tc.in, tc.actualCost)
@@ -485,17 +487,43 @@ func testSetsEnv(t *testing.T, opts ...cel.EnvOption) *cel.Env {
 	return env
 }
 
-func testCheckCost(t *testing.T, env *cel.Env, ast *cel.Ast, hints map[string]uint64, wantEst cost.CostEstimate) {
+// costV0 records the estimate a case produces under cost.ModelVersion0, for the cost tables'
+// estimatedCostV0 fields. It exists because the constructors return values, and a table field of
+// pointer type needs something addressable.
+func costV0(lo, hi uint64) *cost.CostEstimate {
+	est := cost.RangedCostEstimate(lo, hi)
+	return &est
+}
+
+// testCheckCost asserts the estimated cost at the latest cost model revision and at ModelVersion0,
+// so that a case the revision moved shows both numbers side by side.
+//
+// wantEstV0 is nil for the common case where the revision leaves the estimate alone. Nil asserts
+// that equivalence rather than skipping the check, which keeps the set of non-nil entries across
+// the cost tables an exact ledger of what the revision changed.
+func testCheckCost(t *testing.T, env *cel.Env, ast *cel.Ast, hints map[string]uint64, wantEst cost.CostEstimate, wantEstV0 *cost.CostEstimate) {
 	t.Helper()
 	if len(hints) == 0 {
 		hints = map[string]uint64{}
 	}
-	est, err := env.EstimateCost(ast, testCostHintEstimator{hints: hints})
-	if err != nil {
-		t.Fatalf("env.EstimateCost() failed: %v", err)
+	estimate := func(opts ...cost.CostOption) cost.CostEstimate {
+		t.Helper()
+		est, err := env.EstimateCost(ast, testCostHintEstimator{hints: hints}, opts...)
+		if err != nil {
+			t.Fatalf("env.EstimateCost() failed: %v", err)
+		}
+		return est
 	}
-	if !reflect.DeepEqual(est, wantEst) {
+	if est := estimate(); !reflect.DeepEqual(est, wantEst) {
 		t.Errorf("env.EstimateCost() got %v, wanted %v", est, wantEst)
+	}
+	wantLegacy := wantEst
+	if wantEstV0 != nil {
+		wantLegacy = *wantEstV0
+	}
+	est := estimate(cost.EstimateModelVersion(0))
+	if !reflect.DeepEqual(est, wantLegacy) {
+		t.Errorf("env.EstimateCost(version 0) got %v, wanted %v", est, wantLegacy)
 	}
 }
 
@@ -530,7 +558,8 @@ type testCostHintEstimator struct {
 
 func (tc testCostHintEstimator) EstimateSize(element cost.AstNode) *cost.SizeEstimate {
 	if l, ok := tc.hints[strings.Join(element.Path(), ".")]; ok {
-		return &cost.SizeEstimate{Min: 0, Max: l}
+		est := cost.RangedSizeEstimate(0, l)
+		return &est
 	}
 	return nil
 }

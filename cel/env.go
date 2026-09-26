@@ -190,6 +190,12 @@ type Env struct {
 type costModel struct {
 	strategy cost.SizingStrategy
 	models   []cost.OverloadModel
+
+	// version pins the cost model revision used for estimation.
+	//
+	// A pointer rather than a value because version 0 is a meaningful pin, so the
+	// nil case is the only way to express "caller did not ask for a revision".
+	version *uint32
 }
 
 func (c *costModel) copy() *costModel {
@@ -199,38 +205,70 @@ func (c *costModel) copy() *costModel {
 	return &costModel{
 		strategy: c.strategy,
 		models:   slices.Clone(c.models),
+		version:  c.version,
 	}
 }
 
+// isEmpty reports whether the cost model carries no configuration worth emitting options for.
+func (c *costModel) isEmpty() bool {
+	return c == nil || (c.strategy == nil && len(c.models) == 0 && c.version == nil)
+}
+
+// modelOptions returns the options used to compile a user-supplied OverloadModel, so that those
+// models observe the same sizing and revision rules as the standard ones.
+func (c *costModel) modelOptions() []cost.ModelOption {
+	opts := make([]cost.ModelOption, 0, 2)
+	if c.strategy != nil {
+		opts = append(opts, cost.WithSizingStrategy(c.strategy))
+	}
+	if c.version != nil {
+		opts = append(opts, cost.ModelVersion(*c.version))
+	}
+	return opts
+}
+
 func (c *costModel) estimateOptions() []cost.Option {
-	if c == nil || (c.strategy == nil && len(c.models) == 0) {
+	if c.isEmpty() {
 		return nil
 	}
 	count := len(c.models)
 	if c.strategy != nil {
 		count++
 	}
+	if c.version != nil {
+		count++
+	}
+	modelOpts := c.modelOptions()
 	opts := make([]cost.Option, 0, count)
 	for _, m := range c.models {
-		opts = append(opts, cost.OverloadCostEstimate(m.ID, m.FunctionEstimatorWithOptions(c.strategy)))
+		opts = append(opts, cost.OverloadCostEstimate(m.ID, m.FunctionEstimatorWithOptions(modelOpts...)))
 	}
 	if c.strategy != nil {
 		opts = append(opts, cost.EstimateSizingStrategy(c.strategy))
+	}
+	if c.version != nil {
+		opts = append(opts, cost.EstimateModelVersion(*c.version))
 	}
 	return opts
 }
 
 func (c *costModel) trackerOptions() []cost.TrackerOption {
-	if c == nil || (c.strategy == nil && len(c.models) == 0) {
+	if c.isEmpty() {
 		return nil
 	}
 	count := len(c.models)
 	if c.strategy != nil {
 		count++
 	}
+	// Tracking is deliberately not versioned: a revision changes what an expression is predicted
+	// to cost, never what it is charged. Only the sizing strategy reaches the trackers.
+	trackerModelOpts := make([]cost.ModelOption, 0, 1)
+	if c.strategy != nil {
+		trackerModelOpts = append(trackerModelOpts, cost.WithSizingStrategy(c.strategy))
+	}
 	opts := make([]cost.TrackerOption, 0, count)
 	for _, m := range c.models {
-		opts = append(opts, cost.OverloadTracker(m.ID, m.FunctionTrackerWithOptions(c.strategy)))
+		opts = append(opts, cost.OverloadTracker(m.ID, m.FunctionTrackerWithOptions(trackerModelOpts...)))
 	}
 	if c.strategy != nil {
 		opts = append(opts, cost.TrackerSizingStrategy(c.strategy))

@@ -222,24 +222,26 @@ func TestTwoVarComprehensionsCost(t *testing.T) {
 		in            map[string]any
 		hints         map[string]uint64
 		estimatedCost cost.CostEstimate
-		actualCost    uint64
+		// estimatedCostV0 is the estimate under cost.ModelVersion0, set only where the revision moved it.
+		estimatedCostV0 *cost.CostEstimate
+		actualCost      uint64
 	}{
 		{
 			name:          "all list literal",
 			expr:          `[1, 2, 3, 4].all(i, v, i < 5 && v > 0)`,
-			estimatedCost: cost.CostEstimate{Min: 23, Max: 39},
+			estimatedCost: cost.RangedCostEstimate(23, 39),
 			actualCost:    39,
 		},
 		{
 			name:          "all map literal - true",
 			expr:          `{1: 1, 2: 2, 3: 3}.all(i, v, i < 5 && v > 0)`,
-			estimatedCost: cost.CostEstimate{Min: 40, Max: 52},
+			estimatedCost: cost.RangedCostEstimate(40, 52),
 			actualCost:    52,
 		},
 		{
 			name:          "all map literal - false",
 			expr:          `!{0: 0}.all(i, v, i < 5 && v > 0)`,
-			estimatedCost: cost.CostEstimate{Min: 35, Max: 39},
+			estimatedCost: cost.RangedCostEstimate(35, 39),
 			actualCost:    39,
 		},
 		{
@@ -252,7 +254,7 @@ func TestTwoVarComprehensionsCost(t *testing.T) {
 			in: map[string]any{
 				"m": map[int]int{1: 1, 2: 2},
 			},
-			estimatedCost: cost.CostEstimate{Min: 2, Max: 23},
+			estimatedCost: cost.RangedCostEstimate(2, 23),
 			actualCost:    16,
 		},
 		{
@@ -267,7 +269,7 @@ func TestTwoVarComprehensionsCost(t *testing.T) {
 			in: map[string]any{
 				"m": map[string]string{"he": "hello", "go": "goodbye"},
 			},
-			estimatedCost: cost.CostEstimate{Min: 2, Max: 23},
+			estimatedCost: cost.RangedCostEstimate(2, 23),
 			actualCost:    14,
 		},
 		{
@@ -285,7 +287,7 @@ func TestTwoVarComprehensionsCost(t *testing.T) {
 		{
 			name:          "transformList with filter",
 			expr:          `[3, 2, 1].transformList(i, v, v > i, v) == [3, 2]`,
-			estimatedCost: cost.CostEstimate{Min: 44, Max: 80},
+			estimatedCost: cost.RangedCostEstimate(44, 80),
 			actualCost:    67,
 		},
 		{
@@ -316,7 +318,7 @@ func TestTwoVarComprehensionsCost(t *testing.T) {
 		{
 			name:          "transformMap filter map",
 			expr:          `{1: 2, 3: 4, 5: 6}.transformMap(k, v, k % 3 == 0, v + 1) == {3: 5}`,
-			estimatedCost: cost.CostEstimate{Min: 104, Max: 116},
+			estimatedCost: cost.RangedCostEstimate(104, 116),
 			actualCost:    106,
 		},
 		{
@@ -337,8 +339,9 @@ func TestTwoVarComprehensionsCost(t *testing.T) {
 				"m.@values":        10,
 				"m.@values.@items": 2,
 			},
-			estimatedCost: cost.CostEstimate{Min: 73, Max: 173},
-			actualCost:    98,
+			estimatedCost:   cost.RangedCostEstimate(72, 173),
+			estimatedCostV0: costV0(73, 173),
+			actualCost:      98,
 		},
 		{
 			name:          "transformMapEntry literal input",
@@ -363,8 +366,9 @@ func TestTwoVarComprehensionsCost(t *testing.T) {
 				"m.@keys":   16,
 				"m.@values": 10,
 			},
-			estimatedCost: cost.CostEstimate{Min: 65, Max: 405},
-			actualCost:    201,
+			estimatedCost:   cost.RangedCostEstimate(64, 405),
+			estimatedCostV0: costV0(65, 405),
+			actualCost:      201,
 		},
 	}
 
@@ -383,7 +387,7 @@ func TestTwoVarComprehensionsCost(t *testing.T) {
 				t.Fatalf("env.Check(%v) failed: %v", tc.expr, iss.Err())
 			}
 
-			testCheckCost(t, env, cAst, tc.hints, tc.estimatedCost)
+			testCheckCost(t, env, cAst, tc.hints, tc.estimatedCost, tc.estimatedCostV0)
 			asts = append(asts, cAst)
 			for _, ast := range asts {
 				testEvalWithCost(t, env, ast, tc.in, tc.actualCost)

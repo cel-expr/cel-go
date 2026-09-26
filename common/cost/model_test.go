@@ -15,6 +15,7 @@
 package cost
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -32,6 +33,17 @@ type testEvalContext struct {
 	result        *SizeEstimate
 	targetType    *types.Type
 	argTypes      []*types.Type
+	// version pins the cost model revision. Nil means the latest revision, which is what every
+	// case that is not specifically about versioning wants.
+	version *uint32
+}
+
+// modelVersion implements versionedEstimateContext.
+func (t *testEvalContext) modelVersion() uint32 {
+	if t.version == nil {
+		return defaultModelVersion
+	}
+	return *t.version
 }
 
 func (t *testEvalContext) ArgValue(index int, defaultVal uint64) uint64 {
@@ -108,6 +120,65 @@ func (t *testEvalContext) ArgType(index int) (*types.Type, bool) {
 		return t.argTypes[index], true
 	}
 	return nil, false
+}
+
+// TestMinQuantityModelVersions pins the one estimation difference between the cost model revisions.
+//
+// Min is the only quantity expression the revision changes, so the two columns here are the whole
+// behavioural delta that CostModelVersion / EstimateModelVersion select between.
+func TestMinQuantityModelVersions(t *testing.T) {
+	v0 := uint32(0)
+	tests := []struct {
+		name   string
+		args   []SizeEstimate
+		wantV0 SizeEstimate
+		wantV1 SizeEstimate
+	}{
+		{
+			// 0 ignores the operands' own lower bounds and reports a floor of 1.
+			name:   "overlapping_intervals",
+			args:   []SizeEstimate{RangedSizeEstimate(2, 10), RangedSizeEstimate(3, 5)},
+			wantV0: RangedSizeEstimate(1, 5),
+			wantV1: RangedSizeEstimate(2, 5),
+		},
+		{
+			// Equally sized operands: the traversal always visits every element, so the true
+			// minimum coincides with the maximum. 0's floor of 1 understates it,
+			// which is the unsoundness 1 corrects.
+			name:   "equal_fixed_operands",
+			args:   []SizeEstimate{FixedSizeEstimate(6), FixedSizeEstimate(6)},
+			wantV0: RangedSizeEstimate(1, 6),
+			wantV1: FixedSizeEstimate(6),
+		},
+		{
+			// An operand that can legitimately be empty: here 0's floor of 1
+			// overstates the minimum, so the revision moves the bound down rather than up.
+			name:   "operand_can_be_empty",
+			args:   []SizeEstimate{RangedSizeEstimate(0, 4), RangedSizeEstimate(3, 9)},
+			wantV0: RangedSizeEstimate(1, 4),
+			wantV1: RangedSizeEstimate(0, 4),
+		},
+		{
+			// A zero upper bound is the one case the revisions already agreed on.
+			name:   "zero_upper_bound",
+			args:   []SizeEstimate{FixedSizeEstimate(0), RangedSizeEstimate(3, 9)},
+			wantV0: FixedSizeEstimate(0),
+			wantV1: FixedSizeEstimate(0),
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			expr := Min(Arg(0), Arg(1))
+			gotV0 := expr.estimate(&testEvalContext{args: tc.args, version: &v0})
+			if !reflect.DeepEqual(gotV0, tc.wantV0) {
+				t.Errorf("Min().estimate() at 0 got %v, wanted %v", gotV0, tc.wantV0)
+			}
+			gotV1 := expr.estimate(&testEvalContext{args: tc.args})
+			if !reflect.DeepEqual(gotV1, tc.wantV1) {
+				t.Errorf("Min().estimate() at the latest revision got %v, wanted %v", gotV1, tc.wantV1)
+			}
+		})
+	}
 }
 
 func TestQuantityExprs_Estimate(t *testing.T) {
@@ -247,7 +318,7 @@ func TestQuantityExprs_Estimate(t *testing.T) {
 		{
 			name:     "min_quantity",
 			expr:     Min(Arg(0), Arg(1)),
-			expected: SizeEstimate{Min: 1, Max: 5},
+			expected: RangedSizeEstimate(2, 5),
 		},
 		{
 			name:     "max_quantity",
@@ -258,11 +329,6 @@ func TestQuantityExprs_Estimate(t *testing.T) {
 			name:     "union_quantity",
 			expr:     Union(Arg(0), Arg(1)),
 			expected: arg0.Union(arg1),
-		},
-		{
-			name:     "intersect_quantity",
-			expr:     Intersect(Arg(0), Arg(1)),
-			expected: RangedSizeEstimate(3, 5),
 		},
 		{
 			name:     "ranged_string_to_bytes",
@@ -471,8 +537,6 @@ func TestModel_HasTargetInspection(t *testing.T) {
 		{name: "max_without_target", expr: Max(Arg(0), Arg(1)), wantTarget: false},
 		{name: "union_with_target", expr: Union(Arg(0), Target()), wantTarget: true},
 		{name: "union_without_target", expr: Union(Arg(0), Arg(1)), wantTarget: false},
-		{name: "intersect_with_target", expr: Intersect(Target(), Arg(0)), wantTarget: true},
-		{name: "intersect_without_target", expr: Intersect(Arg(0), Arg(1)), wantTarget: false},
 		{name: "ranged_with_target_lhs", expr: Ranged(Target(), Arg(0)), wantTarget: true},
 		{name: "ranged_with_target_rhs", expr: Ranged(Arg(0), Target()), wantTarget: true},
 		{name: "ranged_without_target", expr: Ranged(Arg(0), Arg(1)), wantTarget: false},
@@ -528,18 +592,6 @@ func TestModel_EmptyAndDisjointExpressions(t *testing.T) {
 			wantEstimate: RangedSizeEstimate(5, 10),
 			wantTrack:    10,
 		},
-		{
-			name:         "empty_intersect",
-			expr:         Intersect(),
-			wantEstimate: FixedSizeEstimate(0),
-			wantTrack:    0,
-		},
-		{
-			name:         "disjoint_intersect",
-			expr:         Intersect(Const(5), Const(10)),
-			wantEstimate: FixedSizeEstimate(0),
-			wantTrack:    5,
-		},
 	}
 
 	for _, tc := range tests {
@@ -591,8 +643,8 @@ func TestModel_MissingContextFallbacks(t *testing.T) {
 			expr:      ArgKey(0),
 			wantTrack: 1,
 			checkEst: func(t *testing.T, sz SizeEstimate) {
-				if sz != FixedSizeEstimate(1) {
-					t.Errorf("got %v, want 1", sz)
+				if sz != UnknownSizeEstimate() {
+					t.Errorf("got %v, want unknown", sz)
 				}
 			},
 		},
@@ -621,8 +673,8 @@ func TestModel_MissingContextFallbacks(t *testing.T) {
 			expr:      TargetKey(),
 			wantTrack: 1,
 			checkEst: func(t *testing.T, sz SizeEstimate) {
-				if sz != FixedSizeEstimate(1) {
-					t.Errorf("got %v, want 1", sz)
+				if sz != UnknownSizeEstimate() {
+					t.Errorf("got %v, want unknown", sz)
 				}
 			},
 		},
@@ -641,8 +693,8 @@ func TestModel_MissingContextFallbacks(t *testing.T) {
 			expr:      KeyOf(Const(5)),
 			wantTrack: 1,
 			checkEst: func(t *testing.T, sz SizeEstimate) {
-				if sz != FixedSizeEstimate(1) {
-					t.Errorf("got %v, want 1", sz)
+				if sz != UnknownSizeEstimate() {
+					t.Errorf("got %v, want unknown", sz)
 				}
 			},
 		},

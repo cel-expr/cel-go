@@ -886,6 +886,27 @@ func CostSizingStrategy(strategy cost.SizingStrategy) EnvOption {
 	}
 }
 
+// CostModelVersion pins cost estimation to a revision of the cost model's rules.
+//
+// The pin applies both to the standard estimators and to any model supplied via CostModel, so an
+// environment reports one consistent set of rules rather than a mixture.
+//
+// Runtime cost tracking is unaffected: a revision changes what an expression is predicted to cost,
+// never what it is charged.
+//
+// Use this only to hold estimates stable against a baseline recorded under an earlier release. Each
+// revision corrects a defect, so an older revision is by construction the less accurate choice; see
+// cost.ModelVersion for the per-revision details.
+func CostModelVersion(version uint32) EnvOption {
+	return func(e *Env) (*Env, error) {
+		if e.costModel == nil {
+			e.costModel = &costModel{}
+		}
+		e.costModel.version = &version
+		return e, nil
+	}
+}
+
 // CostTrackerOptions configures a set of options for cost-tracking.
 //
 // Note, CostTrackerOptions is a no-op unless CostTracking is also enabled.

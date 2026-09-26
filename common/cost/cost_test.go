@@ -19,6 +19,7 @@ import (
 	"math"
 	"math/rand"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -351,6 +352,9 @@ func TestCostEstimate(t *testing.T) {
 			}
 		})
 	}
+	if got := cost.RangedCostEstimate(3, 8); got.Min != 3 || got.Max != 8 {
+		t.Errorf("RangedCostEstimate(3, 8) = %v, want {3, 8}", got)
+	}
 }
 
 func TestExtCostHelpers(t *testing.T) {
@@ -586,10 +590,12 @@ type testCostEstimator struct {
 
 func (tc testCostEstimator) EstimateSize(element cost.AstNode) *cost.SizeEstimate {
 	if l, ok := tc.hints[strings.Join(element.Path(), ".")]; ok {
-		return &cost.SizeEstimate{Min: 0, Max: l}
+		est := cost.RangedSizeEstimate(0, l)
+		return &est
 	}
 	if element.Type() == types.BytesType {
-		return &cost.SizeEstimate{Min: 0, Max: 12}
+		est := cost.RangedSizeEstimate(0, 12)
+		return &est
 	}
 	return nil
 }
@@ -648,9 +654,8 @@ func listElementNode(list cost.AstNode) cost.AstNode {
 			copy(path, nodePath)
 			path[len(nodePath)] = "@items"
 			return cost.NewAstNode(nil, path, lt, nil)
-		} else {
-			return cost.NewAstNode(nil, nil, lt, nil)
 		}
+		return cost.NewAstNode(nil, nil, lt, nil)
 	}
 	return nil
 }
@@ -662,7 +667,7 @@ func estimateSize(estimator cost.Estimator, node cost.AstNode) cost.SizeEstimate
 	if l := estimator.EstimateSize(node); l != nil {
 		return *l
 	}
-	return cost.SizeEstimate{Min: 0, Max: math.MaxUint64}
+	return cost.RangedSizeEstimate(0, math.MaxUint64)
 }
 
 func sizeEstimate(estimator cost.Estimator, t cost.AstNode) cost.SizeEstimate {
@@ -672,7 +677,7 @@ func sizeEstimate(estimator cost.Estimator, t cost.AstNode) cost.SizeEstimate {
 	if sz := estimator.EstimateSize(t); sz != nil {
 		return *sz
 	}
-	return cost.SizeEstimate{Min: 0, Max: math.MaxUint64}
+	return cost.RangedSizeEstimate(0, math.MaxUint64)
 }
 
 func computeCost(t *testing.T, expr string, vars []*decls.VariableDecl, hints map[string]uint64, ctx cel.Activation, options []cost.TrackerOption) (actualCost uint64, est cost.CostEstimate, err error) {
@@ -736,6 +741,7 @@ func TestCostEstimateAndTracking(t *testing.T) {
 		limit              uint64
 		expectExceedsLimit bool
 		wantEst            *cost.CostEstimate
+		wantEstV0          *cost.CostEstimate
 		wantTrack          *uint64
 	}{
 		{
@@ -1067,11 +1073,12 @@ func TestCostEstimateAndTracking(t *testing.T) {
 			wantTrack: trackPtr(51),
 		},
 		{
-			name:    "bytes to string conversion equality",
-			expr:    `string(input) == string(input)`,
-			vars:    []*decls.VariableDecl{decls.NewVariable("input", types.BytesType)},
-			hints:   map[string]uint64{"input": 500},
-			wantEst: estPtr(cost.CostEstimate{Min: 3, Max: 152}),
+			name:      "bytes to string conversion equality",
+			expr:      `string(input) == string(input)`,
+			vars:      []*decls.VariableDecl{decls.NewVariable("input", types.BytesType)},
+			hints:     map[string]uint64{"input": 500},
+			wantEst:   estPtr(cost.CostEstimate{Min: 2, Max: 152}),
+			wantEstV0: estPtr(cost.CostEstimate{Min: 3, Max: 152}),
 		},
 		{
 			name:      "string to bytes conversion",
@@ -1083,11 +1090,12 @@ func TestCostEstimateAndTracking(t *testing.T) {
 			wantTrack: trackPtr(51),
 		},
 		{
-			name:    "string to bytes conversion equality",
-			expr:    `bytes(input) == bytes(input)`,
-			vars:    []*decls.VariableDecl{decls.NewVariable("input", types.StringType)},
-			hints:   map[string]uint64{"input": 500},
-			wantEst: estPtr(cost.CostEstimate{Min: 3, Max: 302}),
+			name:      "string to bytes conversion equality",
+			expr:      `bytes(input) == bytes(input)`,
+			vars:      []*decls.VariableDecl{decls.NewVariable("input", types.StringType)},
+			hints:     map[string]uint64{"input": 500},
+			wantEst:   estPtr(cost.CostEstimate{Min: 2, Max: 302}),
+			wantEstV0: estPtr(cost.CostEstimate{Min: 3, Max: 302}),
 		},
 		{
 			name:      "int to string conversion",
@@ -1368,7 +1376,8 @@ func TestCostEstimateAndTracking(t *testing.T) {
 				decls.NewVariable("timestamp1", types.TimestampType),
 				decls.NewVariable("timestamp2", types.TimestampType),
 			},
-			wantEst: estPtr(cost.CostEstimate{Min: 5, Max: 1844674407370955268}),
+			wantEst:   estPtr(cost.CostEstimate{Min: 4, Max: 1844674407370955268}),
+			wantEstV0: estPtr(cost.CostEstimate{Min: 5, Max: 1844674407370955268}),
 		},
 		{
 			name: "timestamp equality check",
@@ -2038,6 +2047,18 @@ func TestCostEstimateAndTracking(t *testing.T) {
 				if est.Min != tc.wantEst.Min || est.Max != tc.wantEst.Max {
 					t.Errorf("estimated cost got [%d, %d], wanted [%d, %d]", est.Min, est.Max, tc.wantEst.Min, tc.wantEst.Max)
 				}
+				wantLegacy := *tc.wantEst
+				if tc.wantEstV0 != nil {
+					wantLegacy = *tc.wantEstV0
+				}
+				legacyOpts := append(slices.Clone(costOpts), cost.EstimateModelVersion(0))
+				legacyEst, err := cost.Cost(checked.NativeRep(), testCostEstimator{hints: tc.hints}, legacyOpts...)
+				if err != nil {
+					t.Fatalf("Cost(version 0) failed: %v", err)
+				}
+				if legacyEst.Min != wantLegacy.Min || legacyEst.Max != wantLegacy.Max {
+					t.Errorf("version 0 estimated cost got [%d, %d], wanted [%d, %d]", legacyEst.Min, legacyEst.Max, wantLegacy.Min, wantLegacy.Max)
+				}
 			}
 
 			if tc.wantTrack != nil || tc.in != nil || tc.expectExceedsLimit {
@@ -2083,10 +2104,10 @@ type testCustomSizingStrategy struct{}
 
 func (testCustomSizingStrategy) EstimateSize(ctx cost.EstimateContext, node cost.AstNode) (cost.SizeEstimate, bool) {
 	if node.Path() != nil && len(node.Path()) > 0 && node.Path()[0] == "custom_str" {
-		return cost.SizeEstimate{Min: 10, Max: 20}, true
+		return cost.RangedSizeEstimate(10, 20), true
 	}
 	if node.Path() != nil && len(node.Path()) > 0 && node.Path()[0] == "custom_list" {
-		return cost.SizeEstimate{Min: 1, Max: 5, Elem: &cost.SizeEstimate{Min: 15, Max: 30}}, true
+		return cost.ListSizeEstimate(cost.RangedSizeEstimate(1, 5), cost.RangedSizeEstimate(15, 30)), true
 	}
 	return cost.SizeEstimate{}, false
 }

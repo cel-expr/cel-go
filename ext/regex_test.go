@@ -281,12 +281,15 @@ func TestRegexCosts(t *testing.T) {
 		in            map[string]any
 		hints         map[string]uint64
 		estimatedCost cost.CostEstimate
-		actualCost    uint64
+		// estimatedCostV0 is the estimate under cost.0, set only where the revision moved it.
+		estimatedCostV0 *cost.CostEstimate
+		actualCost      uint64
 	}{
 		{
-			expr:          `regex.extract('hello world', 'hello (.*)') == optional.of('world')`,
-			estimatedCost: cost.CostEstimate{Min: 8, Max: 20},
-			actualCost:    8,
+			expr:            `regex.extract('hello world', 'hello (.*)') == optional.of('world')`,
+			estimatedCost:   cost.RangedCostEstimate(7, 20),
+			estimatedCostV0: costV0(8, 20),
+			actualCost:      8,
 		},
 		// - Estimated Cost (Min: 5): Derived from fixed costs of scanning 10-char
 		//   target string and compiling 2-char regex. Since the inputs are constant,
@@ -295,26 +298,29 @@ func TestRegexCosts(t *testing.T) {
 		//   search cost, and the allocation cost for the 2-char result string '22'.
 		//   It aligns perfectly with the minimum estimate.
 		{
-			expr:          "regex.extract('4122345432', '22').orValue('777') == '22'",
-			estimatedCost: cost.CostEstimate{Min: 4, Max: 14},
-			actualCost:    4,
+			expr:            "regex.extract('4122345432', '22').orValue('777') == '22'",
+			estimatedCost:   cost.RangedCostEstimate(2, 13),
+			estimatedCostV0: costV0(3, 13),
+			actualCost:      4,
 		},
 		// .or() condition introduces runtime uncertainty, and since the cost estimator
 		// can't know which branch the code will take, it must prepare for the most
 		// expensive possible outcome resulting in an estimate.Max of ~ math.MaxUint64.
 		{
-			expr:          "regex.extract('4122345432', '22').or(optional.of('777')) == optional.of('22')",
-			estimatedCost: cost.CostEstimate{Min: 6, Max: 1844674407370955279},
-			actualCost:    5,
+			expr:            "regex.extract('4122345432', '22').or(optional.of('777')) == optional.of('22')",
+			estimatedCost:   cost.RangedCostEstimate(3, 1844674407370955278),
+			estimatedCostV0: costV0(4, 1844674407370955278),
+			actualCost:      5,
 		},
 		{
-			expr:          "regex.extract('hello world', 'goodbye (.*)') == optional.none()",
-			estimatedCost: cost.CostEstimate{Min: 10, Max: 22},
-			actualCost:    8,
+			expr:            "regex.extract('hello world', 'goodbye (.*)') == optional.none()",
+			estimatedCost:   cost.RangedCostEstimate(9, 22),
+			estimatedCostV0: costV0(10, 22),
+			actualCost:      8,
 		},
 		{
 			expr:          "regex.extractAll('id:123, id:456', 'assa') == []",
-			estimatedCost: cost.CostEstimate{Min: 24, Max: 38},
+			estimatedCost: cost.RangedCostEstimate(24, 38),
 			actualCost:    23,
 		},
 		// - Estimated Cost (Min: 25): Cost to scan the 14-char target and compile
@@ -324,38 +330,42 @@ func TestRegexCosts(t *testing.T) {
 		//   allocation cost, which is the base list creation cost plus the cost of
 		//   allocating the two result strings, totaling 12 chars of content.
 		{
-			expr:          `regex.extractAll('id:123, id:456', r'id:\d+') == ['id:123', 'id:456']`,
-			estimatedCost: cost.CostEstimate{Min: 25, Max: 39},
-			actualCost:    27,
+			expr:            `regex.extractAll('id:123, id:456', r'id:\d+') == ['id:123', 'id:456']`,
+			estimatedCost:   cost.RangedCostEstimate(24, 39),
+			estimatedCostV0: costV0(25, 39),
+			actualCost:      27,
 		},
 		{
-			expr:          `regex.extractAll('a b c', r'(\S*)\s*') == ['a', 'b', 'c']`,
-			estimatedCost: cost.CostEstimate{Min: 24, Max: 29},
-			actualCost:    27,
+			expr:            `regex.extractAll('a b c', r'(\S*)\s*') == ['a', 'b', 'c']`,
+			estimatedCost:   cost.RangedCostEstimate(23, 29),
+			estimatedCostV0: costV0(24, 29),
+			actualCost:      27,
 		},
 		{
-			expr:          `regex.extractAll('testuser@gmail.com, a@y.com, 2312321wsamkldjq2w2@sdad.com', r'(?P<username>\w+)@') == ['testuser', 'a', '2312321wsamkldjq2w2']`,
-			estimatedCost: cost.CostEstimate{Min: 51, Max: 108},
-			actualCost:    53,
+			expr:            `regex.extractAll('testuser@gmail.com, a@y.com, 2312321wsamkldjq2w2@sdad.com', r'(?P<username>\w+)@') == ['testuser', 'a', '2312321wsamkldjq2w2']`,
+			estimatedCost:   cost.RangedCostEstimate(50, 108),
+			estimatedCostV0: costV0(51, 108),
+			actualCost:      53,
 		},
 		{
-			expr:          "regex.replace('hello world hello', 'hello', 'hi') == 'hi world hi'",
-			estimatedCost: cost.CostEstimate{Min: 22, Max: 40},
-			actualCost:    16,
+			expr:            "regex.replace('hello world hello', 'hello', 'hi') == 'hi world hi'",
+			estimatedCost:   cost.RangedCostEstimate(23, 40),
+			estimatedCostV0: costV0(22, 40),
+			actualCost:      16,
 		},
 		{
 			expr:          `regex.replace('ac', 'a(b)?c', r'[\1]') == '[]'`,
-			estimatedCost: cost.CostEstimate{Min: 5, Max: 11},
+			estimatedCost: cost.RangedCostEstimate(5, 11),
 			actualCost:    4,
 		},
 		{
 			expr:          "regex.replace('apple pie', 'p', 'X') == 'aXXle Xie'",
-			estimatedCost: cost.CostEstimate{Min: 11, Max: 11},
+			estimatedCost: cost.FixedCostEstimate(11),
 			actualCost:    11,
 		},
 		{
 			expr:          "regex.replace('aaaaaa', 'a', '-what-') == '-what--what--what--what--what--what-'",
-			estimatedCost: cost.CostEstimate{Min: 8, Max: 41},
+			estimatedCost: cost.RangedCostEstimate(8, 41),
 			actualCost:    41,
 		},
 		// --- Constant Cost Cases ---
@@ -368,27 +378,27 @@ func TestRegexCosts(t *testing.T) {
 		//  string for all matches, so the dominant cost is constant.
 		{
 			expr:          "regex.replace('banana', 'a', 'x', 0) == 'banana'",
-			estimatedCost: cost.CostEstimate{Min: 8, Max: 8},
+			estimatedCost: cost.FixedCostEstimate(8),
 			actualCost:    8,
 		},
 		{
 			expr:          "regex.replace('banana', 'a', 'x', 1) == 'bxnana'",
-			estimatedCost: cost.CostEstimate{Min: 8, Max: 8},
+			estimatedCost: cost.FixedCostEstimate(8),
 			actualCost:    8,
 		},
 		{
 			expr:          "regex.replace('banana', 'a', 'x', 100) == 'bxnxnx'",
-			estimatedCost: cost.CostEstimate{Min: 8, Max: 8},
+			estimatedCost: cost.FixedCostEstimate(8),
 			actualCost:    8,
 		},
 		{
 			expr:          `regex.replace('foo bar', r'(foo bar)', r'\1\1\1\1\1' ) == 'foo barfoo barfoo barfoo barfoo bar'`,
-			estimatedCost: cost.CostEstimate{Min: 11, Max: 77},
+			estimatedCost: cost.RangedCostEstimate(11, 77),
 			actualCost:    42,
 		},
 		{
 			expr:          `regex.replace('foo bar', r'(foo bar)', '') == ''`,
-			estimatedCost: cost.CostEstimate{Min: 3, Max: 10},
+			estimatedCost: cost.RangedCostEstimate(3, 10),
 			actualCost:    3,
 		},
 	}
@@ -407,7 +417,7 @@ func TestRegexCosts(t *testing.T) {
 				t.Fatalf("Check(%s) failed: %v", tc.expr, iss.Err())
 			}
 
-			testCheckCost(t, env, cAst, tc.hints, tc.estimatedCost)
+			testCheckCost(t, env, cAst, tc.hints, tc.estimatedCost, tc.estimatedCostV0)
 			asts = append(asts, cAst)
 			for _, ast := range asts {
 				testEvalWithCost(t, env, ast, tc.in, tc.actualCost)

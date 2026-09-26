@@ -56,6 +56,13 @@ var StandardOverloadModels = []OverloadModel{
 	// O(n) containment
 	Overload(overloads.InList, EvalCost(Arg(1))),
 
+	// Short-circuiting optional selection. The planner rewrites these calls into a branch which
+	// evaluates the alternative only when the receiver is empty, and which is not charged at
+	// runtime, so the model reports no cost for the dispatch itself. The alternative's cost is
+	// bounded by calculateArgCost.
+	MemberOverload(overloads.OptionalOrOptional, EvalCost(Const(0))),
+	MemberOverload(overloads.OptionalOrValueValue, EvalCost(Const(0))),
+
 	// O(min(m, n)) comparison / equality
 	Overload(overloads.LessString,
 		EvalCost(Scale(Min(Arg(0), Arg(1)), StringTraversalCostFactor)),
@@ -142,34 +149,30 @@ var StandardOverloadModels = []OverloadModel{
 
 // StandardOverloadEstimators returns the map of FunctionEstimator instances for standard overloads.
 func StandardOverloadEstimators() map[string]FunctionEstimator {
-	return StandardOverloadEstimatorsWithOptions(DefaultSizingStrategy())
+	return StandardOverloadEstimatorsWithOptions()
 }
 
-// StandardOverloadEstimatorsWithOptions returns the map of FunctionEstimator instances for standard overloads with an optional SizingStrategy.
-func StandardOverloadEstimatorsWithOptions(strategy SizingStrategy) map[string]FunctionEstimator {
-	if strategy == nil {
-		strategy = DefaultSizingStrategy()
-	}
+// StandardOverloadEstimatorsWithOptions returns the map of FunctionEstimator instances for standard
+// overloads, configured by the supplied options.
+func StandardOverloadEstimatorsWithOptions(opts ...ModelOption) map[string]FunctionEstimator {
 	estimators := make(map[string]FunctionEstimator, len(StandardOverloadModels))
 	for _, m := range StandardOverloadModels {
-		estimators[m.ID] = m.FunctionEstimatorWithOptions(strategy)
+		estimators[m.ID] = m.FunctionEstimatorWithOptions(opts...)
 	}
 	return estimators
 }
 
 // StandardOverloadTrackers returns the map of FunctionTracker instances for standard overloads.
 func StandardOverloadTrackers() map[string]FunctionTracker {
-	return StandardOverloadTrackersWithOptions(DefaultSizingStrategy())
+	return StandardOverloadTrackersWithOptions()
 }
 
-// StandardOverloadTrackersWithOptions returns the map of FunctionTracker instances for standard overloads with an optional SizingStrategy.
-func StandardOverloadTrackersWithOptions(strategy SizingStrategy) map[string]FunctionTracker {
-	if strategy == nil {
-		strategy = DefaultSizingStrategy()
-	}
+// StandardOverloadTrackersWithOptions returns the map of FunctionTracker instances for standard
+// overloads, configured by the supplied options.
+func StandardOverloadTrackersWithOptions(opts ...ModelOption) map[string]FunctionTracker {
 	trackers := make(map[string]FunctionTracker, len(StandardOverloadModels))
 	for _, m := range StandardOverloadModels {
-		trackers[m.ID] = m.FunctionTrackerWithOptions(strategy)
+		trackers[m.ID] = m.FunctionTrackerWithOptions(opts...)
 	}
 	return trackers
 }

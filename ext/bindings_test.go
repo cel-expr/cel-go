@@ -40,30 +40,35 @@ var bindingTests = []struct {
 	in            map[string]any
 	hints         map[string]uint64
 	estimatedCost cost.CostEstimate
-	actualCost    uint64
+	// estimatedCostV0 is the estimate under cost.ModelVersion0, set only where the revision moved it.
+	estimatedCostV0 *cost.CostEstimate
+	actualCost      uint64
 }{
 	{
 		name: "single bind",
 		expr: `cel.bind(a, 'hell' + 'o' + '!', "%s, %s, %s".format([a, a, a])) ==
 	                       'hello!, hello!, hello' + '!'`,
-		estimatedCost: cost.CostEstimate{Min: 30, Max: 32},
-		actualCost:    32,
+		estimatedCost:   cost.RangedCostEstimate(29, 32),
+		estimatedCostV0: costV0(30, 32),
+		actualCost:      32,
 	},
 	{
 		name: "multiple binds",
 		expr: `cel.bind(a, 'hello!',
 		       cel.bind(b, 'goodbye',
 				a + ' and, ' + b)) == 'hello! and, goodbye'`,
-		estimatedCost: cost.CostEstimate{Min: 27, Max: 28},
-		actualCost:    28,
+		estimatedCost:   cost.FixedCostEstimate(28),
+		estimatedCostV0: costV0(27, 28),
+		actualCost:      28,
 	},
 	{
 		name: "shadow binds",
 		expr: `cel.bind(a,
 		       cel.bind(a, 'world', a + '!'),
 		   	    'hello ' + a) == 'hello ' + 'world' + '!'`,
-		estimatedCost: cost.CostEstimate{Min: 30, Max: 31},
-		actualCost:    31,
+		estimatedCost:   cost.FixedCostEstimate(31),
+		estimatedCostV0: costV0(30, 31),
+		actualCost:      31,
 	},
 	{
 		name: "nested bind with int list",
@@ -77,7 +82,7 @@ var bindingTests = []struct {
 		hints: map[string]uint64{
 			"x": 3,
 		},
-		estimatedCost: cost.CostEstimate{Min: 39, Max: 39},
+		estimatedCost: cost.FixedCostEstimate(39),
 		actualCost:    39,
 	},
 	{
@@ -93,8 +98,9 @@ var bindingTests = []struct {
 			"x":        3,
 			"x.@items": 10,
 		},
-		estimatedCost: cost.CostEstimate{Min: 38, Max: 40},
-		actualCost:    39,
+		estimatedCost:   cost.RangedCostEstimate(37, 40),
+		estimatedCostV0: costV0(38, 40),
+		actualCost:      39,
 	},
 	{
 		name: "shadowed binding",
@@ -183,7 +189,7 @@ func TestBindings(t *testing.T) {
 			if iss.Err() != nil {
 				t.Fatalf("env.Check(%v) failed: %v", tc.expr, iss.Err())
 			}
-			testCheckCost(t, env, cAst, tc.hints, tc.estimatedCost)
+			testCheckCost(t, env, cAst, tc.hints, tc.estimatedCost, tc.estimatedCostV0)
 			asts = append(asts, cAst)
 			for _, ast := range asts {
 				testEvalWithCost(t, env, ast, tc.in, tc.actualCost)

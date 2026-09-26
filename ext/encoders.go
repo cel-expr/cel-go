@@ -490,11 +490,22 @@ func trackEncode(args []ref.Val, _ ref.Val) *uint64 {
 	return &total
 }
 
+// trackJSONEncode charges the maximum possible cost.
+//
+// This is deliberate, not an unfinished estimate. Encoding walks a value of unbounded shape, and no
+// cheaper bound has been established that is safe to charge, so the call is priced at the maximum.
+// The practical consequence is that json.encode cannot be used under a cost limit.
+//
+// estimateJSONEncode reports UnknownCostEstimate to match; the estimate and the charge agree.
 func trackJSONEncode(args []ref.Val, _ ref.Val) *uint64 {
 	maxCost := uint64(math.MaxUint64)
 	return &maxCost
 }
 
+// trackJSONParse charges the maximum possible cost.
+//
+// Deliberate, for the same reason as trackJSONEncode: parsing produces a value whose size and shape
+// are not known from the input alone. json.parse likewise cannot be used under a cost limit.
 func trackJSONParse(args []ref.Val, _ ref.Val) *uint64 {
 	maxCost := uint64(math.MaxUint64)
 	return &maxCost

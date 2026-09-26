@@ -132,7 +132,8 @@ func NewTracker(estimator ActualCostEstimator, opts ...TrackerOption) (*Tracker,
 		tracker.sizingStrategy = DefaultSizingStrategy()
 	}
 	if tracker.sizingStrategy != defaultSizing {
-		tracker.sizingOverloadTrackers = StandardOverloadTrackersWithOptions(tracker.sizingStrategy)
+		tracker.sizingOverloadTrackers = StandardOverloadTrackersWithOptions(
+			WithSizingStrategy(tracker.sizingStrategy))
 	}
 	return tracker, nil
 }

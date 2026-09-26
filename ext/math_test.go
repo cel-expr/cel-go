@@ -696,8 +696,10 @@ func TestMathCosts(t *testing.T) {
 		in            map[string]any
 		hints         map[string]uint64
 		estimatedCost cost.CostEstimate
-		actualCost    uint64
-		version       int
+		// estimatedCostV0 is the estimate under cost.ModelVersion0, set only where the revision moved it.
+		estimatedCostV0 *cost.CostEstimate
+		actualCost      uint64
+		version         int
 	}{
 		{
 			name: "math_greatest_list_v2",
@@ -711,7 +713,7 @@ func TestMathCosts(t *testing.T) {
 			hints: map[string]uint64{
 				"x": 10,
 			},
-			estimatedCost: cost.CostEstimate{Min: 3, Max: 3},
+			estimatedCost: cost.FixedCostEstimate(3),
 			actualCost:    3,
 			version:       2,
 		},
@@ -727,7 +729,7 @@ func TestMathCosts(t *testing.T) {
 			hints: map[string]uint64{
 				"x": 10,
 			},
-			estimatedCost: cost.CostEstimate{Min: 3, Max: 13},
+			estimatedCost: cost.RangedCostEstimate(3, 13),
 			actualCost:    8,
 			version:       3,
 		},
@@ -743,7 +745,7 @@ func TestMathCosts(t *testing.T) {
 			hints: map[string]uint64{
 				"x": 100,
 			},
-			estimatedCost: cost.CostEstimate{Min: 3, Max: 3},
+			estimatedCost: cost.FixedCostEstimate(3),
 			actualCost:    3,
 			version:       2,
 		},
@@ -759,7 +761,7 @@ func TestMathCosts(t *testing.T) {
 			hints: map[string]uint64{
 				"x": 100,
 			},
-			estimatedCost: cost.CostEstimate{Min: 3, Max: 103},
+			estimatedCost: cost.RangedCostEstimate(3, 103),
 			actualCost:    6,
 			version:       3,
 		},
@@ -777,7 +779,7 @@ func TestMathCosts(t *testing.T) {
 			if iss.Err() != nil {
 				t.Fatalf("env.Check(%v) failed: %v", tc.expr, iss.Err())
 			}
-			testCheckCost(t, env, cAst, tc.hints, tc.estimatedCost)
+			testCheckCost(t, env, cAst, tc.hints, tc.estimatedCost, tc.estimatedCostV0)
 			asts = append(asts, cAst)
 			for _, ast := range asts {
 				testEvalWithCost(t, env, ast, tc.in, tc.actualCost)

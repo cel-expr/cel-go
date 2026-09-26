@@ -88,6 +88,15 @@ type QuantityExpr interface {
 	track(ctx TrackContext) uint64
 }
 
+// ModelVersionOf reports the cost model version the given Estimator is configured with, or
+// math.MaxUint32 if the estimator does not carry version metadata.
+func ModelVersionOf(estimator Estimator) uint32 {
+	if v, ok := estimator.(interface{ modelVersion() uint32 }); ok {
+		return v.modelVersion()
+	}
+	return defaultModelVersion
+}
+
 // targetInspector is an internal interface for expressions that inspect receiver/target presence.
 type targetInspector interface {
 	hasTarget() bool
@@ -267,7 +276,9 @@ func (k keyExpr) estimate(ctx EstimateContext) SizeEstimate {
 	if sz.Key != nil {
 		return *sz.Key
 	}
-	return FixedSizeEstimate(1)
+	// An absent key size is unknown rather than single-byte: map keys may be strings or bytes of
+	// any length. Strategies which know the key type is fixed-width populate Key themselves.
+	return UnknownSizeEstimate()
 }
 
 func (k keyExpr) track(ctx TrackContext) uint64 {
@@ -509,12 +520,17 @@ type minExpr struct {
 func (m minExpr) estimate(ctx EstimateContext) SizeEstimate {
 	lhsVal := m.lhs.estimate(ctx)
 	rhsVal := m.rhs.estimate(ctx)
-	minVal := uint64(0)
 	smallestMax := min(lhsVal.Max, rhsVal.Max)
-	if smallestMax > 0 {
-		minVal = 1
+	if contextModelVersion(ctx) < 1 {
+		// 0 reported a floor of 1 for any non-empty interval, ignoring the operands'
+		// own lower bounds. Retained verbatim so pinned callers see their recorded estimates.
+		minVal := uint64(0)
+		if smallestMax > 0 {
+			minVal = 1
+		}
+		return RangedSizeEstimate(minVal, smallestMax)
 	}
-	return RangedSizeEstimate(minVal, smallestMax)
+	return RangedSizeEstimate(min(lhsVal.Min, rhsVal.Min), smallestMax)
 }
 
 func (m minExpr) track(ctx TrackContext) uint64 {
@@ -588,48 +604,6 @@ func (u unionExpr) hasTarget() bool {
 // Union creates an expression representing the union interval of multiple expressions.
 func Union(terms ...QuantityExpr) QuantityExpr {
 	return unionExpr{terms: terms}
-}
-
-// intersectExpr represents the intersection interval of multiple quantity expressions.
-type intersectExpr struct {
-	terms []QuantityExpr
-}
-
-func (in intersectExpr) estimate(ctx EstimateContext) SizeEstimate {
-	if len(in.terms) == 0 {
-		return FixedSizeEstimate(0)
-	}
-	res := in.terms[0].estimate(ctx)
-	for _, term := range in.terms[1:] {
-		other := term.estimate(ctx)
-		minVal := max(res.Min, other.Min)
-		maxVal := min(res.Max, other.Max)
-		if minVal > maxVal {
-			return FixedSizeEstimate(0)
-		}
-		res = SizeEstimate{Min: minVal, Max: maxVal}
-	}
-	return res
-}
-
-func (in intersectExpr) track(ctx TrackContext) uint64 {
-	if len(in.terms) == 0 {
-		return 0
-	}
-	res := in.terms[0].track(ctx)
-	for _, term := range in.terms[1:] {
-		res = min(res, term.track(ctx))
-	}
-	return res
-}
-
-func (in intersectExpr) hasTarget() bool {
-	return slices.ContainsFunc(in.terms, hasTarget)
-}
-
-// Intersect creates an expression representing the intersection interval of multiple expressions.
-func Intersect(terms ...QuantityExpr) QuantityExpr {
-	return intersectExpr{terms: terms}
 }
 
 // rangedExpr represents a quantity bounded by minExpr on the bottom and maxExpr on top.
@@ -813,14 +787,14 @@ func (m OverloadModel) hasTarget() bool {
 
 // FunctionEstimator returns a FunctionEstimator implementing the cost model.
 func (m OverloadModel) FunctionEstimator() FunctionEstimator {
-	return m.FunctionEstimatorWithOptions(DefaultSizingStrategy())
+	return m.FunctionEstimatorWithOptions()
 }
 
-// FunctionEstimatorWithOptions returns a FunctionEstimator implementing the cost model with an optional SizingStrategy.
-func (m OverloadModel) FunctionEstimatorWithOptions(strategy SizingStrategy) FunctionEstimator {
-	if strategy == nil {
-		strategy = DefaultSizingStrategy()
-	}
+// FunctionEstimatorWithOptions returns a FunctionEstimator implementing the cost model, configured
+// by the supplied options. Unset options take their defaults: the default SizingStrategy and the
+// latest model revision.
+func (m OverloadModel) FunctionEstimatorWithOptions(opts ...ModelOption) FunctionEstimator {
+	resolved := newModelOptions(opts...)
 	hasTarget := m.hasTarget()
 	return func(estimator Estimator, target *AstNode, args []AstNode) *CallEstimate {
 		if hasTarget && target == nil {
@@ -828,7 +802,8 @@ func (m OverloadModel) FunctionEstimatorWithOptions(strategy SizingStrategy) Fun
 		}
 		ctx := &estimatorEvalContext{
 			estimator: estimator,
-			strategy:  strategy,
+			strategy:  resolved.strategy,
+			version:   resolved.version,
 			target:    target,
 			args:      args,
 			hasTarget: hasTarget,
@@ -845,18 +820,20 @@ func (m OverloadModel) FunctionEstimatorWithOptions(strategy SizingStrategy) Fun
 
 // FunctionTracker returns a FunctionTracker implementing the cost model.
 func (m OverloadModel) FunctionTracker() FunctionTracker {
-	return m.FunctionTrackerWithOptions(DefaultSizingStrategy())
+	return m.FunctionTrackerWithOptions()
 }
 
-// FunctionTrackerWithOptions returns a FunctionTracker implementing the cost model with an optional SizingStrategy.
-func (m OverloadModel) FunctionTrackerWithOptions(strategy SizingStrategy) FunctionTracker {
-	if strategy == nil {
-		strategy = DefaultSizingStrategy()
-	}
+// FunctionTrackerWithOptions returns a FunctionTracker implementing the cost model, configured by
+// the supplied options.
+//
+// ModelVersion is accepted for symmetry with FunctionEstimatorWithOptions but has no effect:
+// revisions correct estimation only, never the cost charged at runtime.
+func (m OverloadModel) FunctionTrackerWithOptions(opts ...ModelOption) FunctionTracker {
+	resolved := newModelOptions(opts...)
 	isMember := m.hasTarget()
 	return func(args []ref.Val, result ref.Val) *uint64 {
 		ctx := &trackerEvalContext{
-			strategy: strategy,
+			strategy: resolved.strategy,
 			args:     args,
 			result:   result,
 			isMember: isMember,
@@ -868,11 +845,18 @@ func (m OverloadModel) FunctionTrackerWithOptions(strategy SizingStrategy) Funct
 
 // estimatorEvalContext provides evaluation context for cost estimation.
 type estimatorEvalContext struct {
+	coster    *coster
 	estimator Estimator
 	strategy  SizingStrategy
+	version   uint32
 	target    *AstNode
 	args      []AstNode
 	hasTarget bool
+}
+
+// modelVersion implements versionedEstimateContext.
+func (e *estimatorEvalContext) modelVersion() uint32 {
+	return e.version
 }
 
 // Arg returns the size estimate for the argument at index.
@@ -908,6 +892,11 @@ func (e *estimatorEvalContext) Size(node AstNode) SizeEstimate {
 	}
 	if sz := node.ComputedSize(); sz != nil {
 		return *sz
+	}
+	if e.coster != nil && node.Expr() != nil {
+		if sz := e.coster.computeSize(node.Expr()); sz != nil {
+			return *sz
+		}
 	}
 	if e.strategy != nil {
 		if sz, ok := e.strategy.EstimateSize(e, node); ok {

@@ -166,6 +166,13 @@ const (
 	ExtFormatString = "string_format"
 )
 
+// Optional function overloads which short-circuit, and so need to be referenced in cost
+// computations.
+const (
+	OptionalOrOptional   = "optional_or_optional"
+	OptionalOrValueValue = "optional_orValue_value"
+)
+
 // Time-based functions.
 const (
 	TimeGetFullYear     = "getFullYear"

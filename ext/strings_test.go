@@ -855,7 +855,9 @@ func TestStringCostTracking(t *testing.T) {
 		name          string
 		expr          string
 		estimatedCost cost.CostEstimate
-		actualCost    uint64
+		// estimatedCostV0 is the estimate under cost.0, set only where the revision moved it.
+		estimatedCostV0 *cost.CostEstimate
+		actualCost      uint64
 	}{
 		{
 			name:          "charAt",
@@ -890,19 +892,19 @@ func TestStringCostTracking(t *testing.T) {
 		{
 			name:          "replace",
 			expr:          `"hello world".replace("world", "CEL")`,
-			estimatedCost: cost.CostEstimate{Min: 11, Max: 55},
+			estimatedCost: cost.RangedCostEstimate(11, 55),
 			actualCost:    16,
 		},
 		{
 			name:          "replace_exponential_growth",
 			expr:          `"A".replace("", "AAAAAAAAAA").replace("", "AAAAAAAAAA")`,
-			estimatedCost: cost.CostEstimate{Min: 6, Max: 281},
+			estimatedCost: cost.RangedCostEstimate(6, 281),
 			actualCost:    268,
 		},
 		{
 			name:          "split",
 			expr:          `"a,b,c,d,e".split(",")`,
-			estimatedCost: cost.CostEstimate{Min: 12, Max: 21},
+			estimatedCost: cost.RangedCostEstimate(12, 21),
 			actualCost:    17,
 		},
 		{
@@ -914,13 +916,13 @@ func TestStringCostTracking(t *testing.T) {
 		{
 			name:          "join",
 			expr:          `["a", "b", "c", "d", "e"].join("-")`,
-			estimatedCost: cost.CostEstimate{Min: 12, Max: 23},
+			estimatedCost: cost.RangedCostEstimate(12, 23),
 			actualCost:    21,
 		},
 		{
 			name:          "trim",
 			expr:          `"  hello  ".trim()`,
-			estimatedCost: cost.CostEstimate{Min: 2, Max: 11},
+			estimatedCost: cost.RangedCostEstimate(2, 11),
 			actualCost:    7,
 		},
 		{
@@ -942,7 +944,7 @@ func TestStringCostTracking(t *testing.T) {
 			if iss.Err() != nil {
 				t.Fatalf("env.Compile(%q) failed: %v", tc.expr, iss.Err())
 			}
-			testCheckCost(t, env, ast, nil, tc.estimatedCost)
+			testCheckCost(t, env, ast, nil, tc.estimatedCost, tc.estimatedCostV0)
 			prg, err := env.Program(ast, cel.CostTracking(nil))
 			if err != nil {
 				t.Fatalf("env.Program() failed: %v", err)
