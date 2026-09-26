@@ -245,6 +245,20 @@ func (p *Registry) ensureMutable() {
 		p.revTypeMap = maps.Clone(p.revTypeMap)
 		p.structTypes = maps.Clone(p.structTypes)
 		p.reflectTypes = maps.Clone(p.reflectTypes)
+		for k, st := range p.structTypes {
+			if nt, isNative := st.(*NativeType); isNative {
+				cloned, _ := nt.Clone(NativeTypeAdapter(p))
+				p.structTypes[k] = cloned
+				if rt := cloned.ReflectType(); rt != nil {
+					p.reflectTypes[rt] = cloned
+					if rt.Kind() == reflect.Ptr {
+						p.reflectTypes[rt.Elem()] = cloned
+					} else {
+						p.reflectTypes[reflect.PointerTo(rt)] = cloned
+					}
+				}
+			}
+		}
 		p.pbdb = p.pbdb.Copy()
 		p.shared.Store(false)
 	}
@@ -520,6 +534,14 @@ func (p *Registry) RegisterType(types ...ref.Type) error {
 		p.revTypeMap[typeName] = celType
 		if st, ok := t.(StructTypeDescriptor); ok {
 			// Conflicts are gated above so if we see a struct here, it's safe to register.
+			if nt, isNative := t.(*NativeType); isNative {
+				cloned, err := nt.Clone(NativeTypeAdapter(p))
+				if err != nil {
+					return err
+				}
+				t = cloned
+				st = cloned
+			}
 			p.structTypes[typeName] = st
 			if rt := st.ReflectType(); rt != nil {
 				p.reflectTypes[rt] = st
@@ -537,6 +559,8 @@ func (p *Registry) RegisterType(types ...ref.Type) error {
 // RegisterNativeType creates nativeType instances for the given reflect.Type and registers them.
 func (p *Registry) RegisterNativeType(refType reflect.Type, opts ...NativeTypeOption) error {
 	nativeOpts := p.nativeOptions
+	// Note: consider cloning NativeType instances so that the registry may be reset if the type is copied to another registry.
+	nativeOpts.adapter = p
 	for _, opt := range opts {
 		if err := opt(&nativeOpts); err != nil {
 			return err
