@@ -281,13 +281,13 @@ func TestRegexCosts(t *testing.T) {
 		in            map[string]any
 		hints         map[string]uint64
 		estimatedCost cost.CostEstimate
-		// estimatedCostV0 is the estimate under cost.0, set only where the revision moved it.
+		// estimatedCostV0 is the estimate under 0, set only where the revision moved it.
 		estimatedCostV0 *cost.CostEstimate
 		actualCost      uint64
 	}{
 		{
 			expr:            `regex.extract('hello world', 'hello (.*)') == optional.of('world')`,
-			estimatedCost:   cost.RangedCostEstimate(7, 20),
+			estimatedCost:   cost.RangedCostEstimate(7, 19),
 			estimatedCostV0: costV0(8, 20),
 			actualCost:      8,
 		},
@@ -303,12 +303,12 @@ func TestRegexCosts(t *testing.T) {
 			estimatedCostV0: costV0(3, 13),
 			actualCost:      4,
 		},
-		// .or() condition introduces runtime uncertainty, and since the cost estimator
-		// can't know which branch the code will take, it must prepare for the most
-		// expensive possible outcome resulting in an estimate.Max of ~ math.MaxUint64.
+		// The .or() picks one of two optionals, and from ModelVersion1 the model reports the
+		// union of their sizes, so the comparison below it is bounded by the longer of the two.
+		// Before the revision the optional carried no size at all and the estimate saturated.
 		{
 			expr:            "regex.extract('4122345432', '22').or(optional.of('777')) == optional.of('22')",
-			estimatedCost:   cost.RangedCostEstimate(3, 1844674407370955278),
+			estimatedCost:   cost.RangedCostEstimate(3, 15),
 			estimatedCostV0: costV0(4, 1844674407370955278),
 			actualCost:      5,
 		},

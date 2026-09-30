@@ -173,6 +173,23 @@ const (
 	OptionalOrValueValue = "optional_orValue_value"
 )
 
+// Optional function overloads which wrap or unwrap a value, and so need to be referenced in cost
+// computations to carry the wrapped value's size through the optional.
+const (
+	OptionalOf             = "optional_of"
+	OptionalOfNonZeroValue = "optional_ofNonZeroValue"
+	OptionalValue          = "optional_value"
+)
+
+// Optional index overloads, which qualify their operand in the same way as the non-optional index
+// operations and so extend a field path during cost estimation.
+const (
+	OptIndexList         = "list_optindex_optional_int"
+	OptIndexOptionalList = "optional_list_optindex_optional_int"
+	OptIndexMap          = "map_optindex_optional_value"
+	OptIndexOptionalMap  = "optional_map_optindex_optional_value"
+)
+
 // Time-based functions.
 const (
 	TimeGetFullYear     = "getFullYear"

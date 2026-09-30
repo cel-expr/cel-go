@@ -148,6 +148,77 @@ observed:
   and
   [`TrackerSizingStrategy`](https://github.com/cel-expr/cel-go/blob/master/common/cost/tracker.go).
 
+### Model Revisions
+
+Corrections to the model would otherwise silently move numbers that existing
+deployments budget against, so they land behind a revision. A caller holding
+estimates recorded under an earlier release can pin with
+[`cel.CostModelVersion`](https://github.com/cel-expr/cel-go/blob/master/cel/options.go)
+(or [`cost.ModelVersion`](https://github.com/cel-expr/cel-go/blob/master/common/cost/version.go)),
+review the delta, and adopt the correction deliberately. New callers get the
+latest revision by default.
+
+| Version | Corrects |
+|---|---|
+| `0` | The model as released in `v0.32.0`. |
+| `1` | Core `Min()` interval bounds, `optional` size propagation, and extension (`ext/lists`, `ext/strings`, `ext/regex`) cost and result-size bounds. |
+
+Specifically, version `1` corrects:
+* **Core `Min()` (`common/cost`)**: `Min()` computes the exact minimum of its
+  operands' intervals (`min(lhs.Min, rhs.Min)`) rather than clamping non-zero
+  intervals to a floor of $1$.
+* **Optionals (`common/cost`)**: `optional.of`, `optional.ofNonZeroValue`, and
+  `value()` preserve the wrapped value's `SizeEstimate` (including container
+  `Key` and `Elem` metadata); `or` and `orValue` report the union of their
+  branches' sizes; and optional index operators (`_[?_]`) record the same
+  `@items` and `@values` field paths as standard indexing.
+* **Lists (`ext/lists`)**:
+  * `distinct()`, `sort()`, and `sortBy()` align their self-comparison bounds
+    with the runtime tracker's $2.1 \times n^2$ factor (`Max` covers $2.1 \times n^2$
+    when element equality rounds to $1$, and `ListsVersion(3)` truncates `Min`
+    to match the tracker).
+  * `slice()`, `lists.range()`, and `flatten()` widen `Min` to $0$ (or depth $0$
+    for `flatten`) when given non-literal bounds or depths instead of treating
+    unknown arguments as a fixed `math.MaxUint64` minimum.
+  * `ListsVersion(3)` `flatten()` reports the flattened list size as its
+    `ResultSize`, and `estimateItemSize` consults `node.ComputedSize().Elem`
+    before falling back to path hints.
+* **Strings (`ext/strings`)**:
+  * `join()` scales the maximum output string length by the target list's
+    estimated element size (`Elem`) rather than $1$ character per element.
+  * `split()` bounds the resulting list length by $\text{target.Max} + 1$ to
+    account for empty-separator and trailing-separator splits.
+  * `substring()` widens `ResultSize` to $[0, \text{end} - \text{start}]$ when
+    index bounds are not fixed literals.
+  * `replace()` bounds `resultMinSize` using the unpadded replacement minimum so
+    no-match and empty-replacement results do not overestimate `Min`.
+* **Regex (`ext/regex`)**:
+  * `regex.extract()` and `regex.extractAll()` include `CallCost` (and the
+    `Optional` wrapper's unit `ActualSize` for `extract`), compute `Min` without
+    intermediate factor rounding, and bound `extractAll` matches by
+    $\text{target.Max} + 1$.
+  * `regex.replace()` bounds `ResultSize` as $[0, \text{maxOut}]$ accounting for
+    $n + 1$ empty matches and capture-group expansion, and aligns `Min`/`Max`
+    with `replaceCostTracker`.
+
+Custom `cost.FunctionEstimator` callbacks can inspect the active model revision
+via [`cost.ModelVersionOf(estimator)`](https://github.com/cel-expr/cel-go/blob/master/common/cost/model.go).
+
+> [!IMPORTANT]
+> Revisions affect **estimation only**. What an expression is charged at
+> runtime is not versioned — a revision that moved the charge would change what
+> a program is billed rather than what it is predicted to be billed. This is
+> why a revision may add an overload model purely to carry a result size, as
+> version `1` does for `optional.of`: the added model prices the call at
+> the same $1$ an unmodeled call already costs.
+
+> [!WARNING]
+> Pinning is an escape hatch, not a supported configuration. Every revision
+> corrects a defect, so an older revision is by construction less accurate.
+> Staying on version `0` means a saturated upper bound below any optional,
+> which rejects programs that would never have reached the limit, and a lower
+> bound that is wrong in both directions.
+
 ---
 
 ## 3. Cost Model AST Primitives & Combinators Reference
@@ -479,6 +550,13 @@ cost.MemberOverload("list_slice_int_int",
   result size is estimated as $[0, 6]$.
 * **Tracking Behavior**: Extracts runtime integer arguments, computing
   $8 - 2 = 6$.
+
+> [!NOTE]
+> The length here is derived from the integer arguments, not from the target,
+> so nothing carries the target's element size into the result and a slice of
+> strings looks like a list of unbounded elements to whatever consumes it. A
+> model that wants to keep it must say so:
+> `cost.List(cost.AtMost(...), cost.TargetElem())`.
 
 ---
 

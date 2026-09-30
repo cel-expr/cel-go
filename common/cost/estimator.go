@@ -449,15 +449,8 @@ func (c *coster) costCall(e ast.Expr) CostEstimate {
 		fnCost = fnCost.Union(overloadCost.CostEstimate)
 		resultSize = mergeSizeEstimatePtr(resultSize, overloadCost.ResultSize)
 		// build and track the field path for index operations
-		switch overload {
-		case overloads.IndexList:
-			if len(args) > 0 {
-				c.addPath(e, append(c.getPath(args[0]), "@items"))
-			}
-		case overloads.IndexMap:
-			if len(args) > 0 {
-				c.addPath(e, append(c.getPath(args[0]), "@values"))
-			}
+		if field, ok := c.indexFieldPath(overload); ok && len(args) > 0 {
+			c.addPath(e, append(c.getPath(args[0]), field))
 		}
 		if resultSize == nil {
 			resultSize = c.computeSize(e)
@@ -465,6 +458,26 @@ func (c *coster) costCall(e ast.Expr) CostEstimate {
 	}
 	c.setSize(e, resultSize)
 	return sum.Add(fnCost)
+}
+
+// indexFieldPath reports the field path segment an index overload qualifies its operand with, so
+// that the size hint recorded for a container's elements is found when one of them is read.
+//
+// The optional forms count only from version 1. Before the revision `l[?0]` recorded no path,
+// so the `@items` hint that `l[0]` finds was never consulted and every estimate below an optional
+// index was unbounded. A pinned caller keeps that.
+func (c *coster) indexFieldPath(overloadID string) (string, bool) {
+	switch overloadID {
+	case overloads.IndexList:
+		return "@items", true
+	case overloads.IndexMap:
+		return "@values", true
+	case overloads.OptIndexList, overloads.OptIndexOptionalList:
+		return "@items", c.modelVersion >= 1
+	case overloads.OptIndexMap, overloads.OptIndexOptionalMap:
+		return "@values", c.modelVersion >= 1
+	}
+	return "", false
 }
 
 // maybeUnwrapDynCall handles the 'dyn' call wrapper, returning an estimate if matched.
