@@ -1176,6 +1176,7 @@ func TestCostEstimateAndTracking(t *testing.T) {
 			hints:     map[string]uint64{"arg1": 500},
 			in:        map[string]any{"input": "idc", "arg1": string(randSeq(500))},
 			wantEst:   estPtr(cost.CostEstimate{Min: 2, Max: 52}),
+			wantEstV0: estPtr(cost.CostEstimate{Min: 3, Max: 52}),
 			wantTrack: trackPtr(52),
 		},
 		{
@@ -1188,7 +1189,30 @@ func TestCostEstimateAndTracking(t *testing.T) {
 			hints:     map[string]uint64{"arg1": 500},
 			in:        map[string]any{"input": "idc", "arg1": string(randSeq(500))},
 			wantEst:   estPtr(cost.CostEstimate{Min: 2, Max: 52}),
+			wantEstV0: estPtr(cost.CostEstimate{Min: 3, Max: 52}),
 			wantTrack: trackPtr(52),
+		},
+		{
+			name: "startsWith bounded by receiver size",
+			expr: `input.startsWith(arg1)`,
+			vars: []*decls.VariableDecl{
+				decls.NewVariable("input", types.StringType),
+				decls.NewVariable("arg1", types.StringType),
+			},
+			hints:     map[string]uint64{"input": 10, "arg1": 1_000_000},
+			wantEst:   estPtr(cost.CostEstimate{Min: 2, Max: 3}),
+			wantEstV0: estPtr(cost.CostEstimate{Min: 3, Max: 3}),
+		},
+		{
+			name: "endsWith bounded by receiver size",
+			expr: `input.endsWith(arg1)`,
+			vars: []*decls.VariableDecl{
+				decls.NewVariable("input", types.StringType),
+				decls.NewVariable("arg1", types.StringType),
+			},
+			hints:     map[string]uint64{"input": 10, "arg1": 1_000_000},
+			wantEst:   estPtr(cost.CostEstimate{Min: 2, Max: 3}),
+			wantEstV0: estPtr(cost.CostEstimate{Min: 3, Max: 3}),
 		},
 		{
 			name: "size receiver",
