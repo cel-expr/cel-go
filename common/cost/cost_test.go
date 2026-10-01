@@ -1177,7 +1177,7 @@ func TestCostEstimateAndTracking(t *testing.T) {
 			in:        map[string]any{"input": "idc", "arg1": string(randSeq(500))},
 			wantEst:   estPtr(cost.CostEstimate{Min: 2, Max: 52}),
 			wantEstV0: estPtr(cost.CostEstimate{Min: 3, Max: 52}),
-			wantTrack: trackPtr(52),
+			wantTrack: trackPtr(3),
 		},
 		{
 			name: "endsWith",
@@ -1190,7 +1190,7 @@ func TestCostEstimateAndTracking(t *testing.T) {
 			in:        map[string]any{"input": "idc", "arg1": string(randSeq(500))},
 			wantEst:   estPtr(cost.CostEstimate{Min: 2, Max: 52}),
 			wantEstV0: estPtr(cost.CostEstimate{Min: 3, Max: 52}),
-			wantTrack: trackPtr(52),
+			wantTrack: trackPtr(3),
 		},
 		{
 			name: "startsWith bounded by receiver size",
@@ -1415,7 +1415,8 @@ func TestCostEstimateAndTracking(t *testing.T) {
 				decls.NewVariable("str1", types.StringType),
 				decls.NewVariable("str2", types.StringType),
 			},
-			wantEst: estPtr(cost.CostEstimate{Min: 9, Max: 9}),
+			wantEst:   estPtr(cost.CostEstimate{Min: 3, Max: 9}),
+			wantEstV0: estPtr(cost.CostEstimate{Min: 5, Max: 9}),
 		},
 		{
 			name:    "nested subexpression operators",
