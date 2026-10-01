@@ -202,6 +202,7 @@ latest revision by default.
 |---|---|
 | `0` | The model as released in `v0.32.0`. |
 | `1` | Core `Min()` interval bounds, exact rational `Scale` normalization, `optional` size propagation and qualifier tracking, computed-operand attribute and comprehension variable sizing, and extension (`ext/sets`, `ext/math`, `ext/encoders`, `ext/strings`, `ext/regex`, `ext/network`, `ext/lists`) cost and result-size models. |
+| `2` | Bounds `startsWith`/`endsWith` traversal and charge by the shorter of the receiver and the argument. |
 
 Specifically, version `1` corrects:
 * **Core `Min()` and `Scale()` (`common/cost`)**: `Min()` computes the exact
@@ -750,15 +751,25 @@ cost.Overload(overloads.IndexList,
 ### Linear String Prefix / Suffix Search
 
 * **CEL Expression**: `str.startsWith(prefix)` or `str.endsWith(suffix)`
-* **Complexity**: $O(k)$ where $k$ is the prefix/suffix string length.
+* **Complexity**: $O(\min(m, n))$ where $m$ is the receiver length and $n$ is
+  the prefix/suffix length.
 * **Cost Model AST**:
 ```go
 cost.MemberOverload(overloads.StartsWithString,
-    cost.EvalCost(cost.Scale(cost.Arg(0), cost.StringTraversalCostFactor)),
+    cost.EvalCost(cost.Scale(
+        cost.Min(cost.Target(), cost.Arg(0)),
+        cost.StringTraversalCostFactor,
+    )),
+    cost.BeforeVersion(2,
+        cost.EvalCost(cost.Scale(cost.Arg(0), cost.StringTraversalCostFactor)),
+    ),
 )
 ```
-* **Estimation Behavior**: Scales prefix length estimate by `0.1` (rounded up).
-* **Tracking Behavior**: Multiplies actual prefix byte length by `0.1`.
+* **Estimation Behavior**: From revision 2, scales the shorter of the receiver
+  and prefix length estimates by `0.1` (rounded up); earlier revisions scale
+  the prefix estimate alone.
+* **Tracking Behavior**: Charges the smaller of the actual receiver and prefix
+  string lengths scaled by `0.1`, honoring the pinned model revision.
 
 ---
 

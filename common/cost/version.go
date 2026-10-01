@@ -291,6 +291,11 @@ func WithSizingStrategy(strategy SizingStrategy) ModelOption {
 //   - A list or map literal's minimum size counts only its required elements or entries, and an
 //     optional element written as optional.none() or optional.of(x) contributes nothing or the
 //     size of x.
+//
+// Version 2:
+//   - startsWith and endsWith estimate and charge the shorter of the receiver and the argument
+//     rather than the argument alone, so a prefix or suffix longer than the receiver no longer
+//     inflates the estimate or the charge. Earlier revisions retain the argument-only model.
 func ModelVersion(version uint32) ModelOption {
 	return func(o *modelOptions) {
 		o.hasVersion = true
