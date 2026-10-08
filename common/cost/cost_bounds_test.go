@@ -797,15 +797,9 @@ func TestContainerKeyElemPropagationAndClearing(t *testing.T) {
 		// String split and regex extractAll bound element sizes by target string Max:
 		`s.split(',').exists(i, i.contains('z'))`,
 		`regex.extractAll(s, '[a-z]+').exists(i, i.contains('z'))`,
-	}
-
-	// Expressions that depend on deep (2-level) size hints on variable ll ("ll.@items.@items")
-	// without an AST path to the leaf:
-	// - Under DefaultSizingStrategy (shallow), estimates only inspect immediate hints ("ll" and "ll.@items"),
-	//   so leaf element size is Unknown and est.Max is unbounded.
-	// - Under AggregateSizingStrategy (deep), estimates inspect nested hints ("ll.@items.@items"),
-	//   so leaf element size is 50 and est.Max is finite.
-	deepHintExprs := []string{
+		// Nested (2-level) size hints on variable ll ("ll.@items.@items"): both strategies resolve
+		// nested container hints (DefaultSizingStrategy descends through resolveChildSize when the
+		// child type is itself a container), so the leaf element size is 50 and est.Max is finite.
 		`ll[0][0].contains('z')`,
 		`ll.flatten().exists(i, i.contains('z'))`,
 		`ll.flatten()[0].contains('z')`,
@@ -816,10 +810,9 @@ func TestContainerKeyElemPropagationAndClearing(t *testing.T) {
 		name     string
 		strategy cost.SizingStrategy
 		hints    cost.Estimator
-		isDeep   bool
 	}{
-		{name: "default", strategy: cost.DefaultSizingStrategy(), hints: exactSizeEstimator{hints: rawHints}, isDeep: false},
-		{name: "aggregate", strategy: cost.AggregateSizingStrategy(), hints: testCostEstimator{hints: rawHints}, isDeep: true},
+		{name: "default", strategy: cost.DefaultSizingStrategy(), hints: exactSizeEstimator{hints: rawHints}},
+		{name: "aggregate", strategy: cost.AggregateSizingStrategy(), hints: testCostEstimator{hints: rawHints}},
 	} {
 		t.Run(stratCase.name, func(t *testing.T) {
 			stratEnv, err := env.Extend(cel.CostSizingStrategy(stratCase.strategy))
@@ -899,27 +892,6 @@ func TestContainerKeyElemPropagationAndClearing(t *testing.T) {
 				})
 			}
 
-			for _, expr := range deepHintExprs {
-				t.Run(expr, func(t *testing.T) {
-					est, actual := evalAndEstimate(t, expr)
-					if actual < est.Min || actual > est.Max {
-						t.Errorf("%s: actual cost %d outside estimated bounds [%d, %d]",
-							expr, actual, est.Min, est.Max)
-					}
-					if stratCase.isDeep {
-						if est.Max >= math.MaxUint32 {
-							t.Errorf("%s: expected finite Max bound under AggregateSizingStrategy from nested hint, got %d",
-								expr, est.Max)
-						}
-					} else {
-						if est.Max < math.MaxUint32 {
-							t.Errorf("%s: expected DefaultSizingStrategy to only look at immediate size hints (unbounded leaf), got %d",
-								expr, est.Max)
-						}
-					}
-				})
-			}
-
 			// Union of a small literal list with an unhinted list must widen Elem to Unknown:
 			for _, expr := range []string{
 				`(['a'] + unhinted_l).exists(i, i.contains('z'))`,
@@ -989,5 +961,3 @@ func (b *bindToBlockOptimizer) Optimize(ctx *cel.OptimizerContext, a *ast.AST) *
 	}
 	return ctx.NewAST(rewrite(a.Expr()))
 }
-
-
