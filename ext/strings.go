@@ -940,7 +940,19 @@ func estimateSubstringCost(estimator cost.Estimator, target *cost.AstNode, args 
 	if len(args) == 2 {
 		end = cost.NodeAsUintValue(args[1], end)
 	}
-	resultSize := cost.FixedSizeEstimate(end - start)
+	var resultSize cost.SizeEstimate
+	if cost.ModelVersionOf(estimator) >= 1 {
+		maxLen := cost.SafeSubtract(end, start)
+		fixedStart := isUintLiteral(args[0])
+		fixedEnd := (len(args) == 1 && targetSize.Min == targetSize.Max) || (len(args) == 2 && isUintLiteral(args[1]))
+		if fixedStart && fixedEnd {
+			resultSize = cost.FixedSizeEstimate(maxLen)
+		} else {
+			resultSize = cost.RangedSizeEstimate(0, maxLen)
+		}
+	} else {
+		resultSize = cost.FixedSizeEstimate(end - start)
+	}
 	return cost.NewCallEstimate(evalCost.Add(cost.CallCostEstimate).Add(resultSize.AsCost()), &resultSize)
 }
 
@@ -969,11 +981,18 @@ func estimateStringReplaceCost(estimator cost.Estimator, target *cost.AstNode, a
 	needleSize := cost.AtLeastOneSize(cost.EstimateSize(estimator, args[0]))
 	searchCost := cost.AtLeastOneSize(targetSize).Multiply(needleSize).MultiplyByCostFactor(cost.StringCostFactor)
 
-	replacementSize := cost.EstimateSize(estimator, args[1]).Add(cost.FixedSizeEstimate(1))
+	rawReplacementSize := cost.EstimateSize(estimator, args[1])
+	replacementSize := rawReplacementSize.Add(cost.FixedSizeEstimate(1))
 	allReplacedSize := cost.SafeMultiply(cost.SafeAdd(targetSize.Max, 1), replacementSize.Max)
 	resultMinSize := targetSize.Min
-	if resultMinSize > replacementSize.Min {
-		resultMinSize = replacementSize.Min
+	if cost.ModelVersionOf(estimator) >= 1 {
+		if resultMinSize > rawReplacementSize.Min {
+			resultMinSize = rawReplacementSize.Min
+		}
+	} else {
+		if resultMinSize > replacementSize.Min {
+			resultMinSize = replacementSize.Min
+		}
 	}
 	resultSize := cost.RangedSizeEstimate(resultMinSize, allReplacedSize)
 	return cost.NewCallEstimate(
@@ -991,8 +1010,14 @@ func estimateStringSplitCost(estimator cost.Estimator, target *cost.AstNode, arg
 	targetSize := cost.EstimateSize(estimator, *target)
 	// Traversal cost proportional to input size.
 	traversalCost := targetSize.Add(cost.FixedSizeEstimate(1)).MultiplyByCostFactor(cost.StringCostFactor)
-	// Worst case: split("") produces N elements for a string of size N.
-	resultSize := cost.RangedSizeEstimate(0, targetSize.Max)
+	// Worst case: split("") produces N elements for a string of size N, and split(unmatched)
+	// produces 1 element of size N; splitting on a delimiter produces up to N+1 pieces.
+	maxPieces := targetSize.Max
+	if cost.ModelVersionOf(estimator) >= 1 {
+		maxPieces = cost.SafeAdd(targetSize.Max, 1)
+	}
+	elemSize := cost.RangedSizeEstimate(0, targetSize.Max)
+	resultSize := cost.ListSizeEstimate(cost.RangedSizeEstimate(0, maxPieces), elemSize)
 	// Include list creation base cost plus allocation for each element.
 	allocationCost := resultSize.MultiplyByCostFactor(1).Add(cost.FixedCostEstimate(cost.ListCreateBaseCost))
 	evalCost := traversalCost.Add(allocationCost).Add(cost.CallCostEstimate)
@@ -1015,7 +1040,12 @@ func estimateStringJoinCost(estimator cost.Estimator, target *cost.AstNode, args
 	traversalCost := targetSize.Add(cost.FixedSizeEstimate(1)).MultiplyByCostFactor(cost.StringCostFactor)
 	// Result size: sum of element sizes + (n-1) * separator size.
 	// Worst case estimate: use list size * max element size + list size * separator size.
-	maxResultSize := cost.SafeAdd(cost.SafeMultiply(targetSize.Max, cost.SafeAdd(1, sepSize.Max)), sepSize.Max)
+	elemMax := uint64(1)
+	if cost.ModelVersionOf(estimator) >= 1 {
+		itemSize := estimateItemSize(estimator, *target)
+		elemMax = itemSize.Max
+	}
+	maxResultSize := cost.SafeAdd(cost.SafeMultiply(targetSize.Max, cost.SafeAdd(elemMax, sepSize.Max)), sepSize.Max)
 	resultSize := cost.RangedSizeEstimate(0, maxResultSize)
 	estimate := traversalCost.Add(resultSize.MultiplyByCostFactor(1)).Add(cost.CallCostEstimate)
 	return cost.NewCallEstimate(estimate, &resultSize)

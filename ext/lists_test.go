@@ -578,7 +578,7 @@ func TestListsCosts(t *testing.T) {
 		in            map[string]any
 		hints         map[string]uint64
 		estimatedCost cost.CostEstimate
-		// estimatedCostV0 is the estimate under cost.0, set only where the revision moved it.
+		// estimatedCostV0 is the estimate under cost.ModelVersion0, set only where the revision moved it.
 		estimatedCostV0 *cost.CostEstimate
 		actualCost      uint64
 		version         int
@@ -593,19 +593,21 @@ func TestListsCosts(t *testing.T) {
 			actualCost:    26,
 		},
 		{
-			name:          "list_range_computed",
-			expr:          `lists.range(4 / 2) == [0, 1]`,
-			estimatedCost: cost.FixedCostEstimate(math.MaxUint64),
-			actualCost:    25,
+			name:            "list_range_computed",
+			expr:            `lists.range(4 / 2) == [0, 1]`,
+			estimatedCost:   cost.RangedCostEstimate(22, math.MaxUint64),
+			estimatedCostV0: costV0(math.MaxUint64, math.MaxUint64),
+			actualCost:      25,
 		},
 		{
-			name:          "list_range_var",
-			expr:          `lists.range(x) == [0, 1, 2, 3, 4]`,
-			vars:          []cel.EnvOption{cel.Variable("x", cel.IntType)},
-			in:            map[string]any{"x": 5},
-			hints:         map[string]uint64{"x": 10},
-			estimatedCost: cost.FixedCostEstimate(math.MaxUint64),
-			actualCost:    28,
+			name:            "list_range_var",
+			expr:            `lists.range(x) == [0, 1, 2, 3, 4]`,
+			vars:            []cel.EnvOption{cel.Variable("x", cel.IntType)},
+			in:              map[string]any{"x": 5},
+			hints:           map[string]uint64{"x": 10},
+			estimatedCost:   cost.RangedCostEstimate(22, math.MaxUint64),
+			estimatedCostV0: costV0(math.MaxUint64, math.MaxUint64),
+			actualCost:      28,
 		},
 		{
 			// (3 array allocs + internal alloc) * 10 + size(list) + 2 calls
@@ -694,23 +696,25 @@ func TestListsCosts(t *testing.T) {
 			actualCost:      26,
 		},
 		{
-			name:          "list_flatten_depth_var",
-			expr:          `[[1, 2], 3].flatten(x) == [1, 2, 3]`,
-			vars:          []cel.EnvOption{cel.Variable("x", cel.IntType)},
-			in:            map[string]any{"x": 5},
-			hints:         map[string]uint64{"x": 10},
-			estimatedCost: cost.FixedCostEstimate(math.MaxUint64),
-			actualCost:    53,
-			version:       3,
+			name:            "list_flatten_depth_var",
+			expr:            `[[1, 2], 3].flatten(x) == [1, 2, 3]`,
+			vars:            []cel.EnvOption{cel.Variable("x", cel.IntType)},
+			in:              map[string]any{"x": 5},
+			hints:           map[string]uint64{"x": 10},
+			estimatedCost:   cost.RangedCostEstimate(43, math.MaxUint64),
+			estimatedCostV0: costV0(math.MaxUint64, math.MaxUint64),
+			actualCost:      53,
+			version:         3,
 		},
 		{
-			name:          "list_flatten_depth_var_v4",
-			expr:          `[[1, 2], 3].flatten(x) == [1, 2, 3]`,
-			vars:          []cel.EnvOption{cel.Variable("x", cel.IntType)},
-			in:            map[string]any{"x": 5},
-			hints:         map[string]uint64{"x": 10},
-			estimatedCost: cost.FixedCostEstimate(46),
-			actualCost:    46,
+			name:            "list_flatten_depth_var_v4",
+			expr:            `[[1, 2], 3].flatten(x) == [1, 2, 3]`,
+			vars:            []cel.EnvOption{cel.Variable("x", cel.IntType)},
+			in:              map[string]any{"x": 5},
+			hints:           map[string]uint64{"x": 10},
+			estimatedCost:   cost.RangedCostEstimate(45, 46),
+			estimatedCostV0: costV0(46, 46),
+			actualCost:      46,
 		},
 		{
 			// (2 array allocs + 1 internal) * 10
@@ -755,9 +759,10 @@ func TestListsCosts(t *testing.T) {
 				cel.Variable("x", cel.IntType),
 				cel.Variable("y", cel.IntType),
 			},
-			in:            map[string]any{"x": 1, "y": 3},
-			estimatedCost: cost.FixedCostEstimate(39),
-			actualCost:    36,
+			in:              map[string]any{"x": 1, "y": 3},
+			estimatedCost:   cost.RangedCostEstimate(33, 39),
+			estimatedCostV0: costV0(39, 39),
+			actualCost:      36,
 		},
 		{
 			// allocs: (1 + one internal) * 10
@@ -788,10 +793,11 @@ func TestListsCosts(t *testing.T) {
 				cel.Variable("y", cel.IntType),
 				cel.Variable("z", cel.ListType(cel.IntType)),
 			},
-			in:            map[string]any{"x": 1, "y": 3, "z": []int{1, 2, 3, 4, 5, 6, 7}},
-			hints:         map[string]uint64{"z": 10},
-			estimatedCost: cost.FixedCostEstimate(35),
-			actualCost:    27,
+			in:              map[string]any{"x": 1, "y": 3, "z": []int{1, 2, 3, 4, 5, 6, 7}},
+			hints:           map[string]uint64{"z": 10},
+			estimatedCost:   cost.RangedCostEstimate(24, 35),
+			estimatedCostV0: costV0(35, 35),
+			actualCost:      27,
 		},
 		{
 			name:          "list_slice",
@@ -853,7 +859,7 @@ func TestListsCosts(t *testing.T) {
 			vars:            []cel.EnvOption{cel.Variable("x", cel.ListType(cel.StringType))},
 			in:              map[string]any{"x": []string{"b", "a", "b", "a", "c", "c"}},
 			hints:           map[string]uint64{"x": 10, "x.@items": 1},
-			estimatedCost:   cost.RangedCostEstimate(22, 223),
+			estimatedCost:   cost.RangedCostEstimate(22, 233),
 			estimatedCostV0: costV0(23, 223),
 			actualCost:      98,
 		},
@@ -926,8 +932,9 @@ func TestListsCosts(t *testing.T) {
 				"x.@items": 1,
 				"y":        10,
 			},
-			estimatedCost: cost.RangedCostEstimate(16, 216),
-			actualCost:    226,
+			estimatedCost:   cost.RangedCostEstimate(16, 226),
+			estimatedCostV0: costV0(16, 216),
+			actualCost:      226,
 		},
 		{
 			name: "list_distinct_concat_cost",
@@ -1005,7 +1012,7 @@ func TestListsCosts(t *testing.T) {
 			vars:            []cel.EnvOption{cel.Variable("x", cel.ListType(cel.StringType))},
 			in:              map[string]any{"x": []string{"b", "a", "b", "a", "c", "c"}},
 			hints:           map[string]uint64{"x": 10, "x.@items": 1},
-			estimatedCost:   cost.RangedCostEstimate(22, 223),
+			estimatedCost:   cost.RangedCostEstimate(22, 233),
 			estimatedCostV0: costV0(23, 223),
 			actualCost:      98,
 		},

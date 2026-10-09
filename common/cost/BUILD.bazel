@@ -35,6 +35,7 @@ go_test(
     size = "small",
     srcs = [
         "aggregate_strategy_test.go",
+        "cost_bounds_test.go",
         "cost_test.go",
         "default_strategy_test.go",
         "model_test.go",
