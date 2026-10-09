@@ -431,8 +431,16 @@ func TestHeights(t *testing.T) {
 func TestHasExtension(t *testing.T) {
 	info := ast.NewSourceInfo(common.NewStringSource("true", "test-only"))
 	info.AddExtension(ast.NewExtension("json_name", ast.NewExtensionVersion(1, 1), ast.ComponentRuntime))
+	info.AddExtension(ast.NewExtension("cel_block", ast.NewExtensionVersion(1, 1), ast.ComponentRuntime))
+	info.AddExtension(ast.NewExtension("cel_block", ast.NewExtensionVersion(1, 1), ast.ComponentRuntime))
+	if len(info.Extensions()) != 2 {
+		t.Errorf("len(info.Extensions()) got %d, wanted 2", len(info.Extensions()))
+	}
 	if !info.HasExtension("json_name", ast.NewExtensionVersion(1, 0)) {
 		t.Error("info.HasExtension('json_name', 1.0) returned false for v1.1")
+	}
+	if !info.HasExtension("cel_block", ast.NewExtensionVersion(1, 1)) {
+		t.Error("info.HasExtension('cel_block', 1.1) returned false for v1.1")
 	}
 	if info.HasExtension("json_name", ast.NewExtensionVersion(2, 1)) {
 		t.Error("info.HasExtension() returned true for v2.1 when v1.1 configured")

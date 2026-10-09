@@ -317,6 +317,11 @@ func (opt *optimizerExprFactory) MacroCalls() map[int64]ast.Expr {
 	return opt.sourceInfo.MacroCalls()
 }
 
+// AddExtension adds an extension record into the tracked source info metadata.
+func (opt *optimizerExprFactory) AddExtension(ext ast.Extension) {
+	opt.sourceInfo.AddExtension(ext)
+}
+
 // NewBindMacro creates an AST expression representing the expanded bind() macro, and a macro expression
 // representing the unexpanded call signature to be inserted into the source info macro call metadata.
 func (opt *optimizerExprFactory) NewBindMacro(macroID int64, varName string, varInit, remaining ast.Expr) (astExpr, macroExpr ast.Expr) {

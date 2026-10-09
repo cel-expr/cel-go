@@ -27,6 +27,10 @@ import (
 	"cel.dev/cel-go/common/types"
 )
 
+var (
+	celBlockExt = ast.NewExtension("cel_block", ast.NewExtensionVersion(1, 1), ast.ComponentRuntime)
+)
+
 // ComposerOption is a functional option used to configure a RuleComposer
 type ComposerOption func(*RuleComposer) (*RuleComposer, error)
 
@@ -177,6 +181,7 @@ func (opt *ruleComposerImpl) Optimize(ctx *cel.OptimizerContext, a *ast.AST) *as
 		}
 	}
 	blockExpr := ctx.NewCall("cel.@block", ctx.NewList(varExprs, []int32{}), ruleExpr)
+	ctx.AddExtension(celBlockExt)
 	return ctx.NewAST(blockExpr)
 }
 
@@ -376,6 +381,7 @@ func (opt *ruleUnnesterImpl) Optimize(ctx *cel.OptimizerContext, a *ast.AST) *as
 		}
 	}
 	blockExpr := ctx.NewCall("cel.@block", ctx.NewList(varExprs, []int32{}), ruleExpr)
+	ctx.AddExtension(celBlockExt)
 	return ctx.NewAST(blockExpr)
 }
 

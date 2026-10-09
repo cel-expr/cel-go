@@ -20,6 +20,7 @@ func TestCompose(t *testing.T) {
 		wantUnparsed string
 		wantEval     string
 		checkInfo    bool
+		wantBlockExt bool
 	}{
 		{
 			name: "source_info",
@@ -43,6 +44,7 @@ rule:
 `,
 			composerOpts: []ComposerOption{ExpressionUnnestHeight(1)},
 			checkInfo:    true,
+			wantBlockExt: true,
 		},
 		{
 			name: "empty_aggregate",
@@ -80,6 +82,10 @@ rule:
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			env, compiledRule, compAST := parseAndComposeRule(t, tc.policy, tc.name+".yaml", tc.composerOpts...)
+			hasBlockExt := compAST.NativeRep().SourceInfo().HasExtension("cel_block", ast.NewExtensionVersion(1, 1))
+			if hasBlockExt != tc.wantBlockExt {
+				t.Errorf("SourceInfo().HasExtension('cel_block', 1.1) got %v, wanted %v", hasBlockExt, tc.wantBlockExt)
+			}
 			if tc.checkInfo {
 				si := compAST.SourceInfo()
 				if si.Location != tc.name+".yaml" {
