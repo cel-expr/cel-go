@@ -24,7 +24,6 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"cel.dev/cel-go/cel"
-	"cel.dev/cel-go/common/ast"
 	"cel.dev/cel-go/common/types"
 	"cel.dev/cel-go/common/types/ref"
 	"cel.dev/cel-go/ext"
@@ -324,13 +323,13 @@ func (r *runner) compileRule(t testing.TB) (*cel.Env, *CompiledRule, *cel.Issues
 	return env, rule, iss
 }
 
-func (r *runner) setup(t testing.TB, env *cel.Env, a *cel.Ast) {
+func (r *runner) setup(t testing.TB, env *cel.Env, ast *cel.Ast) {
 	t.Helper()
-	pExpr, err := cel.AstToString(a)
+	pExpr, err := cel.AstToString(ast)
 	if err != nil {
 		t.Fatalf("cel.AstToString() failed: %v", err)
 	}
-	_, err = cel.AstToCheckedExpr(a)
+	_, err = cel.AstToCheckedExpr(ast)
 	if err != nil {
 		t.Fatalf("cel.AstToCheckedExpr() failed: %v", err)
 	}
@@ -338,11 +337,11 @@ func (r *runner) setup(t testing.TB, env *cel.Env, a *cel.Ast) {
 		t.Errorf("cel.AstToString() got %s, wanted %s", pExpr, r.expr)
 	}
 	wantBlockExt := strings.Contains(pExpr, "cel.@block")
-	hasBlockExt := a.NativeRep().SourceInfo().HasExtension("cel_block", ast.NewExtensionVersion(1, 1))
+	hasBlockExt := ast.NativeRep().SourceInfo().HasExtension(celBlockExt.ID, celBlockExt.Version)
 	if hasBlockExt != wantBlockExt {
 		t.Errorf("SourceInfo().HasExtension('cel_block', 1.1) got %v, wanted %v", hasBlockExt, wantBlockExt)
 	}
-	prg, err := env.Program(a, cel.EvalOptions(cel.OptOptimize))
+	prg, err := env.Program(ast, cel.EvalOptions(cel.OptOptimize))
 	if err != nil {
 		t.Fatalf("env.Program() failed: %v", err)
 	}
@@ -772,7 +771,7 @@ rule:
 	for _, tst := range tests {
 		tc := tst
 		t.Run(tc.name, func(t *testing.T) {
-			env, compAST, iss := parseAndCompilePolicy(t, tc.name, tc.policy, tc.envOpts, nil)
+			env, ast, iss := parseAndCompilePolicy(t, tc.name, tc.policy, tc.envOpts, nil)
 			if tc.wantErr != "" {
 				if iss.Err() == nil {
 					t.Fatalf("Compile() succeeded, wanted error %q", tc.wantErr)
@@ -787,7 +786,7 @@ rule:
 				t.Fatalf("Compile() failed: %v", iss.Err())
 			}
 
-			unparsed, err := cel.AstToString(compAST)
+			unparsed, err := cel.AstToString(ast)
 			if err != nil {
 				t.Fatalf("cel.AstToString() failed: %v", err)
 			}
@@ -796,17 +795,17 @@ rule:
 			}
 
 			wantBlockExt := strings.Contains(unparsed, "cel.@block")
-			hasBlockExt := compAST.NativeRep().SourceInfo().HasExtension("cel_block", ast.NewExtensionVersion(1, 1))
+			hasBlockExt := ast.NativeRep().SourceInfo().HasExtension(celBlockExt.ID, celBlockExt.Version)
 			if hasBlockExt != wantBlockExt {
 				t.Errorf("SourceInfo().HasExtension('cel_block', 1.1) got %v, wanted %v", hasBlockExt, wantBlockExt)
 			}
 
-			_, err = cel.AstToCheckedExpr(compAST)
+			_, err = cel.AstToCheckedExpr(ast)
 			if err != nil {
 				t.Fatalf("cel.AstToCheckedExpr() failed: %v", err)
 			}
 
-			prg, err := env.Program(compAST)
+			prg, err := env.Program(ast)
 			if err != nil {
 				t.Fatalf("env.Program(ast) failed: %v", err)
 			}

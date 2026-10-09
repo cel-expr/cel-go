@@ -432,6 +432,7 @@ func TestHasExtension(t *testing.T) {
 	info := ast.NewSourceInfo(common.NewStringSource("true", "test-only"))
 	info.AddExtension(ast.NewExtension("json_name", ast.NewExtensionVersion(1, 1), ast.ComponentRuntime))
 	info.AddExtension(ast.NewExtension("cel_block", ast.NewExtensionVersion(1, 1), ast.ComponentRuntime))
+	// Adding the same extension again should be a no-op (deduplicated).
 	info.AddExtension(ast.NewExtension("cel_block", ast.NewExtensionVersion(1, 1), ast.ComponentRuntime))
 	if len(info.Extensions()) != 2 {
 		t.Errorf("len(info.Extensions()) got %d, wanted 2", len(info.Extensions()))
