@@ -198,6 +198,97 @@ func TestBindings(t *testing.T) {
 	}
 }
 
+func TestBindingsImmutability(t *testing.T) {
+	tests := []string{
+		`cel.bind(x, [], [x + [1], x + [2]]) == [[1], [2]]`,
+		`cel.bind(x, [], cel.bind(y, x + [1], cel.bind(z, x + [2], [x, y, z]))) == [[], [1], [2]]`,
+		`cel.bind(x, [], [1, 2].map(i, x + [i])) == [[1], [2]]`,
+		`cel.bind(x, [], [x + [1]].map(l, l + [2]) + [x]) == [[1, 2], []]`,
+		`cel.bind(m, {}, [1, 2].transformList(i, v, m.size() + v)) == [1, 2]`,
+		`cel.bind(x, [], [1, 2].transformMap(i, v, x + [v])) == {0: [1], 1: [2]}`,
+		`optional.of([]).optMap(x, [x + [1], x + [2]]) == optional.of([[1], [2]])`,
+		`optional.of([]).optFlatMap(x, optional.of([x + [1], x + [2]])) == optional.of([[1], [2]])`,
+		`[[1], [2]].map(x, x.map(y, y + 1)) == [[2], [3]]`,
+		`{'a': 1, 'b': 2}.transformMap(k, v, v + 1) == {'a': 2, 'b': 3}`,
+	}
+	env, err := cel.NewEnv(Bindings(), TwoVarComprehensions(), cel.OptionalTypes())
+	if err != nil {
+		t.Fatalf("cel.NewEnv() failed: %v", err)
+	}
+	progOpts := map[string][]cel.ProgramOption{
+		"default":    {},
+		"exhaustive": {cel.EvalOptions(cel.OptExhaustiveEval)},
+		"optimized":  {cel.EvalOptions(cel.OptOptimize)},
+	}
+	for _, tst := range tests {
+		expr := tst
+		for name, opts := range progOpts {
+			t.Run(name+"/"+expr, func(t *testing.T) {
+				checkedAST, iss := env.Compile(expr)
+				if iss.Err() != nil {
+					t.Fatalf("env.Compile(%q) failed: %v", expr, iss.Err())
+				}
+				prg, err := env.Program(checkedAST, opts...)
+				if err != nil {
+					t.Fatalf("env.Program() failed: %v", err)
+				}
+				for i := 0; i < 3; i++ {
+					out, _, err := prg.Eval(cel.NoVars())
+					if err != nil {
+						t.Fatalf("prg.Eval() failed: %v", err)
+					}
+					if out != types.True {
+						t.Errorf("prg.Eval(%q) got %v, wanted true", expr, out)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestLegacyAccumulatorImmutability(t *testing.T) {
+	// The legacy accumulator name `__result__` may be referenced from user expressions, so the
+	// comprehension must not use a mutable accumulator.
+	tests := []string{
+		`[1, 2].map(x, (__result__ + [x]).size()) == [1, 2]`,
+		`[1, 2, 3].filter(x, (__result__ + [x]).size() > 1) == []`,
+		`[1, 2].map(x, x > 0, (__result__ + [0]).size()) == [1, 2]`,
+		`[1, 2].map(x, cel.bind(y, __result__, y + [9]).size()) == [1, 2]`,
+		`[1, 2].transformList(i, v, (__result__ + [v]).size()) == [1, 2]`,
+	}
+	env, err := cel.NewEnv(cel.EnableHiddenAccumulatorName(false), Bindings(), TwoVarComprehensions())
+	if err != nil {
+		t.Fatalf("cel.NewEnv() failed: %v", err)
+	}
+	progOpts := map[string][]cel.ProgramOption{
+		"default":    {},
+		"exhaustive": {cel.EvalOptions(cel.OptExhaustiveEval)},
+		"optimized":  {cel.EvalOptions(cel.OptOptimize)},
+	}
+	for _, tst := range tests {
+		expr := tst
+		for name, opts := range progOpts {
+			t.Run(name+"/"+expr, func(t *testing.T) {
+				checkedAST, iss := env.Compile(expr)
+				if iss.Err() != nil {
+					t.Fatalf("env.Compile(%q) failed: %v", expr, iss.Err())
+				}
+				prg, err := env.Program(checkedAST, opts...)
+				if err != nil {
+					t.Fatalf("env.Program() failed: %v", err)
+				}
+				out, _, err := prg.Eval(cel.NoVars())
+				if err != nil {
+					t.Fatalf("prg.Eval() failed: %v", err)
+				}
+				if out != types.True {
+					t.Errorf("prg.Eval(%q) got %v, wanted true", expr, out)
+				}
+			})
+		}
+	}
+}
+
 // nestedBindExpr produces an exponentially amplified value through nested cel.bind calls:
 //
 //	cel.bind(a0, [0,1,2,3,4,5,6,7,8,9],

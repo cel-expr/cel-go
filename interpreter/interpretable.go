@@ -1348,6 +1348,11 @@ type evalFold struct {
 	result    InterpretableV2
 	adapter   types.Adapter
 
+	// mutableAccu indicates that static analysis of the comprehension has determined that the
+	// accumulator is only ever observed by in-place accumulation steps and the final result, and
+	// may therefore be backed by a mutable list or map without the mutation being observable.
+	mutableAccu bool
+
 	// note an exhaustive fold will ensure that all branches are evaluated
 	// when using mutable values, these branches will mutate the final result
 	// rather than make a throw-away computation.
@@ -2050,7 +2055,10 @@ func (f *folder) ResolveName(name string) (any, bool) {
 		if !f.initialized {
 			f.initialized = true
 			initVal := f.accu.Exec(f.frame.parent)
-			if !f.exhaustive {
+			// Only substitute a mutable accumulator when the planner has proven that the
+			// accumulator cannot be aliased, and when evaluation is not exhaustive since
+			// exhaustive evaluation would apply in-place updates from untaken branches.
+			if f.mutableAccu && !f.exhaustive {
 				if l, isList := initVal.(traits.Lister); isList && l.Size() == types.IntZero {
 					initVal = types.NewMutableList(f.adapter)
 					f.mutableValue = true

@@ -54,6 +54,7 @@ go_test(
         "attributes_test.go",
         "frame_test.go",
         "interpreter_test.go",
+        "mutability_test.go",
         "prune_test.go",
         "runtimecost_test.go",
         "runtimememory_test.go",
