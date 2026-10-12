@@ -292,58 +292,34 @@ func (*networkLib) CompileOptions() []cel.EnvOption {
 			networkFormatValidator{funcName: ipFunc, argNum: 0, check: checkIP},
 			networkFormatValidator{funcName: cidrFunc, argNum: 0, check: checkCIDR},
 		),
-		cel.CostEstimatorOptions(
-			cost.OverloadCostEstimate("string_to_cidr", estimateNetworkParseCost),
-			cost.OverloadCostEstimate("cidr_to_string", estimateNetworkNominalStringCost),
-			cost.OverloadCostEstimate("cidr_contains_cidr", estimateNetworkContainsCIDRCIDRCost),
-			cost.OverloadCostEstimate("cidr_contains_cidr_string", estimateNetworkContainsCIDRStringCost),
-			cost.OverloadCostEstimate("cidr_contains_ip_ip", estimateNetworkContainsIPIPCost),
-			cost.OverloadCostEstimate("cidr_contains_ip_string", estimateNetworkContainsIPStringCost),
-			cost.OverloadCostEstimate("ip_family", estimateNetworkNominalCost),
-			cost.OverloadCostEstimate("string_to_ip", estimateNetworkParseCost),
-			cost.OverloadCostEstimate("cidr_ip", estimateNetworkNominalOpaqueCost),
-			cost.OverloadCostEstimate("ip_to_string", estimateNetworkNominalStringCost),
-			cost.OverloadCostEstimate("ip_is_canonical", estimateIPIsCanonicalCost),
-			cost.OverloadCostEstimate("is_cidr", estimateNetworkParseBoolCost),
-			cost.OverloadCostEstimate("ip_is_global_unicast", estimateNetworkNominalCost),
-			cost.OverloadCostEstimate("is_ip", estimateNetworkParseBoolCost),
-			cost.OverloadCostEstimate("ip_is_link_local_multicast", estimateNetworkNominalCost),
-			cost.OverloadCostEstimate("ip_is_link_local_unicast", estimateNetworkNominalCost),
-			cost.OverloadCostEstimate("ip_is_loopback", estimateNetworkNominalCost),
-			cost.OverloadCostEstimate("cidr_is_mask", estimateNetworkNominalCost),
-			cost.OverloadCostEstimate("ip_is_unspecified", estimateNetworkNominalCost),
-			cost.OverloadCostEstimate("cidr_masked", estimateNetworkNominalOpaqueCost),
-			cost.OverloadCostEstimate("cidr_prefix_length", estimateNetworkNominalCost),
+		cel.CostModel(
+			networkParseCostModel("string_to_ip"),
+			networkParseCostModel("string_to_cidr"),
+			networkParseBoolCostModel("is_ip"),
+			networkParseBoolCostModel("is_cidr"),
+			networkIsCanonicalCostModel("ip_is_canonical"),
+			networkToStringCostModel("ip_to_string"),
+			networkToStringCostModel("cidr_to_string"),
+			networkCIDROpaqueCostModel("cidr_ip"),
+			networkCIDROpaqueCostModel("cidr_masked"),
+			networkContainsIPIPCostModel("cidr_contains_ip_ip"),
+			networkContainsIPStringCostModel("cidr_contains_ip_string"),
+			networkContainsCIDRCIDRCostModel("cidr_contains_cidr"),
+			networkContainsCIDRStringCostModel("cidr_contains_cidr_string"),
+			networkNominalCostModel("ip_family"),
+			networkNominalCostModel("ip_is_global_unicast"),
+			networkNominalCostModel("ip_is_link_local_multicast"),
+			networkNominalCostModel("ip_is_link_local_unicast"),
+			networkNominalCostModel("ip_is_loopback"),
+			networkNominalCostModel("ip_is_unspecified"),
+			networkNominalCostModel("cidr_is_mask"),
+			networkNominalCostModel("cidr_prefix_length"),
 		),
 	}
 }
 
 func (*networkLib) ProgramOptions() []cel.ProgramOption {
-	return []cel.ProgramOption{
-		cel.CostTrackerOptions(
-			cost.OverloadTracker("string_to_cidr", trackNetworkParseCost),
-			cost.OverloadTracker("cidr_to_string", trackNetworkNominalCost),
-			cost.OverloadTracker("cidr_contains_cidr", trackNetworkContainsCIDRCIDRCost),
-			cost.OverloadTracker("cidr_contains_cidr_string", trackNetworkContainsCIDRStringCost),
-			cost.OverloadTracker("cidr_contains_ip_ip", trackNetworkContainsIPIPCost),
-			cost.OverloadTracker("cidr_contains_ip_string", trackNetworkContainsIPStringCost),
-			cost.OverloadTracker("ip_family", trackNetworkNominalCost),
-			cost.OverloadTracker("string_to_ip", trackNetworkParseCost),
-			cost.OverloadTracker("cidr_ip", trackNetworkNominalCost),
-			cost.OverloadTracker("ip_to_string", trackNetworkNominalCost),
-			cost.OverloadTracker("ip_is_canonical", trackIPIsCanonicalCost),
-			cost.OverloadTracker("is_cidr", trackNetworkParseCost),
-			cost.OverloadTracker("ip_is_global_unicast", trackNetworkNominalCost),
-			cost.OverloadTracker("is_ip", trackNetworkParseCost),
-			cost.OverloadTracker("ip_is_link_local_multicast", trackNetworkNominalCost),
-			cost.OverloadTracker("ip_is_link_local_unicast", trackNetworkNominalCost),
-			cost.OverloadTracker("ip_is_loopback", trackNetworkNominalCost),
-			cost.OverloadTracker("cidr_is_mask", trackNetworkNominalCost),
-			cost.OverloadTracker("ip_is_unspecified", trackNetworkNominalCost),
-			cost.OverloadTracker("cidr_masked", trackNetworkNominalCost),
-			cost.OverloadTracker("cidr_prefix_length", trackNetworkNominalCost),
-		),
-	}
+	return []cel.ProgramOption{}
 }
 
 // networkAdapter adapts netip types while preserving existing adapters.
@@ -806,4 +782,94 @@ func trackNetworkContainsCIDRStringCost(args []ref.Val, result ref.Val) *uint64 
 	total = cost.SafeAdd(total, cost.SafeMultiplyByFactor(cidrSize, cost.StringCostFactor), 1)
 	total = cost.SafeAdd(total, cost.SafeMultiplyByFactor(otherSize, cost.StringCostFactor))
 	return &total
+}
+
+// networkParseCostModel models ip(string) and cidr(string): an IP's length is its address bytes
+// (4 or 16) and a CIDR's is the bytes of its prefix (0 to 16); both strategies size them by that
+// length, so parsed values are sized at most 16 with no lower bound.
+func networkParseCostModel(id string) cost.OverloadModel {
+	return cost.Overload(id,
+		cost.EvalCost(cost.StringScan(cost.Length(cost.Arg(0)))),
+		cost.ResultSize(cost.AtMost(cost.Const(16))),
+		cost.BeforeVersion(1, cost.ManualCost(estimateNetworkParseCost, trackNetworkParseCost)),
+	)
+}
+
+func networkParseBoolCostModel(id string) cost.OverloadModel {
+	return cost.Overload(id,
+		cost.EvalCost(cost.StringScan(cost.Length(cost.Arg(0)))),
+		cost.BeforeVersion(1, cost.ManualCost(estimateNetworkParseBoolCost, trackNetworkParseCost)),
+	)
+}
+
+func networkIsCanonicalCostModel(id string) cost.OverloadModel {
+	return cost.Overload(id,
+		cost.EvalCost(cost.Scale(cost.Length(cost.Arg(0)), 2*cost.StringCostFactor)),
+		cost.BeforeVersion(1, cost.ManualCost(estimateIPIsCanonicalCost, trackIPIsCanonicalCost)),
+	)
+}
+
+// networkToStringCostModel models string(IP) and string(CIDR): formatted IPv6/CIDR strings are at
+// most 45 characters.
+func networkToStringCostModel(id string) cost.OverloadModel {
+	return cost.Overload(id,
+		cost.EvalCost(cost.Const(cost.CallCost)),
+		cost.ResultSize(cost.AtMost(cost.Const(45))),
+		cost.BeforeVersion(1, cost.ManualCost(estimateNetworkNominalStringCost, trackNetworkNominalCost)),
+	)
+}
+
+func networkCIDROpaqueCostModel(id string) cost.OverloadModel {
+	return cost.MemberOverload(id,
+		cost.EvalCost(cost.Const(cost.CallCost)),
+		cost.ResultSize(cost.AtMost(cost.Const(16))),
+		cost.BeforeVersion(1, cost.ManualCost(estimateNetworkNominalOpaqueCost, trackNetworkNominalCost)),
+	)
+}
+
+func networkNominalCostModel(id string) cost.OverloadModel {
+	return cost.MemberOverload(id,
+		cost.EvalCost(cost.Const(cost.CallCost)),
+		cost.BeforeVersion(1, cost.ManualCost(estimateNetworkNominalCost, trackNetworkNominalCost)),
+	)
+}
+
+// networkCIDRLength returns the bounded length of a CIDR receiver (at most 16 bytes), which bounds
+// the estimate for a receiver of unknown size without changing the runtime charge.
+func networkCIDRLength() cost.QuantityExpr {
+	return cost.Min(cost.Length(cost.Target()), cost.Const(16))
+}
+
+// networkCIDRCompareCost returns the address comparison cost for a CIDR receiver, which reads the
+// CIDR twice and therefore scans at twice StringCostFactor.
+func networkCIDRCompareCost() cost.QuantityExpr {
+	return cost.Scale(networkCIDRLength(), 2*cost.StringCostFactor)
+}
+
+func networkContainsIPIPCostModel(id string) cost.OverloadModel {
+	return cost.MemberOverload(id,
+		cost.EvalCost(networkCIDRCompareCost()),
+		cost.BeforeVersion(1, cost.ManualCost(estimateNetworkContainsIPIPCost, trackNetworkContainsIPIPCost)),
+	)
+}
+
+func networkContainsIPStringCostModel(id string) cost.OverloadModel {
+	return cost.MemberOverload(id,
+		cost.EvalCost(cost.Sum(networkCIDRCompareCost(), cost.StringScan(cost.Length(cost.Arg(0))))),
+		cost.BeforeVersion(1, cost.ManualCost(estimateNetworkContainsIPStringCost, trackNetworkContainsIPStringCost)),
+	)
+}
+
+func networkContainsCIDRCIDRCostModel(id string) cost.OverloadModel {
+	return cost.MemberOverload(id,
+		cost.EvalCost(cost.Sum(networkCIDRCompareCost(), cost.StringScan(networkCIDRLength()), cost.Const(1))),
+		cost.BeforeVersion(1, cost.ManualCost(estimateNetworkContainsCIDRCIDRCost, trackNetworkContainsCIDRCIDRCost)),
+	)
+}
+
+func networkContainsCIDRStringCostModel(id string) cost.OverloadModel {
+	return cost.MemberOverload(id,
+		cost.EvalCost(cost.Sum(networkCIDRCompareCost(), cost.StringScan(networkCIDRLength()), cost.Const(1), cost.StringScan(cost.Length(cost.Arg(0))))),
+		cost.BeforeVersion(1, cost.ManualCost(estimateNetworkContainsCIDRStringCost, trackNetworkContainsCIDRStringCost)),
+	)
 }

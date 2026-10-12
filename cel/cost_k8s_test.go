@@ -393,7 +393,10 @@ func TestK8sIPCost(t *testing.T) {
 	testCases := []struct {
 		ops                 []string
 		expectEstimatedCost func(cost.CostEstimate) cost.CostEstimate
-		expectRuntimeCost   func(uint64) uint64
+		// expectEstimatedCostV0 is the estimate under cost.ModelVersion0, set only where the
+		// revision moved it.
+		expectEstimatedCostV0 func(cost.CostEstimate) cost.CostEstimate
+		expectRuntimeCost     func(uint64) uint64
 	}{
 		{
 			// For just parsing the IP, the cost is expected to be the base.
@@ -413,6 +416,9 @@ func TestK8sIPCost(t *testing.T) {
 			ops: []string{" == ip('192.168.0.1')"},
 			// In CEL-go, equality for opaque types is estimated as [1, 2].
 			expectEstimatedCost: func(c cost.CostEstimate) cost.CostEstimate {
+				return c.Add(ipv4BaseEstimatedCost).Add(cost.RangedCostEstimate(0, 2))
+			},
+			expectEstimatedCostV0: func(c cost.CostEstimate) cost.CostEstimate {
 				return c.Add(ipv4BaseEstimatedCost).Add(cost.RangedCostEstimate(1, 2))
 			},
 			expectRuntimeCost: func(c uint64) uint64 { return c + ipv4BaseRuntimeCost + 1 },
@@ -422,10 +428,18 @@ func TestK8sIPCost(t *testing.T) {
 	for _, tc := range testCases {
 		for _, op := range tc.ops {
 			t.Run(ipv4+op, func(t *testing.T) {
+				if tc.expectEstimatedCostV0 != nil {
+					testK8sCost(t, ipv4+op, tc.expectEstimatedCost(ipv4BaseEstimatedCost), tc.expectRuntimeCost(ipv4BaseRuntimeCost), tc.expectEstimatedCostV0(ipv4BaseEstimatedCost))
+					return
+				}
 				testK8sCost(t, ipv4+op, tc.expectEstimatedCost(ipv4BaseEstimatedCost), tc.expectRuntimeCost(ipv4BaseRuntimeCost))
 			})
 
 			t.Run(ipv6+op, func(t *testing.T) {
+				if tc.expectEstimatedCostV0 != nil {
+					testK8sCost(t, ipv6+op, tc.expectEstimatedCost(ipv6BaseEstimatedCost), tc.expectRuntimeCost(ipv6BaseRuntimeCost), tc.expectEstimatedCostV0(ipv6BaseEstimatedCost))
+					return
+				}
 				testK8sCost(t, ipv6+op, tc.expectEstimatedCost(ipv6BaseEstimatedCost), tc.expectRuntimeCost(ipv6BaseRuntimeCost))
 			})
 		}
@@ -474,7 +488,10 @@ func TestK8sCIDRCost(t *testing.T) {
 	type testCase struct {
 		ops                 []string
 		expectEstimatedCost func(cost.CostEstimate) cost.CostEstimate
-		expectRuntimeCost   func(uint64) uint64
+		// expectEstimatedCostV0 is the estimate under cost.ModelVersion0, set only where the
+		// revision moved it.
+		expectEstimatedCostV0 func(cost.CostEstimate) cost.CostEstimate
+		expectRuntimeCost     func(uint64) uint64
 	}
 
 	cases := []testCase{
@@ -496,6 +513,9 @@ func TestK8sCIDRCost(t *testing.T) {
 			ops: []string{" == cidr('2001:db8::/32')"},
 			// In CEL-go, equality for opaque types is estimated as [1, 2].
 			expectEstimatedCost: func(c cost.CostEstimate) cost.CostEstimate {
+				return c.Add(ipv6BaseEstimatedCost).Add(cost.RangedCostEstimate(0, 2))
+			},
+			expectEstimatedCostV0: func(c cost.CostEstimate) cost.CostEstimate {
 				return c.Add(ipv6BaseEstimatedCost).Add(cost.RangedCostEstimate(1, 2))
 			},
 			expectRuntimeCost: func(c uint64) uint64 { return c + ipv6BaseRuntimeCost + 1 },
@@ -506,6 +526,9 @@ func TestK8sCIDRCost(t *testing.T) {
 		{
 			ops: []string{".containsCIDR(cidr('192.0.0.0/30'))"},
 			expectEstimatedCost: func(c cost.CostEstimate) cost.CostEstimate {
+				return cost.RangedCostEstimate(c.Min+3, c.Max+9)
+			},
+			expectEstimatedCostV0: func(c cost.CostEstimate) cost.CostEstimate {
 				return cost.RangedCostEstimate(c.Min+5, c.Max+9)
 			},
 			expectRuntimeCost: func(c uint64) uint64 { return c + 5 },
@@ -513,6 +536,9 @@ func TestK8sCIDRCost(t *testing.T) {
 		{
 			ops: []string{".containsCIDR(cidr('192.168.0.0/16'))"},
 			expectEstimatedCost: func(c cost.CostEstimate) cost.CostEstimate {
+				return cost.RangedCostEstimate(c.Min+3, c.Max+9)
+			},
+			expectEstimatedCostV0: func(c cost.CostEstimate) cost.CostEstimate {
 				return cost.RangedCostEstimate(c.Min+5, c.Max+9)
 			},
 			expectRuntimeCost: func(c uint64) uint64 { return c + 5 },
@@ -520,6 +546,9 @@ func TestK8sCIDRCost(t *testing.T) {
 		{
 			ops: []string{".containsCIDR('192.0.0.0/30')"},
 			expectEstimatedCost: func(c cost.CostEstimate) cost.CostEstimate {
+				return cost.RangedCostEstimate(c.Min+3, c.Max+9)
+			},
+			expectEstimatedCostV0: func(c cost.CostEstimate) cost.CostEstimate {
 				return cost.RangedCostEstimate(c.Min+5, c.Max+9)
 			},
 			expectRuntimeCost: func(c uint64) uint64 { return c + 5 },
@@ -527,6 +556,9 @@ func TestK8sCIDRCost(t *testing.T) {
 		{
 			ops: []string{".containsCIDR('192.168.0.0/16')"},
 			expectEstimatedCost: func(c cost.CostEstimate) cost.CostEstimate {
+				return cost.RangedCostEstimate(c.Min+3, c.Max+9)
+			},
+			expectEstimatedCostV0: func(c cost.CostEstimate) cost.CostEstimate {
 				return cost.RangedCostEstimate(c.Min+5, c.Max+9)
 			},
 			expectRuntimeCost: func(c uint64) uint64 { return c + 5 },
@@ -534,6 +566,9 @@ func TestK8sCIDRCost(t *testing.T) {
 		{
 			ops: []string{".containsIP(ip('192.0.0.1'))"},
 			expectEstimatedCost: func(c cost.CostEstimate) cost.CostEstimate {
+				return cost.RangedCostEstimate(c.Min+1, c.Max+5)
+			},
+			expectEstimatedCostV0: func(c cost.CostEstimate) cost.CostEstimate {
 				return cost.RangedCostEstimate(c.Min+2, c.Max+5)
 			},
 			expectRuntimeCost: func(c uint64) uint64 { return c + 2 },
@@ -541,6 +576,9 @@ func TestK8sCIDRCost(t *testing.T) {
 		{
 			ops: []string{".containsIP(ip('192.169.0.1'))"},
 			expectEstimatedCost: func(c cost.CostEstimate) cost.CostEstimate {
+				return cost.RangedCostEstimate(c.Min+2, c.Max+6)
+			},
+			expectEstimatedCostV0: func(c cost.CostEstimate) cost.CostEstimate {
 				return cost.RangedCostEstimate(c.Min+3, c.Max+6)
 			},
 			expectRuntimeCost: func(c uint64) uint64 { return c + 3 },
@@ -548,6 +586,9 @@ func TestK8sCIDRCost(t *testing.T) {
 		{
 			ops: []string{".containsIP(ip('192.169.169.250'))"},
 			expectEstimatedCost: func(c cost.CostEstimate) cost.CostEstimate {
+				return cost.RangedCostEstimate(c.Min+2, c.Max+6)
+			},
+			expectEstimatedCostV0: func(c cost.CostEstimate) cost.CostEstimate {
 				return cost.RangedCostEstimate(c.Min+3, c.Max+6)
 			},
 			expectRuntimeCost: func(c uint64) uint64 { return c + 3 },
@@ -555,6 +596,9 @@ func TestK8sCIDRCost(t *testing.T) {
 		{
 			ops: []string{".containsIP('192.0.0.1')"},
 			expectEstimatedCost: func(c cost.CostEstimate) cost.CostEstimate {
+				return cost.RangedCostEstimate(c.Min+1, c.Max+5)
+			},
+			expectEstimatedCostV0: func(c cost.CostEstimate) cost.CostEstimate {
 				return cost.RangedCostEstimate(c.Min+2, c.Max+5)
 			},
 			expectRuntimeCost: func(c uint64) uint64 { return c + 2 },
@@ -562,6 +606,9 @@ func TestK8sCIDRCost(t *testing.T) {
 		{
 			ops: []string{".containsIP('192.169.0.1')"},
 			expectEstimatedCost: func(c cost.CostEstimate) cost.CostEstimate {
+				return cost.RangedCostEstimate(c.Min+2, c.Max+6)
+			},
+			expectEstimatedCostV0: func(c cost.CostEstimate) cost.CostEstimate {
 				return cost.RangedCostEstimate(c.Min+3, c.Max+6)
 			},
 			expectRuntimeCost: func(c uint64) uint64 { return c + 3 },
@@ -573,6 +620,9 @@ func TestK8sCIDRCost(t *testing.T) {
 			ops: []string{".containsCIDR(cidr('2001:db8::/126'))"},
 			// For operations like checking if an IP is in a CIDR, the cost is expected to higher.
 			expectEstimatedCost: func(c cost.CostEstimate) cost.CostEstimate {
+				return cost.RangedCostEstimate(c.Min+3, c.Max+9)
+			},
+			expectEstimatedCostV0: func(c cost.CostEstimate) cost.CostEstimate {
 				return cost.RangedCostEstimate(c.Min+5, c.Max+9)
 			},
 			expectRuntimeCost: func(c uint64) uint64 { return c + 5 },
@@ -581,6 +631,9 @@ func TestK8sCIDRCost(t *testing.T) {
 			ops: []string{".containsCIDR(cidr('2001:db8::/32'))"},
 			// For operations like checking if an IP is in a CIDR, the cost is expected to higher.
 			expectEstimatedCost: func(c cost.CostEstimate) cost.CostEstimate {
+				return cost.RangedCostEstimate(c.Min+3, c.Max+9)
+			},
+			expectEstimatedCostV0: func(c cost.CostEstimate) cost.CostEstimate {
 				return cost.RangedCostEstimate(c.Min+5, c.Max+9)
 			},
 			expectRuntimeCost: func(c uint64) uint64 { return c + 5 },
@@ -589,6 +642,9 @@ func TestK8sCIDRCost(t *testing.T) {
 			ops: []string{".containsCIDR('2001:db8::/126')"},
 			// For operations like checking if an IP is in a CIDR, the cost is expected to higher.
 			expectEstimatedCost: func(c cost.CostEstimate) cost.CostEstimate {
+				return cost.RangedCostEstimate(c.Min+3, c.Max+9)
+			},
+			expectEstimatedCostV0: func(c cost.CostEstimate) cost.CostEstimate {
 				return cost.RangedCostEstimate(c.Min+5, c.Max+9)
 			},
 			expectRuntimeCost: func(c uint64) uint64 { return c + 5 },
@@ -597,6 +653,9 @@ func TestK8sCIDRCost(t *testing.T) {
 			ops: []string{".containsCIDR('2001:db8::/32')"},
 			// For operations like checking if an IP is in a CIDR, the cost is expected to higher.
 			expectEstimatedCost: func(c cost.CostEstimate) cost.CostEstimate {
+				return cost.RangedCostEstimate(c.Min+3, c.Max+9)
+			},
+			expectEstimatedCostV0: func(c cost.CostEstimate) cost.CostEstimate {
 				return cost.RangedCostEstimate(c.Min+5, c.Max+9)
 			},
 			expectRuntimeCost: func(c uint64) uint64 { return c + 5 },
@@ -605,6 +664,9 @@ func TestK8sCIDRCost(t *testing.T) {
 			ops: []string{".containsIP(ip('2001:db8:3333:4444:5555:6666:7777:8888'))"},
 			// For operations like checking if an IP is in a CIDR, the cost is expected to higher.
 			expectEstimatedCost: func(c cost.CostEstimate) cost.CostEstimate {
+				return cost.RangedCostEstimate(c.Min+4, c.Max+8)
+			},
+			expectEstimatedCostV0: func(c cost.CostEstimate) cost.CostEstimate {
 				return cost.RangedCostEstimate(c.Min+5, c.Max+8)
 			},
 			expectRuntimeCost: func(c uint64) uint64 { return c + 5 },
@@ -613,6 +675,9 @@ func TestK8sCIDRCost(t *testing.T) {
 			ops: []string{".containsIP(ip('2001:db8::1'))"},
 			// For operations like checking if an IP is in a CIDR, the cost is expected to higher.
 			expectEstimatedCost: func(c cost.CostEstimate) cost.CostEstimate {
+				return cost.RangedCostEstimate(c.Min+2, c.Max+6)
+			},
+			expectEstimatedCostV0: func(c cost.CostEstimate) cost.CostEstimate {
 				return cost.RangedCostEstimate(c.Min+3, c.Max+6)
 			},
 			expectRuntimeCost: func(c uint64) uint64 { return c + 3 },
@@ -621,6 +686,9 @@ func TestK8sCIDRCost(t *testing.T) {
 			ops: []string{".containsIP('2001:db8:3333:4444:5555:6666:7777:8888')"},
 			// For operations like checking if an IP is in a CIDR, the cost is expected to higher.
 			expectEstimatedCost: func(c cost.CostEstimate) cost.CostEstimate {
+				return cost.RangedCostEstimate(c.Min+4, c.Max+8)
+			},
+			expectEstimatedCostV0: func(c cost.CostEstimate) cost.CostEstimate {
 				return cost.RangedCostEstimate(c.Min+5, c.Max+8)
 			},
 			expectRuntimeCost: func(c uint64) uint64 { return c + 5 },
@@ -629,6 +697,9 @@ func TestK8sCIDRCost(t *testing.T) {
 			ops: []string{".containsIP('2001:db8::1')"},
 			// For operations like checking if an IP is in a CIDR, the cost is expected to higher.
 			expectEstimatedCost: func(c cost.CostEstimate) cost.CostEstimate {
+				return cost.RangedCostEstimate(c.Min+2, c.Max+6)
+			},
+			expectEstimatedCostV0: func(c cost.CostEstimate) cost.CostEstimate {
 				return cost.RangedCostEstimate(c.Min+3, c.Max+6)
 			},
 			expectRuntimeCost: func(c uint64) uint64 { return c + 3 },
@@ -638,6 +709,10 @@ func TestK8sCIDRCost(t *testing.T) {
 	for _, tc := range ipv4Cases {
 		for _, op := range tc.ops {
 			t.Run(ipv4+op, func(t *testing.T) {
+				if tc.expectEstimatedCostV0 != nil {
+					testK8sCost(t, ipv4+op, tc.expectEstimatedCost(ipv4BaseEstimatedCost), tc.expectRuntimeCost(ipv4BaseRuntimeCost), tc.expectEstimatedCostV0(ipv4BaseEstimatedCost))
+					return
+				}
 				testK8sCost(t, ipv4+op, tc.expectEstimatedCost(ipv4BaseEstimatedCost), tc.expectRuntimeCost(ipv4BaseRuntimeCost))
 			})
 		}
@@ -646,6 +721,10 @@ func TestK8sCIDRCost(t *testing.T) {
 	for _, tc := range ipv6Cases {
 		for _, op := range tc.ops {
 			t.Run(ipv6+op, func(t *testing.T) {
+				if tc.expectEstimatedCostV0 != nil {
+					testK8sCost(t, ipv6+op, tc.expectEstimatedCost(ipv6BaseEstimatedCost), tc.expectRuntimeCost(ipv6BaseRuntimeCost), tc.expectEstimatedCostV0(ipv6BaseEstimatedCost))
+					return
+				}
 				testK8sCost(t, ipv6+op, tc.expectEstimatedCost(ipv6BaseEstimatedCost), tc.expectRuntimeCost(ipv6BaseRuntimeCost))
 			})
 		}
@@ -661,39 +740,45 @@ func TestK8sNonConformance_CostEstimators(t *testing.T) {
 		expr             string
 		k8sEstimatedCost cost.CostEstimate
 		celEstimatedCost cost.CostEstimate
-		k8sRuntimeCost   uint64
-		celRuntimeCost   uint64
-		reason           string
+		// celEstimatedCostV0 is CEL-go's estimate under cost.ModelVersion0, set only where the
+		// revision moved it.
+		celEstimatedCostV0 *cost.CostEstimate
+		k8sRuntimeCost     uint64
+		celRuntimeCost     uint64
+		reason             string
 	}{
 		// 1. IP and CIDR Equality (_==_)
 		// Kubernetes hardcoded _==_ for IP/CIDR types to a fixed unit cost of 1 (Min: 1, Max: 1).
 		// CEL-go estimates _==_ for opaque types as [1, 2].
 		{
-			name:             "ip_equality",
-			expr:             "ip('192.168.0.1') == ip('192.168.0.1')",
-			k8sEstimatedCost: cost.FixedCostEstimate(5),
-			celEstimatedCost: cost.RangedCostEstimate(5, 6),
-			k8sRuntimeCost:   5,
-			celRuntimeCost:   5,
-			reason:           "K8s custom estimator hardcoded _==_ on IP/CIDR to fixed cost 1, whereas CEL-go estimates _==_ on opaque types as [1, 2]",
+			name:               "ip_equality",
+			expr:               "ip('192.168.0.1') == ip('192.168.0.1')",
+			k8sEstimatedCost:   cost.FixedCostEstimate(5),
+			celEstimatedCost:   cost.RangedCostEstimate(4, 6),
+			celEstimatedCostV0: costV0(5, 6),
+			k8sRuntimeCost:     5,
+			celRuntimeCost:     5,
+			reason:             "K8s custom estimator hardcoded _==_ on IP/CIDR to fixed cost 1, whereas CEL-go estimates _==_ on opaque types as [1, 2]",
 		},
 		{
-			name:             "ipv6_equality",
-			expr:             "ip('2001:db8:3333:4444:5555:6666:7777:8888') == ip('192.168.0.1')",
-			k8sEstimatedCost: cost.FixedCostEstimate(7),
-			celEstimatedCost: cost.RangedCostEstimate(7, 8),
-			k8sRuntimeCost:   7,
-			celRuntimeCost:   7,
-			reason:           "K8s custom estimator hardcoded _==_ on IP/CIDR to fixed cost 1, whereas CEL-go estimates _==_ on opaque types as [1, 2]",
+			name:               "ipv6_equality",
+			expr:               "ip('2001:db8:3333:4444:5555:6666:7777:8888') == ip('192.168.0.1')",
+			k8sEstimatedCost:   cost.FixedCostEstimate(7),
+			celEstimatedCost:   cost.RangedCostEstimate(6, 8),
+			celEstimatedCostV0: costV0(7, 8),
+			k8sRuntimeCost:     7,
+			celRuntimeCost:     7,
+			reason:             "K8s custom estimator hardcoded _==_ on IP/CIDR to fixed cost 1, whereas CEL-go estimates _==_ on opaque types as [1, 2]",
 		},
 		{
-			name:             "cidr_equality",
-			expr:             "cidr('192.168.0.0/16') == cidr('2001:db8::/32')",
-			k8sEstimatedCost: cost.FixedCostEstimate(5),
-			celEstimatedCost: cost.RangedCostEstimate(5, 6),
-			k8sRuntimeCost:   5,
-			celRuntimeCost:   5,
-			reason:           "K8s custom estimator hardcoded _==_ on IP/CIDR to fixed cost 1, whereas CEL-go estimates _==_ on opaque types as [1, 2]",
+			name:               "cidr_equality",
+			expr:               "cidr('192.168.0.0/16') == cidr('2001:db8::/32')",
+			k8sEstimatedCost:   cost.FixedCostEstimate(5),
+			celEstimatedCost:   cost.RangedCostEstimate(4, 6),
+			celEstimatedCostV0: costV0(5, 6),
+			k8sRuntimeCost:     5,
+			celRuntimeCost:     5,
+			reason:             "K8s custom estimator hardcoded _==_ on IP/CIDR to fixed cost 1, whereas CEL-go estimates _==_ on opaque types as [1, 2]",
 		},
 
 		// 2. String Library Transformations
@@ -767,7 +852,11 @@ func TestK8sNonConformance_CostEstimators(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Verify that CEL-go produces the celEstimatedCost and celRuntimeCost as triaged.
-			testK8sCost(t, tc.expr, tc.celEstimatedCost, tc.celRuntimeCost)
+			if tc.celEstimatedCostV0 != nil {
+				testK8sCost(t, tc.expr, tc.celEstimatedCost, tc.celRuntimeCost, *tc.celEstimatedCostV0)
+			} else {
+				testK8sCost(t, tc.expr, tc.celEstimatedCost, tc.celRuntimeCost)
+			}
 
 			// Document that K8s expected values differ from CEL-go's actual values.
 			if tc.k8sEstimatedCost != tc.celEstimatedCost {
