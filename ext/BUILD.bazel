@@ -56,6 +56,7 @@ go_test(
     srcs = [
         "bindings_test.go",
         "comprehensions_test.go",
+        "cost_golden_test.go",
         "cost_soundness_test.go",
         "encoders_test.go",
         "extension_option_factory_test.go",
@@ -70,6 +71,9 @@ go_test(
         "sets_test.go",
         "strings_test.go",
     ],
+    data = glob([
+        "testdata/**",
+    ]),
     embed = [
         ":go_default_library",
     ],

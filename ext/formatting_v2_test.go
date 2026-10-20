@@ -918,6 +918,8 @@ func TestStringFormatV2(t *testing.T) {
 			}
 		}
 
+		checkCostGoldenV0Estimate(t, env, checkedAst, costTracker)
+
 		var out ref.Val
 		var details *cel.EvalDetails
 		if evalArgs != nil {
@@ -938,6 +940,9 @@ func TestStringFormatV2(t *testing.T) {
 					t.Fatalf("runtime cost %d outside of expected estimated cost range %v", *details.ActualCost(), expectedEstimatedCost)
 				}
 			}
+		}
+		if expectedRuntimeCost != 0 {
+			checkCostGoldenV0Actual(t, env, checkedAst, evalArgs)
 		}
 		return out, err
 	}

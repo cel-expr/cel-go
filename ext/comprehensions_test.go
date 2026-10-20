@@ -225,6 +225,8 @@ func TestTwoVarComprehensionsCost(t *testing.T) {
 		// estimatedCostV0 is the estimate under cost.ModelVersion0, set only where the revision moved it.
 		estimatedCostV0 *cost.CostEstimate
 		actualCost      uint64
+		// actualCostV0 is the tracked cost under cost.ModelVersion0, set only where the revision moved it.
+		actualCostV0 *uint64
 	}{
 		{
 			name:          "all list literal",
@@ -273,10 +275,12 @@ func TestTwoVarComprehensionsCost(t *testing.T) {
 			actualCost:    14,
 		},
 		{
-			name:          "transformList empty",
-			expr:          `[].transformList(i, v, v) == []`,
-			estimatedCost: cost.FixedCostEstimate(31),
-			actualCost:    31,
+			name:            "transformList empty",
+			expr:            `[].transformList(i, v, v) == []`,
+			estimatedCost:   cost.FixedCostEstimate(32),
+			estimatedCostV0: costV0(31, 31),
+			actualCost:      32,
+			actualCostV0:    actualV0(31),
 		},
 		{
 			name:          "transformList single element",
@@ -285,22 +289,27 @@ func TestTwoVarComprehensionsCost(t *testing.T) {
 			actualCost:    45,
 		},
 		{
-			name:          "transformList with filter",
-			expr:          `[3, 2, 1].transformList(i, v, v > i, v) == [3, 2]`,
-			estimatedCost: cost.RangedCostEstimate(43, 80),
-			actualCost:    67,
+			name:            "transformList with filter",
+			expr:            `[3, 2, 1].transformList(i, v, v > i, v) == [3, 2]`,
+			estimatedCost:   cost.RangedCostEstimate(41, 80),
+			estimatedCostV0: costV0(44, 80),
+			actualCost:      67,
 		},
 		{
-			name:          "transformMap empty list",
-			expr:          `[].transformMap(k, v, v + 1) == {}`,
-			estimatedCost: cost.FixedCostEstimate(71),
-			actualCost:    71,
+			name:            "transformMap empty list",
+			expr:            `[].transformMap(k, v, v + 1) == {}`,
+			estimatedCost:   cost.FixedCostEstimate(72),
+			estimatedCostV0: costV0(71, 71),
+			actualCost:      72,
+			actualCostV0:    actualV0(71),
 		},
 		{
-			name:          "transformMap empty map",
-			expr:          `{}.transformMap(k, v, v + 1) == {}`,
-			estimatedCost: cost.FixedCostEstimate(91),
-			actualCost:    91,
+			name:            "transformMap empty map",
+			expr:            `{}.transformMap(k, v, v + 1) == {}`,
+			estimatedCost:   cost.FixedCostEstimate(92),
+			estimatedCostV0: costV0(91, 91),
+			actualCost:      92,
+			actualCostV0:    actualV0(91),
 		},
 		{
 			name:          "transformMap literal scalar map",
@@ -316,10 +325,11 @@ func TestTwoVarComprehensionsCost(t *testing.T) {
 			actualCost:    108,
 		},
 		{
-			name:          "transformMap filter map",
-			expr:          `{1: 2, 3: 4, 5: 6}.transformMap(k, v, k % 3 == 0, v + 1) == {3: 5}`,
-			estimatedCost: cost.RangedCostEstimate(103, 116),
-			actualCost:    106,
+			name:            "transformMap filter map",
+			expr:            `{1: 2, 3: 4, 5: 6}.transformMap(k, v, k % 3 == 0, v + 1) == {3: 5}`,
+			estimatedCost:   cost.RangedCostEstimate(101, 116),
+			estimatedCostV0: costV0(104, 116),
+			actualCost:      106,
 		},
 		{
 			name: "transformMap variable input",
@@ -339,7 +349,7 @@ func TestTwoVarComprehensionsCost(t *testing.T) {
 				"m.@values":        10,
 				"m.@values.@items": 2,
 			},
-			estimatedCost: cost.RangedCostEstimate(72, 173),
+			estimatedCost: cost.RangedCostEstimate(73, 173),
 			actualCost:    98,
 		},
 		{
@@ -365,7 +375,7 @@ func TestTwoVarComprehensionsCost(t *testing.T) {
 				"m.@keys":   16,
 				"m.@values": 10,
 			},
-			estimatedCost: cost.RangedCostEstimate(64, 405),
+			estimatedCost: cost.RangedCostEstimate(65, 405),
 			actualCost:    201,
 		},
 	}
@@ -388,7 +398,7 @@ func TestTwoVarComprehensionsCost(t *testing.T) {
 			testCheckCost(t, env, cAst, tc.hints, tc.estimatedCost, tc.estimatedCostV0)
 			asts = append(asts, cAst)
 			for _, ast := range asts {
-				testEvalWithCost(t, env, ast, tc.in, tc.actualCost)
+				testEvalWithCost(t, env, ast, tc.in, tc.actualCost, ledgerV0(tc.actualCostV0)...)
 			}
 		})
 	}

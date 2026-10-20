@@ -93,7 +93,7 @@ func (t *testEvalContext) Size(node AstNode) SizeEstimate {
 			return *sz
 		}
 	}
-	if sz := computeTypeSize(node.Type()); sz != nil {
+	if sz := computeTypeSize(node.Type(), versionOf(t)); sz != nil {
 		return *sz
 	}
 	return UnknownSizeEstimate()
@@ -116,7 +116,7 @@ func (t *testEvalContext) ArgType(index int) (*types.Type, bool) {
 // TestMinQuantityModelVersions checks that Min computes the exact interval minimum, while the
 // BeforeVersion(1, ...) prior on comparison overloads reproduces the version 0 floor of 1.
 func TestMinQuantityModelVersions(t *testing.T) {
-	model := Overload("cmp",
+	model := Overload("cmp", argumentsOnly(),
 		EvalCost(Min(Arg(0), Arg(1))),
 		BeforeVersion(1, EvalCost(Ranged(Const(1), Min(Arg(0), Arg(1))))),
 	)

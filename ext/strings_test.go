@@ -747,6 +747,8 @@ func evalWithCEL(input string, expectedRuntimeCost uint64, expectedEstimatedCost
 	if out.Type() != types.StringType {
 		t.Fatalf("expected expr output to be a string, got %s", out.Type().TypeName())
 	}
+	checkCostGoldenV0Estimate(t, env, checkedAst, costTracker)
+	checkCostGoldenV0Actual(t, env, checkedAst, nil)
 	return out.Value().(string)
 }
 

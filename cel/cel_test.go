@@ -2007,7 +2007,7 @@ func TestEstimateCostAndRuntimeCost(t *testing.T) {
 				Variable("str2", StringType),
 			},
 			hints: map[string]uint64{"str1": 10, "str2": 10},
-			want:  cost.RangedCostEstimate(2, 6),
+			want:  cost.RangedCostEstimate(4, 6),
 			in:    map[string]any{"str1": "val1111111", "str2": "val2222222"},
 		},
 	}

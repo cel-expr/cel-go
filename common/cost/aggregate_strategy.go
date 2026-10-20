@@ -52,16 +52,12 @@ type aggregateSizingStrategy struct {
 }
 
 // TrackSize calculates the actual runtime aggregate size of a value during cost tracking.
+//
+// An optional is 1 plus the aggregate size of the value it holds, and an empty optional is 1, as
+// types.Optional reports it; see Optional.
 func (a *aggregateSizingStrategy) TrackSize(ctx TrackContext, value ref.Val) (uint64, bool) {
 	if value == nil {
 		return 0, false
-	}
-	if inner, isOpt := optionalValueOf(value); isOpt {
-		if inner == nil {
-			// An empty optional has size 1, as every value does under this strategy.
-			return 1, true
-		}
-		value = inner
 	}
 	return uint64(a.calc.AggregateSize(value)), true
 }

@@ -561,7 +561,7 @@ func (lib *optionalLib) CompileOptions() []EnvOption {
 				}))),
 		Function(optionalNoneFunc,
 			FunctionDocs(`singleton value representing an optional without a value`),
-			Overload("optional_none", []*Type{}, optionalTypeV,
+			Overload(overloads.OptionalNone, []*Type{}, optionalTypeV,
 				OverloadExamples(`optional.none()`),
 				FunctionBinding(func(values ...ref.Val) ref.Val {
 					return types.OptionalNone

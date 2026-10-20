@@ -397,12 +397,14 @@ func regexSearch(target, pattern cost.QuantityExpr) cost.QuantityExpr {
 	)
 }
 
-// regexExtractCostModel models regex.extract: it returns an optional, whose length is 1, holding a
-// part of the target.
+// regexExtractCostModel models regex.extract: it searches the target, and returns an optional
+// holding the first match or capture group, a part of the target. The result is charged as the
+// optional it is, 1 plus the size of the part (1 when nothing matched); see cost.Optional. Version 0
+// sizes an optional as 1, which is what v0.32.0 charged.
 func regexExtractCostModel(id string) cost.OverloadModel {
 	return cost.Overload(id,
-		cost.EvalCost(cost.Sum(cost.Const(cost.CallCost+1), regexSearch(cost.Arg(0), cost.Arg(1)))),
-		cost.ResultSize(cost.AtMost(cost.Arg(0))),
+		cost.EvalCost(cost.Sum(cost.Const(cost.CallCost), regexSearch(cost.Arg(0), cost.Arg(1)), cost.Result())),
+		cost.ResultSize(cost.Optional(cost.AtMost(cost.Arg(0)))),
 		cost.BeforeVersion(1, cost.ManualEstimator(estimateExtractCost)),
 	)
 }

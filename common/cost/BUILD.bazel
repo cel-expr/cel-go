@@ -42,6 +42,8 @@ go_test(
         "default_strategy_test.go",
         "length_test.go",
         "model_test.go",
+        "optional_cost_test.go",
+        "optional_test.go",
         "standard_test.go",
         "totals_test.go",
         "tracker_test.go",

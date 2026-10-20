@@ -61,68 +61,90 @@ var StandardOverloadModels = []OverloadModel{
 	// runtime, so the model reports no cost for the dispatch itself. The alternative's cost is
 	// bounded by calculateArgCost.
 	//
-	// The result is whichever of the two is present, so its size is the union of both (version 1).
+	// From version 1 the result is whichever of the two is present: or() returns one of the two
+	// optionals, and orValue() the receiver's value or the alternative. Before the revision these
+	// were unmodeled calls, which v0.32.0 estimated at 1 with no result size, although it charged
+	// them nothing.
 	MemberOverload(overloads.OptionalOrOptional,
 		EvalCost(Const(0)),
+		argumentsOnly(),
 		ResultSize(Union(Target(), Arg(0))),
-		BeforeVersion(1, ResultSize(nil)),
+		BeforeVersion(1, ManualEstimator(estimateUnmodeledCall)),
 	),
 	MemberOverload(overloads.OptionalOrValueValue,
 		EvalCost(Const(0)),
-		ResultSize(Union(Target(), Arg(0))),
-		BeforeVersion(1, ResultSize(nil)),
+		argumentsOnly(),
+		ResultSize(Union(ElemOf(Target()), Arg(0))),
+		BeforeVersion(1, ManualEstimator(estimateUnmodeledCall)),
 	),
 
-	// Wrapping and unwrapping an optional. These cost what an unmodeled call costs; they are
-	// modeled from version 1 so that the wrapped value's size survives the round trip. Without
-	// them an estimate dies at optional.of(x) and everything downstream of the optional is
-	// unbounded.
-	Overload(overloads.OptionalOf,
+	// Creating, wrapping and unwrapping an optional. These cost what an unmodeled call costs; they
+	// are modeled from version 1 so that the wrapped value's size survives the round trip, with an
+	// optional sized as 1 plus the value it holds (see Optional). Without them an estimate dies at
+	// optional.of(x) and everything downstream of the optional is unbounded.
+	Overload(overloads.OptionalNone,
 		EvalCost(Const(1)),
-		ResultSize(Arg(0)),
+		ResultSize(Optional(Const(0))),
 		BeforeVersion(1, ResultSize(nil)),
 	),
+	Overload(overloads.OptionalOf,
+		EvalCost(Const(1)),
+		ResultSize(Optional(Arg(0))),
+		BeforeVersion(1, ResultSize(nil)),
+	),
+	// ofNonZeroValue is empty for a zero value, so it holds a value of at most the argument's size.
 	Overload(overloads.OptionalOfNonZeroValue,
 		EvalCost(Const(1)),
-		ResultSize(Arg(0)),
+		ResultSize(Optional(AtMost(Arg(0)))),
 		BeforeVersion(1, ResultSize(nil)),
 	),
 	MemberOverload(overloads.OptionalValue,
 		EvalCost(Const(1)),
-		ResultSize(Target()),
+		ResultSize(ElemOf(Target())),
 		BeforeVersion(1, ResultSize(nil)),
 	),
 
-	// O(min(m, n)) comparison / equality
+	// O(min(m, n)) comparison / equality. Before version 1 the estimate keeps the v0.32.0 bounds of
+	// estimateComparisonV0; the charge is the same at every version.
 	Overload(overloads.LessString,
 		EvalCost(Scale(Min(Arg(0), Arg(1)), StringTraversalCostFactor)),
+		BeforeVersion(1, ManualEstimator(estimateComparisonV0)),
 	),
 	Overload(overloads.GreaterString,
 		EvalCost(Scale(Min(Arg(0), Arg(1)), StringTraversalCostFactor)),
+		BeforeVersion(1, ManualEstimator(estimateComparisonV0)),
 	),
 	Overload(overloads.LessEqualsString,
 		EvalCost(Scale(Min(Arg(0), Arg(1)), StringTraversalCostFactor)),
+		BeforeVersion(1, ManualEstimator(estimateComparisonV0)),
 	),
 	Overload(overloads.GreaterEqualsString,
 		EvalCost(Scale(Min(Arg(0), Arg(1)), StringTraversalCostFactor)),
+		BeforeVersion(1, ManualEstimator(estimateComparisonV0)),
 	),
 	Overload(overloads.LessBytes,
 		EvalCost(Scale(Min(Arg(0), Arg(1)), StringTraversalCostFactor)),
+		BeforeVersion(1, ManualEstimator(estimateComparisonV0)),
 	),
 	Overload(overloads.GreaterBytes,
 		EvalCost(Scale(Min(Arg(0), Arg(1)), StringTraversalCostFactor)),
+		BeforeVersion(1, ManualEstimator(estimateComparisonV0)),
 	),
 	Overload(overloads.LessEqualsBytes,
 		EvalCost(Scale(Min(Arg(0), Arg(1)), StringTraversalCostFactor)),
+		BeforeVersion(1, ManualEstimator(estimateComparisonV0)),
 	),
 	Overload(overloads.GreaterEqualsBytes,
 		EvalCost(Scale(Min(Arg(0), Arg(1)), StringTraversalCostFactor)),
+		BeforeVersion(1, ManualEstimator(estimateComparisonV0)),
 	),
 	Overload(overloads.Equals,
 		EvalCost(Scale(Min(Arg(0), Arg(1)), StringTraversalCostFactor)),
+		BeforeVersion(1, ManualEstimator(estimateComparisonV0)),
 	),
 	Overload(overloads.NotEquals,
 		EvalCost(Scale(Min(Arg(0), Arg(1)), StringTraversalCostFactor)),
+		BeforeVersion(1, ManualEstimator(estimateComparisonV0)),
 	),
 
 	// O(m+n) string & bytes concatenation
@@ -179,12 +201,13 @@ var StandardOverloadModels = []OverloadModel{
 	// short-circuiting (see CalculateArgCost in estimator.go), so the arg cost is 0.
 
 	// Logical short-circuiting operators
-	Overload(overloads.LogicalOr, EvalCost(Const(0))),
-	Overload(overloads.LogicalAnd, EvalCost(Const(0))),
+	Overload(overloads.LogicalOr, EvalCost(Const(0)), argumentsOnly()),
+	Overload(overloads.LogicalAnd, EvalCost(Const(0)), argumentsOnly()),
 
 	// Conditional operator
 	Overload(overloads.Conditional,
 		EvalCost(Const(0)),
+		argumentsOnly(),
 		ResultSize(Union(Arg(1), Arg(2))),
 	),
 }
@@ -227,4 +250,29 @@ func StandardOverloadTrackersWithOptions(opts ...ModelOption) map[string]Functio
 		trackers[m.ID] = m.FunctionTrackerWithOptions(opts...)
 	}
 	return trackers
+}
+
+// estimateUnmodeledCall estimates a call as the estimator does a call it has no model for: a cost
+// of 1, with no result size.
+func estimateUnmodeledCall(Estimator, *AstNode, []AstNode) *CallEstimate {
+	return NewCallEstimate(CallCostEstimate, nil)
+}
+
+// estimateComparisonV0 estimates a string, bytes or equality comparison as cel-go v0.32.0 did:
+// ceil(0.1 * [m, min(lhs.Max, rhs.Max)]), where m is 1 when the smaller maximum is non-zero, and 0
+// otherwise.
+//
+// The lower bound is the charge of comparing any non-empty operands, whatever their minimum sizes,
+// where the version 1 model reports ceil(0.1 * min(lhs.Min, rhs.Min)). The upper bound scales an
+// unknown size like any other, where the version 1 model saturates it at math.MaxUint64.
+func estimateComparisonV0(estimator Estimator, _ *AstNode, args []AstNode) *CallEstimate {
+	if len(args) != 2 {
+		return nil
+	}
+	smallestMax := min(EstimateSize(estimator, args[0]).Max, EstimateSize(estimator, args[1]).Max)
+	lo := uint64(0)
+	if smallestMax > 0 {
+		lo = 1
+	}
+	return NewCallEstimate(CostEstimate{Min: lo, Max: smallestMax}.MultiplyByCostFactor(StringTraversalCostFactor), nil)
 }

@@ -55,7 +55,7 @@ func TestLengthEstimate(t *testing.T) {
 	for _, tc := range tests {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			m := Overload("test", EvalCost(Length(Arg(0))))
+			m := Overload("test", argumentsOnly(), EvalCost(Length(Arg(0))))
 			if err := m.Validate(); err != nil {
 				t.Fatalf("Validate() failed: %v", err)
 			}
@@ -87,11 +87,11 @@ func TestLengthEstimateLiteral(t *testing.T) {
 		for _, strategy := range []SizingStrategy{DefaultSizingStrategy(), AggregateSizingStrategy()} {
 			node := NewAstNode(fac.NewLiteral(1, tc.lit), nil, tc.typ, nil)
 			want := FixedCostEstimate(tc.want)
-			global := Overload("test", EvalCost(Length(Arg(0)))).FunctionEstimatorWithOptions(WithSizingStrategy(strategy))
+			global := Overload("test", argumentsOnly(), EvalCost(Length(Arg(0)))).FunctionEstimatorWithOptions(WithSizingStrategy(strategy))
 			if got := global(nil, nil, []AstNode{node}).CostEstimate; got != want {
 				t.Errorf("%s: Length(Arg(0)) estimate = %v, want %v", tc.name, got, want)
 			}
-			member := MemberOverload("test", EvalCost(Length(Target()))).FunctionEstimatorWithOptions(WithSizingStrategy(strategy))
+			member := MemberOverload("test", argumentsOnly(), EvalCost(Length(Target()))).FunctionEstimatorWithOptions(WithSizingStrategy(strategy))
 			if got := member(nil, &node, nil).CostEstimate; got != want {
 				t.Errorf("%s: Length(Target()) estimate = %v, want %v", tc.name, got, want)
 			}
@@ -126,32 +126,5 @@ func TestLengthTrack(t *testing.T) {
 				t.Errorf("%s: Length(Arg(0)) track = %d, want %d", tc.name, got, tc.want)
 			}
 		}
-	}
-}
-
-// TestOptionalTrackedSize checks that both strategies size an optional as the value it holds, as
-// it is estimated. An empty optional has size 0 under the default strategy, and 1 under the
-// aggregate strategy, where every value has size at least 1.
-func TestOptionalTrackedSize(t *testing.T) {
-	m := Overload("test", EvalCost(Arg(0)))
-	tests := []struct {
-		name     string
-		strategy SizingStrategy
-		val      ref.Val
-		want     uint64
-	}{
-		{name: "default", strategy: DefaultSizingStrategy(), val: types.OptionalOf(types.String("abcd")), want: 4},
-		{name: "default empty", strategy: DefaultSizingStrategy(), val: types.OptionalNone, want: 0},
-		{name: "aggregate", strategy: AggregateSizingStrategy(), val: types.OptionalOf(types.String("abcd")), want: 4},
-		{name: "aggregate empty", strategy: AggregateSizingStrategy(), val: types.OptionalNone, want: 1},
-	}
-	for _, tc := range tests {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			tracker := m.FunctionTrackerWithOptions(WithSizingStrategy(tc.strategy))
-			if got := *tracker([]ref.Val{tc.val}, nil); got != tc.want {
-				t.Errorf("Arg(0) track = %d, want %d", got, tc.want)
-			}
-		})
 	}
 }

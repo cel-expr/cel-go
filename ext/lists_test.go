@@ -581,7 +581,9 @@ func TestListsCosts(t *testing.T) {
 		// estimatedCostV0 is the estimate under cost.ModelVersion0, set only where the revision moved it.
 		estimatedCostV0 *cost.CostEstimate
 		actualCost      uint64
-		version         int
+		// actualCostV0 is the cost tracked under cost.ModelVersion0, set only where the revision moved it.
+		actualCostV0 *uint64
+		version      int
 	}{
 		{
 			// (1 array alloc + internal alloc) * 10
@@ -595,7 +597,7 @@ func TestListsCosts(t *testing.T) {
 		{
 			name:            "list_range_computed",
 			expr:            `lists.range(4 / 2) == [0, 1]`,
-			estimatedCost:   cost.RangedCostEstimate(22, math.MaxUint64),
+			estimatedCost:   cost.RangedCostEstimate(23, math.MaxUint64),
 			estimatedCostV0: costV0(math.MaxUint64, math.MaxUint64),
 			actualCost:      25,
 		},
@@ -605,7 +607,7 @@ func TestListsCosts(t *testing.T) {
 			vars:            []cel.EnvOption{cel.Variable("x", cel.IntType)},
 			in:              map[string]any{"x": 5},
 			hints:           map[string]uint64{"x": 10},
-			estimatedCost:   cost.RangedCostEstimate(22, math.MaxUint64),
+			estimatedCost:   cost.RangedCostEstimate(23, math.MaxUint64),
 			estimatedCostV0: costV0(math.MaxUint64, math.MaxUint64),
 			actualCost:      28,
 		},
@@ -652,21 +654,18 @@ func TestListsCosts(t *testing.T) {
 			actualCost:    45,
 		},
 		{
-			name: "list_flatten",
-			expr: `[[1], 2, 3].flatten() == [1, 2, 3]`,
-			// From model version 1 flatten() is priced by its model, whose result size has a lower
-			// bound of 0 under every sizing strategy.
-			estimatedCost:   cost.RangedCostEstimate(44, 45),
-			estimatedCostV0: costV0(45, 45),
-			actualCost:      45,
-			version:         3,
+			name:          "list_flatten",
+			expr:          `[[1], 2, 3].flatten() == [1, 2, 3]`,
+			estimatedCost: cost.FixedCostEstimate(45),
+			actualCost:    45,
+			version:       3,
 		},
 		{
 			name: "list_flatten_v4",
 			expr: `[[1], 2, 3].flatten() == [1, 2, 3]`,
 			// From model version 1 flatten() is priced by its model, whose result size has a lower
 			// bound of 0 under every sizing strategy.
-			estimatedCost:   cost.RangedCostEstimate(41, 45),
+			estimatedCost:   cost.RangedCostEstimate(42, 45),
 			estimatedCostV0: costV0(45, 45),
 			actualCost:      45,
 		},
@@ -676,7 +675,7 @@ func TestListsCosts(t *testing.T) {
 			vars:          []cel.EnvOption{cel.Variable("x", cel.ListType(cel.DynType))},
 			in:            map[string]any{"x": []any{[]any{1}, 2, 3}},
 			hints:         map[string]uint64{"x": 3},
-			estimatedCost: cost.RangedCostEstimate(22, 26),
+			estimatedCost: cost.RangedCostEstimate(23, 26),
 			actualCost:    26,
 			version:       3,
 		},
@@ -686,7 +685,7 @@ func TestListsCosts(t *testing.T) {
 			vars:          []cel.EnvOption{cel.Variable("x", cel.ListType(cel.DynType))},
 			in:            map[string]any{"x": []any{[]any{1}, 2, 3}},
 			hints:         map[string]uint64{"x": 3},
-			estimatedCost: cost.RangedCostEstimate(22, math.MaxUint64),
+			estimatedCost: cost.RangedCostEstimate(23, math.MaxUint64),
 			actualCost:    26,
 		},
 		{
@@ -695,7 +694,7 @@ func TestListsCosts(t *testing.T) {
 			vars:          []cel.EnvOption{cel.Variable("x", cel.ListType(cel.DynType))},
 			in:            map[string]any{"x": []any{[]any{1}, 2, 3}},
 			hints:         map[string]uint64{"x": 3, "x.@items": 5},
-			estimatedCost: cost.RangedCostEstimate(22, 38),
+			estimatedCost: cost.RangedCostEstimate(23, 38),
 			actualCost:    26,
 		},
 		{
@@ -704,8 +703,8 @@ func TestListsCosts(t *testing.T) {
 			vars:            []cel.EnvOption{cel.Variable("x", cel.ListType(cel.DynType))},
 			in:              map[string]any{"x": []any{[]any{[]any{1, 2}}, 3}},
 			hints:           map[string]uint64{"x": 3, "x.@items": 2, "x.@items.@items": 4},
-			estimatedCost:   cost.RangedCostEstimate(22, 47),
-			estimatedCostV0: costV0(22, 29),
+			estimatedCost:   cost.RangedCostEstimate(23, 47),
+			estimatedCostV0: costV0(23, 29),
 			actualCost:      26,
 		},
 		{
@@ -714,8 +713,8 @@ func TestListsCosts(t *testing.T) {
 			vars:            []cel.EnvOption{cel.Variable("x", cel.ListType(cel.DynType))},
 			in:              map[string]any{"x": []any{[]any{[]any{1, 2}}, 3}},
 			hints:           map[string]uint64{"x": 3, "x.@items": 2},
-			estimatedCost:   cost.RangedCostEstimate(22, math.MaxUint64),
-			estimatedCostV0: costV0(22, 29),
+			estimatedCost:   cost.RangedCostEstimate(23, math.MaxUint64),
+			estimatedCostV0: costV0(23, 29),
 			actualCost:      26,
 		},
 		{
@@ -748,6 +747,7 @@ func TestListsCosts(t *testing.T) {
 			estimatedCost:   cost.FixedCostEstimate(51),
 			estimatedCostV0: costV0(50, 50),
 			actualCost:      51,
+			actualCostV0:    actualV0(50),
 		},
 		{
 			// (2 array allocs + 1 internal) * 10
@@ -758,6 +758,7 @@ func TestListsCosts(t *testing.T) {
 			estimatedCost:   cost.FixedCostEstimate(51),
 			estimatedCostV0: costV0(50, 50),
 			actualCost:      51,
+			actualCostV0:    actualV0(50),
 		},
 		{
 			// (1 array alloc + 1 internal) * 20
@@ -769,9 +770,10 @@ func TestListsCosts(t *testing.T) {
 			vars:            []cel.EnvOption{cel.Variable("x", cel.ListType(cel.StringType))},
 			in:              map[string]any{"x": []string{"hello", "hello"}},
 			hints:           map[string]uint64{"x": 3, "x.@items": 5},
-			estimatedCost:   cost.RangedCostEstimate(22, 42),
-			estimatedCostV0: costV0(22, 41),
+			estimatedCost:   cost.RangedCostEstimate(23, 42),
+			estimatedCostV0: costV0(23, 41),
 			actualCost:      32,
+			actualCostV0:    actualV0(31),
 		},
 		{
 			// allocs: (2 + one internal) * 10
@@ -785,7 +787,7 @@ func TestListsCosts(t *testing.T) {
 				cel.Variable("y", cel.IntType),
 			},
 			in:              map[string]any{"x": 1, "y": 3},
-			estimatedCost:   cost.RangedCostEstimate(33, 39),
+			estimatedCost:   cost.RangedCostEstimate(34, 39),
 			estimatedCostV0: costV0(39, 39),
 			actualCost:      36,
 		},
@@ -820,7 +822,7 @@ func TestListsCosts(t *testing.T) {
 			},
 			in:              map[string]any{"x": 1, "y": 3, "z": []int{1, 2, 3, 4, 5, 6, 7}},
 			hints:           map[string]uint64{"z": 10},
-			estimatedCost:   cost.RangedCostEstimate(24, 35),
+			estimatedCost:   cost.RangedCostEstimate(25, 35),
 			estimatedCostV0: costV0(35, 35),
 			actualCost:      27,
 		},
@@ -851,7 +853,7 @@ func TestListsCosts(t *testing.T) {
 			},
 			in:            map[string]any{"x": []int{3, 2, 1}},
 			hints:         map[string]uint64{"x": 5},
-			estimatedCost: cost.RangedCostEstimate(22, 28),
+			estimatedCost: cost.RangedCostEstimate(23, 28),
 			actualCost:    26,
 		},
 		{
@@ -873,7 +875,7 @@ func TestListsCosts(t *testing.T) {
 			vars:          []cel.EnvOption{cel.Variable("x", cel.ListType(cel.IntType))},
 			in:            map[string]any{"x": []int{3, 2, 1}},
 			hints:         map[string]uint64{"x": 5},
-			estimatedCost: cost.RangedCostEstimate(22, 73),
+			estimatedCost: cost.RangedCostEstimate(23, 73),
 			actualCost:    41,
 		},
 		{
@@ -882,18 +884,21 @@ func TestListsCosts(t *testing.T) {
 			vars:            []cel.EnvOption{cel.Variable("x", cel.ListType(cel.StringType))},
 			in:              map[string]any{"x": []string{"b", "a", "b", "a", "c", "c"}},
 			hints:           map[string]uint64{"x": 10, "x.@items": 1},
-			estimatedCost:   cost.RangedCostEstimate(22, 233),
-			estimatedCostV0: costV0(22, 223),
+			estimatedCost:   cost.RangedCostEstimate(23, 233),
+			estimatedCostV0: costV0(23, 223),
 			actualCost:      99,
+			actualCostV0:    actualV0(98),
 		},
 		{
-			name:          "list_sort_var_int_empty",
-			expr:          `x.sort() == []`,
-			vars:          []cel.EnvOption{cel.Variable("x", cel.ListType(cel.IntType))},
-			in:            map[string]any{"x": []int{}},
-			hints:         map[string]uint64{"x": 10},
-			estimatedCost: cost.RangedCostEstimate(22, 222),
-			actualCost:    22,
+			name:            "list_sort_var_int_empty",
+			expr:            `x.sort() == []`,
+			vars:            []cel.EnvOption{cel.Variable("x", cel.ListType(cel.IntType))},
+			in:              map[string]any{"x": []int{}},
+			hints:           map[string]uint64{"x": 10},
+			estimatedCost:   cost.RangedCostEstimate(23, 223),
+			estimatedCostV0: costV0(22, 222),
+			actualCost:      23,
+			actualCostV0:    actualV0(22),
 		},
 		{
 			name:          "list_sortBy",
@@ -907,7 +912,7 @@ func TestListsCosts(t *testing.T) {
 			vars:          []cel.EnvOption{cel.Variable("x", cel.ListType(cel.DynType))},
 			in:            map[string]any{"x": []any{map[string]any{"x": 4}, map[string]any{"x": 3}}},
 			hints:         map[string]uint64{"x": 5},
-			estimatedCost: cost.RangedCostEstimate(105, 226),
+			estimatedCost: cost.RangedCostEstimate(106, 226),
 			actualCost:    142,
 		},
 		{
@@ -916,9 +921,10 @@ func TestListsCosts(t *testing.T) {
 			vars:            []cel.EnvOption{cel.Variable("x", cel.ListType(cel.MapType(cel.StringType, cel.StringType)))},
 			in:              map[string]any{"x": []any{map[string]any{"x": "b"}, map[string]any{"x": "c"}, map[string]any{"x": "a"}}},
 			hints:           map[string]uint64{"x": 3, "x.@items": 1},
-			estimatedCost:   cost.RangedCostEstimate(135, 197),
-			estimatedCostV0: costV0(135, 196),
+			estimatedCost:   cost.RangedCostEstimate(136, 197),
+			estimatedCostV0: costV0(136, 196),
 			actualCost:      197,
+			actualCostV0:    actualV0(196),
 		},
 		{
 			name: "list_sort_concat_cost",
@@ -983,8 +989,9 @@ func TestListsCosts(t *testing.T) {
 			vars:          []cel.EnvOption{cel.Variable("x", cel.ListType(cel.StringType))},
 			in:            map[string]any{"x": []string{"hello", "hello"}},
 			hints:         map[string]uint64{"x": 3},
-			estimatedCost: cost.RangedCostEstimate(22, 42),
+			estimatedCost: cost.RangedCostEstimate(23, 42),
 			actualCost:    32,
+			actualCostV0:  actualV0(31),
 			version:       3,
 		},
 		{
@@ -993,9 +1000,10 @@ func TestListsCosts(t *testing.T) {
 			vars:            []cel.EnvOption{cel.Variable("x", cel.ListType(cel.StringType))},
 			in:              map[string]any{"x": []string{"hello", "hello"}},
 			hints:           map[string]uint64{"x": 3},
-			estimatedCost:   cost.RangedCostEstimate(22, 42),
-			estimatedCostV0: costV0(22, math.MaxUint64),
+			estimatedCost:   cost.RangedCostEstimate(23, 42),
+			estimatedCostV0: costV0(23, math.MaxUint64),
 			actualCost:      32,
+			actualCostV0:    actualV0(31),
 		},
 		{
 			name:            "list_distinct_var_v4_with_item_hint",
@@ -1003,9 +1011,10 @@ func TestListsCosts(t *testing.T) {
 			vars:            []cel.EnvOption{cel.Variable("x", cel.ListType(cel.StringType))},
 			in:              map[string]any{"x": []string{"hello", "hello"}},
 			hints:           map[string]uint64{"x": 3, "x.@items": 5},
-			estimatedCost:   cost.RangedCostEstimate(22, 42),
-			estimatedCostV0: costV0(22, 41),
+			estimatedCost:   cost.RangedCostEstimate(23, 42),
+			estimatedCostV0: costV0(23, 41),
 			actualCost:      32,
+			actualCostV0:    actualV0(31),
 		},
 		{
 			name:          "list_sort_var_string_v3",
@@ -1013,8 +1022,9 @@ func TestListsCosts(t *testing.T) {
 			vars:          []cel.EnvOption{cel.Variable("x", cel.ListType(cel.StringType))},
 			in:            map[string]any{"x": []string{"b", "a", "b", "a", "c", "c"}},
 			hints:         map[string]uint64{"x": 10},
-			estimatedCost: cost.RangedCostEstimate(22, 233),
+			estimatedCost: cost.RangedCostEstimate(23, 233),
 			actualCost:    99,
+			actualCostV0:  actualV0(98),
 			version:       3,
 		},
 		{
@@ -1023,9 +1033,10 @@ func TestListsCosts(t *testing.T) {
 			vars:            []cel.EnvOption{cel.Variable("x", cel.ListType(cel.StringType))},
 			in:              map[string]any{"x": []string{"b", "a", "b", "a", "c", "c"}},
 			hints:           map[string]uint64{"x": 10},
-			estimatedCost:   cost.RangedCostEstimate(22, 233),
-			estimatedCostV0: costV0(22, math.MaxUint64),
+			estimatedCost:   cost.RangedCostEstimate(23, 233),
+			estimatedCostV0: costV0(23, math.MaxUint64),
 			actualCost:      99,
+			actualCostV0:    actualV0(98),
 		},
 		{
 			name:            "list_sort_var_string_v4_with_item_hint",
@@ -1033,9 +1044,10 @@ func TestListsCosts(t *testing.T) {
 			vars:            []cel.EnvOption{cel.Variable("x", cel.ListType(cel.StringType))},
 			in:              map[string]any{"x": []string{"b", "a", "b", "a", "c", "c"}},
 			hints:           map[string]uint64{"x": 10, "x.@items": 1},
-			estimatedCost:   cost.RangedCostEstimate(22, 233),
-			estimatedCostV0: costV0(22, 223),
+			estimatedCost:   cost.RangedCostEstimate(23, 233),
+			estimatedCostV0: costV0(23, 223),
 			actualCost:      99,
+			actualCostV0:    actualV0(98),
 		},
 		{
 			name:          "list_sortBy_var_string_v3",
@@ -1043,8 +1055,9 @@ func TestListsCosts(t *testing.T) {
 			vars:          []cel.EnvOption{cel.Variable("x", cel.ListType(cel.MapType(cel.StringType, cel.StringType)))},
 			in:            map[string]any{"x": []any{map[string]any{"x": "b"}, map[string]any{"x": "c"}, map[string]any{"x": "a"}}},
 			hints:         map[string]uint64{"x": 3},
-			estimatedCost: cost.RangedCostEstimate(135, 197),
+			estimatedCost: cost.RangedCostEstimate(136, 197),
 			actualCost:    197,
+			actualCostV0:  actualV0(196),
 			version:       3,
 		},
 		{
@@ -1053,9 +1066,10 @@ func TestListsCosts(t *testing.T) {
 			vars:            []cel.EnvOption{cel.Variable("x", cel.ListType(cel.MapType(cel.StringType, cel.StringType)))},
 			in:              map[string]any{"x": []any{map[string]any{"x": "b"}, map[string]any{"x": "c"}, map[string]any{"x": "a"}}},
 			hints:           map[string]uint64{"x": 3},
-			estimatedCost:   cost.RangedCostEstimate(135, 197),
-			estimatedCostV0: costV0(135, math.MaxUint64),
+			estimatedCost:   cost.RangedCostEstimate(136, 197),
+			estimatedCostV0: costV0(136, math.MaxUint64),
 			actualCost:      197,
+			actualCostV0:    actualV0(196),
 		},
 		{
 			name:            "list_sortBy_var_string_v4_with_item_hint",
@@ -1063,9 +1077,10 @@ func TestListsCosts(t *testing.T) {
 			vars:            []cel.EnvOption{cel.Variable("x", cel.ListType(cel.MapType(cel.StringType, cel.StringType)))},
 			in:              map[string]any{"x": []any{map[string]any{"x": "b"}, map[string]any{"x": "c"}, map[string]any{"x": "a"}}},
 			hints:           map[string]uint64{"x": 3, "x.@items": 1},
-			estimatedCost:   cost.RangedCostEstimate(135, 197),
-			estimatedCostV0: costV0(135, 196),
+			estimatedCost:   cost.RangedCostEstimate(136, 197),
+			estimatedCostV0: costV0(136, 196),
 			actualCost:      197,
+			actualCostV0:    actualV0(196),
 		},
 		{
 			name:          "list_hasOnly",
@@ -1120,7 +1135,7 @@ func TestListsCosts(t *testing.T) {
 			testCheckCost(t, env, cAst, tc.hints, tc.estimatedCost, tc.estimatedCostV0)
 			asts = append(asts, cAst)
 			for _, ast := range asts {
-				testEvalWithCost(t, env, ast, tc.in, tc.actualCost)
+				testEvalWithCost(t, env, ast, tc.in, tc.actualCost, ledgerV0(tc.actualCostV0)...)
 			}
 		})
 	}

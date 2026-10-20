@@ -437,6 +437,8 @@ func normalize(e QuantityExpr) QuantityExpr {
 		return listExpr{lenExpr: normalize(x.lenExpr), elemExpr: normalize(x.elemExpr)}
 	case mapExpr:
 		return mapExpr{sizeExpr: normalize(x.sizeExpr), keyExpr: normalize(x.keyExpr), valExpr: normalize(x.valExpr)}
+	case optionalExpr:
+		return optionalExpr{valueExpr: normalize(x.valueExpr)}
 	default:
 		// Atoms and projections contain no scale factors.
 		return e
@@ -458,7 +460,7 @@ func carriesElements(ctx EstimateContext, e QuantityExpr) bool {
 	case targetExpr:
 		t, ok := ctx.TargetType()
 		return !ok || mayBeContainerType(t)
-	case resultExpr, elemExpr, keyExpr, listExpr, mapExpr:
+	case resultExpr, elemExpr, keyExpr, listExpr, mapExpr, optionalExpr:
 		return true
 	case subExpr:
 		return carriesElements(ctx, x.lhs)

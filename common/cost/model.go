@@ -152,10 +152,14 @@ func eachValueOf(expr QuantityExpr, ctx TrackContext, fn func(ref.Val)) {
 	}
 }
 
-// eachElement calls fn with each element of a list, or each value of a map. Values which are not
-// containers have no elements.
+// eachElement calls fn with each element of a list, each value of a map, or the value an optional
+// holds. Values which are not containers have no elements.
 func eachElement(val ref.Val, fn func(ref.Val)) {
 	switch v := val.(type) {
+	case *types.Optional:
+		if v.HasValue() {
+			fn(v.GetValue())
+		}
 	case traits.Lister:
 		for it := v.Iterator(); it.HasNext() == types.True; {
 			fn(it.Next())
@@ -449,14 +453,20 @@ func Length(expr QuantityExpr) QuantityExpr {
 	return lengthExpr{expr: expr}
 }
 
-// estimate reports the exact length of a literal operand, as Size() counts it at runtime. Otherwise
-// it bounds the length from the operand's size under the sizing strategy:
+// estimate reports the exact length of a literal operand, as ActualSize counts it at runtime, or
+// bounds the operand's length from its estimated size under the sizing strategy.
 //
-//   - Default strategy: the size is the length.
-//   - Aggregate strategy: a string's size is its UTF-8 byte count, at least 1, and each code point
-//     takes 1 to 4 bytes; a bytes value's size is its length, at least 1; a container's size is 1
-//     plus its entries (see countBounds); any other value has length 1.
-//   - Other strategies: unknown, except for the values whose length is always 1.
+// Because track returns ActualSize(val)—which is 0 for empty strings, bytes, and containers, and 1
+// for fixed-width scalars—the returned range is [1, 1] for fixed-width scalars and [lo, hi] within
+// [0, MaxUint64] for variable-length values. For soundness (est.Min <= actual), lo must be 0
+// whenever the operand may be empty at runtime:
+//
+//   - Default strategy: the size is the length ([sz.Min, sz.Max]).
+//   - Aggregate strategy: every value has an aggregate size >= 1 even when its length is 0 (a
+//     string's size is max(1, UTF-8 byte count) with 1–4 bytes per code point; a bytes value's size
+//     is max(1, byte length); a container's size is 1 + entry sizes, see countBounds); any other
+//     value has length 1. An aggregate size with Min <= 1 therefore yields lo = 0.
+//   - Other strategies: [0, MaxUint64], except for scalars whose length is always [1, 1].
 //
 // The kind of value comes from the operand's checked type, or, for a result whose type is not
 // known, from its metadata: an estimate which states element or key sizes is a container.
@@ -475,14 +485,14 @@ func (l lengthExpr) estimate(ctx EstimateContext) SizeEstimate {
 	case *aggregateSizingStrategy:
 		switch {
 		case known && kind == types.StringKind:
-			// The code point count of a non-literal string is unknown: its n bytes hold between
-			// ceil(n/4) and n code points. A size of 1 may be the empty string.
+			// Size <= 1 may be "" (length 0); n > 1 UTF-8 bytes hold [ceil(n/4), n] code points.
 			lo := uint64(0)
 			if sz.Min > 1 {
 				lo = sz.Min/4 + min(sz.Min%4, 1)
 			}
 			return RangedSizeEstimate(lo, sz.Max)
 		case known && kind == types.BytesKind:
+			// Size <= 1 may be b"" (length 0).
 			lo := uint64(0)
 			if sz.Min > 1 {
 				lo = sz.Min
@@ -491,8 +501,7 @@ func (l lengthExpr) estimate(ctx EstimateContext) SizeEstimate {
 		case (known && (kind == types.ListKind || kind == types.MapKind)) || sz.Elem != nil || sz.Key != nil:
 			return countBounds(strategyOf(ctx), sz)
 		default:
-			// Any value: an empty string has length 0, and no length exceeds the size, which is at
-			// least 1.
+			// Any value: empty strings/bytes/containers have length 0, and length never exceeds size (>= 1).
 			return RangedSizeEstimate(0, max(sz.Max, 1))
 		}
 	default:
@@ -1007,6 +1016,40 @@ func Map(sizeExpr, keyExpr, valExpr QuantityExpr) QuantityExpr {
 	return mapExpr{sizeExpr: sizeExpr, keyExpr: keyExpr, valExpr: valExpr}
 }
 
+// optionalExpr represents the size of an optional which holds a value of the given size.
+type optionalExpr struct {
+	valueExpr QuantityExpr
+}
+
+func (o optionalExpr) estimate(ctx EstimateContext) SizeEstimate {
+	if versionOf(ctx) < 1 {
+		return FixedSizeEstimate(1)
+	}
+	return optionalSizeOf(o.valueExpr.estimate(ctx))
+}
+
+func (o optionalExpr) track(ctx TrackContext) uint64 {
+	if trackVersionOf(ctx) < 1 {
+		return 1
+	}
+	return SafeAdd(1, o.valueExpr.track(ctx))
+}
+
+func (o optionalExpr) hasTarget() bool {
+	return hasTarget(o.valueExpr)
+}
+
+// Optional creates an expression representing an optional which holds a value of the given size.
+//
+// From cost model version 1 an optional is 1 plus the size of the value it holds, under every
+// sizing strategy: 1 plus the value's length under the default strategy, and 1 plus its aggregate
+// size under the aggregate strategy. An empty optional is 1, which Optional(Const(0)) describes.
+// The value is the optional's element, which ElemOf reads, so that value() and orValue() recover its
+// size. Version 0 sizes every optional as 1, as cel-go v0.32.0 did.
+func Optional(valueExpr QuantityExpr) QuantityExpr {
+	return optionalExpr{valueExpr: valueExpr}
+}
+
 // OverloadModel pairs an overload ID with its abstract cost and result size expressions.
 //
 // An OverloadModel is a value built by Overload or MemberOverload, and is not modified afterwards:
@@ -1020,9 +1063,12 @@ type OverloadModel struct {
 	IsMember        bool
 	manual          bool
 	manualEstimator bool
-	estimator       FunctionEstimator
-	tracker         FunctionTracker
-	priors          []priorOverload
+	// argumentsOnly marks a short-circuiting operator, whose cost is that of the arguments it
+	// evaluates, and which is therefore exempt from the minimum call cost; see minCallCost.
+	argumentsOnly bool
+	estimator     FunctionEstimator
+	tracker       FunctionTracker
+	priors        []priorOverload
 }
 
 // priorOverload is the model which priced an overload at revisions earlier than before.
@@ -1177,6 +1223,7 @@ func (m OverloadModel) buildEstimator(strategy SizingStrategy, version uint32) F
 	hasTarget := m.hasTarget()
 	cost := normalize(m.Cost)
 	size := normalize(m.Size)
+	floor := m.hasCallFloor(version)
 	return func(estimator Estimator, target *AstNode, args []AstNode) *CallEstimate {
 		if hasTarget && target == nil {
 			return nil
@@ -1201,6 +1248,9 @@ func (m OverloadModel) buildEstimator(strategy SizingStrategy, version uint32) F
 		costEst := cost.estimate(ctx)
 		*ctx = estimatorEvalContext{}
 		estimatorCtxPool.Put(ctx)
+		if floor {
+			costEst.Min, costEst.Max = max(costEst.Min, minCallCost), max(costEst.Max, minCallCost)
+		}
 		return NewCallEstimate(CostEstimate{Min: costEst.Min, Max: costEst.Max}, resSize)
 	}
 }
@@ -1229,21 +1279,29 @@ func (m OverloadModel) buildTracker(strategy SizingStrategy, version uint32) Fun
 	}
 	isMember := m.hasTarget()
 	cost := normalize(m.Cost)
+	floor := m.hasCallFloor(version)
 	return func(args []ref.Val, result ref.Val) *uint64 {
 		ctx := trackerCtxPool.Get().(*trackerEvalContext)
 		ctx.strategy = strategy
+		ctx.version = version
 		ctx.args = args
 		ctx.result = result
 		ctx.isMember = isMember
 		costVal := cost.track(ctx)
 		*ctx = trackerEvalContext{}
 		trackerCtxPool.Put(ctx)
+		if floor {
+			costVal = max(costVal, minCallCost)
+		}
 		return &costVal
 	}
 }
 
 // versionOf reports the cost model version of an EstimateContext.
 func versionOf(ctx EstimateContext) uint32 {
+	if ctx == nil {
+		return defaultModelVersion
+	}
 	if e, ok := ctx.(*estimatorEvalContext); ok && (e.estimator == nil || e.coster != nil) {
 		return e.version
 	}
@@ -1381,6 +1439,7 @@ func (e *estimatorEvalContext) TargetValue(defaultVal uint64) uint64 {
 type trackerEvalContext struct {
 	estimator ActualCostEstimator
 	strategy  SizingStrategy
+	version   uint32
 	args      []ref.Val
 	result    ref.Val
 	isMember  bool
@@ -1460,11 +1519,8 @@ func (t *trackerEvalContext) Size(value ref.Val) uint64 {
 	}
 	// Inlines defaultSizingStrategy.TrackSize, avoiding an interface call and boxing the context.
 	if t.strategy == defaultSizing {
-		if inner, isOpt := optionalValueOf(value); isOpt {
-			if inner == nil {
-				return 0
-			}
-			value = inner
+		if opt, isOpt := value.(*types.Optional); isOpt {
+			return optionalLength(t.version, opt)
 		}
 		return ActualSize(value)
 	}
@@ -1524,4 +1580,29 @@ func (t *trackerEvalContext) Result() uint64 {
 		return t.Size(val)
 	}
 	return 0
+}
+
+// modelVersion implements trackVersionContext.
+func (t *trackerEvalContext) modelVersion() uint32 {
+	return t.version
+}
+
+// minCallCost is the least a call priced by an OverloadModel costs from cost model version 1, both
+// estimated and tracked: a call does at least a unit of work, even over empty arguments, as
+// comparing two empty strings does. The short-circuiting operators, ||, && and ?:, and the optional
+// or() and orValue(), are exempt, as their cost is that of the arguments they evaluate.
+//
+// Version 0 reproduces cel-go v0.32.0, which estimated and charged such calls 0.
+const minCallCost = uint64(1)
+
+// hasCallFloor reports whether the model's declarative cost is raised to minCallCost at version.
+func (m OverloadModel) hasCallFloor(version uint32) bool {
+	return version >= 1 && !m.argumentsOnly
+}
+
+// argumentsOnly marks the model of a short-circuiting operator, which is exempt from minCallCost.
+func argumentsOnly() OverloadModelOption {
+	return func(m *OverloadModel) {
+		m.argumentsOnly = true
+	}
 }

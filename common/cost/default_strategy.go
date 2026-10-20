@@ -224,7 +224,7 @@ func isDynamicKind(kind types.Kind) bool {
 // fallbackElemSize resolves fixed-width primitive type sizes via computeTypeSize,
 // or queries the estimator with an untyped/pathless node for type-level hints.
 func fallbackElemSize(ctx EstimateContext, elemType *types.Type) *SizeEstimate {
-	if sz := computeTypeSize(elemType); sz != nil {
+	if sz := computeTypeSize(elemType, versionOf(ctx)); sz != nil {
 		return ownedSize(sz)
 	}
 	if ctx != nil && ctx.Estimator() != nil {
@@ -248,21 +248,45 @@ func (defaultSizingStrategy) TrackSize(ctx TrackContext, value ref.Val) (uint64,
 	if value == nil {
 		return 0, false
 	}
-	if inner, isOpt := optionalValueOf(value); isOpt {
-		if inner == nil {
-			return 0, true
-		}
-		value = inner
+	if opt, isOpt := value.(*types.Optional); isOpt {
+		return optionalLength(trackVersionOf(ctx), opt), true
 	}
 	return ActualSize(value), true
 }
 
+// optionalLength reports the size of an optional under the default sizing strategy, at the given
+// cost model version.
+//
+// From version 1 an optional is 1 plus the length of the value it holds, so an empty optional is 1,
+// and the optional's element is that value; see Optional. Version 0 sizes every optional as 1, as
+// cel-go v0.32.0 charged it through ActualSize, for which an optional is not a traits.Sizer.
+func optionalLength(version uint32, opt *types.Optional) uint64 {
+	if version < 1 || !opt.HasValue() {
+		return 1
+	}
+	if inner, isOpt := opt.GetValue().(*types.Optional); isOpt {
+		return SafeAdd(1, optionalLength(version, inner))
+	}
+	return SafeAdd(1, ActualSize(opt.GetValue()))
+}
+
+// trackVersionContext is implemented by TrackContext values which know the cost model version they
+// track under. It is unexported because TrackContext is an interface third parties may implement.
+type trackVersionContext interface {
+	modelVersion() uint32
+}
+
+// trackVersionOf reports the cost model version of a TrackContext: the latest version for a context
+// which does not report one.
+func trackVersionOf(ctx TrackContext) uint32 {
+	if v, ok := ctx.(trackVersionContext); ok {
+		return v.modelVersion()
+	}
+	return defaultModelVersion
+}
+
 // optionalValueOf reports whether value is an optional, and if so returns the value it holds, or
 // nil when the optional is empty.
-//
-// An optional is estimated as the size of the value it holds, so that value() and orValue() keep
-// that size. Tracking sizes it the same way, so that a cost which reads an optional, such as a
-// comparison of two optionals, is charged in the units it was estimated in.
 func optionalValueOf(value ref.Val) (ref.Val, bool) {
 	opt, isOpt := value.(*types.Optional)
 	if !isOpt {
@@ -434,7 +458,7 @@ func estimateScalarOrFallback(ctx EstimateContext, node AstNode) (SizeEstimate, 
 		}
 	}
 	if node.Type() != nil {
-		if sz := computeTypeSize(node.Type()); sz != nil {
+		if sz := computeTypeSize(node.Type(), versionOf(ctx)); sz != nil {
 			return *sz, true
 		}
 	}

@@ -48,7 +48,7 @@ var bindingTests = []struct {
 		name: "single bind",
 		expr: `cel.bind(a, 'hell' + 'o' + '!', "%s, %s, %s".format([a, a, a])) ==
 	                       'hello!, hello!, hello' + '!'`,
-		estimatedCost: cost.RangedCostEstimate(29, 32),
+		estimatedCost: cost.RangedCostEstimate(30, 32),
 		actualCost:    32,
 	},
 	{
@@ -56,16 +56,18 @@ var bindingTests = []struct {
 		expr: `cel.bind(a, 'hello!',
 		       cel.bind(b, 'goodbye',
 				a + ' and, ' + b)) == 'hello! and, goodbye'`,
-		estimatedCost: cost.FixedCostEstimate(28),
-		actualCost:    28,
+		estimatedCost:   cost.FixedCostEstimate(28),
+		estimatedCostV0: costV0(27, 28),
+		actualCost:      28,
 	},
 	{
 		name: "shadow binds",
 		expr: `cel.bind(a,
 		       cel.bind(a, 'world', a + '!'),
 		   	    'hello ' + a) == 'hello ' + 'world' + '!'`,
-		estimatedCost: cost.FixedCostEstimate(31),
-		actualCost:    31,
+		estimatedCost:   cost.FixedCostEstimate(31),
+		estimatedCostV0: costV0(30, 31),
+		actualCost:      31,
 	},
 	{
 		name: "nested bind with int list",
@@ -95,8 +97,9 @@ var bindingTests = []struct {
 			"x":        3,
 			"x.@items": 10,
 		},
-		estimatedCost: cost.RangedCostEstimate(37, 40),
-		actualCost:    39,
+		estimatedCost:   cost.RangedCostEstimate(39, 40),
+		estimatedCostV0: costV0(38, 40),
+		actualCost:      39,
 	},
 	{
 		name: "shadowed binding",

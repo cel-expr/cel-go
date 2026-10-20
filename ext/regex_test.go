@@ -16,7 +16,6 @@ package ext
 
 import (
 	"fmt"
-	"math"
 	"strings"
 	"testing"
 
@@ -285,45 +284,52 @@ func TestRegexCosts(t *testing.T) {
 		// estimatedCostV0 is the estimate under cost.ModelVersion0, set only where the revision moved it.
 		estimatedCostV0 *cost.CostEstimate
 		actualCost      uint64
+		// actualCostV0 is the cost tracked under cost.ModelVersion0, set only where the revision moved it.
+		actualCostV0 *uint64
 	}{
+		// regex.extract charges CallCost, the search, and its result: an optional of 1 plus the
+		// extracted part. Here the search is ceil((11+1)*0.1 * (10+1)*0.25) of 3.3, and the result
+		// optional.of('world') is 1 + 5, so the call costs ceil(1 + 3.3 + 6) = 11, and with the
+		// optional.of() and the comparison the expression costs 13. Version 0 sizes every optional
+		// as 1, as v0.32.0 charged it.
 		{
 			expr:            `regex.extract('hello world', 'hello (.*)') == optional.of('world')`,
-			estimatedCost:   cost.RangedCostEstimate(7, 8),
-			estimatedCostV0: costV0(7, 20),
-			actualCost:      8,
+			estimatedCost:   cost.RangedCostEstimate(8, 19),
+			estimatedCostV0: costV0(8, 20),
+			actualCost:      13,
+			actualCostV0:    actualV0(8),
 		},
-		// - Estimated Cost (Min: 5): Derived from fixed costs of scanning 10-char
-		//   target string and compiling 2-char regex. Since the inputs are constant,
-		//   the Min estimate is very accurate.
-		// - Actual Cost (5): Observed cost is the sum of a base call cost (~1), the
-		//   search cost, and the allocation cost for the 2-char result string '22'.
-		//   It aligns perfectly with the minimum estimate.
+		// The extracted '22' makes the result 1 + 2: ceil(1 + 0.825 + 3) = 5, and the comparison 1.
+		// orValue() is not charged at runtime, and at version 0 is estimated at 1 as v0.32.0 did.
 		{
-			expr:            "regex.extract('4122345432', '22').orValue('777') == '22'",
-			estimatedCost:   cost.RangedCostEstimate(3, 4),
-			estimatedCostV0: costV0(2, 13),
-			actualCost:      4,
+			expr:          "regex.extract('4122345432', '22').orValue('777') == '22'",
+			estimatedCost: cost.RangedCostEstimate(4, 14),
+			actualCost:    6,
+			actualCostV0:  actualV0(4),
 		},
 		// The .or() picks one of two optionals, and from ModelVersion1 the model reports the
 		// union of their sizes, so the comparison below it is bounded by the longer of the two.
 		// Before the revision the optional carried no size at all and the estimate saturated.
 		{
 			expr:            "regex.extract('4122345432', '22').or(optional.of('777')) == optional.of('22')",
-			estimatedCost:   cost.RangedCostEstimate(4, 6),
-			estimatedCostV0: costV0(3, math.MaxUint64),
-			actualCost:      5,
+			estimatedCost:   cost.RangedCostEstimate(5, 16),
+			estimatedCostV0: costV0(6, 1844674407370955279),
+			actualCost:      7,
+			actualCostV0:    actualV0(5),
 		},
+		// Nothing matches, so the result is the empty optional, of size 1 at every version.
 		{
 			expr:            "regex.extract('hello world', 'goodbye (.*)') == optional.none()",
-			estimatedCost:   cost.RangedCostEstimate(7, 9),
-			estimatedCostV0: costV0(9, 22),
-			actualCost:      7,
+			estimatedCost:   cost.RangedCostEstimate(8, 19),
+			estimatedCostV0: costV0(10, 22),
+			actualCost:      8,
 		},
 		{
 			expr:            "regex.extractAll('id:123, id:456', 'assa') == []",
-			estimatedCost:   cost.RangedCostEstimate(23, 38),
+			estimatedCost:   cost.RangedCostEstimate(24, 39),
 			estimatedCostV0: costV0(24, 38),
-			actualCost:      23,
+			actualCost:      24,
+			actualCostV0:    actualV0(23),
 		},
 		// - Estimated Cost (Min: 25): Cost to scan the 14-char target and compile
 		//   5-char regex, plus a worst-case allocation cost for the result list's
@@ -333,45 +339,49 @@ func TestRegexCosts(t *testing.T) {
 		//   allocating the two result strings, totaling 12 chars of content.
 		{
 			expr:            `regex.extractAll('id:123, id:456', r'id:\d+') == ['id:123', 'id:456']`,
-			estimatedCost:   cost.RangedCostEstimate(24, 40),
-			estimatedCostV0: costV0(24, 39),
+			estimatedCost:   cost.RangedCostEstimate(25, 40),
+			estimatedCostV0: costV0(25, 39),
 			actualCost:      27,
 		},
 		{
 			expr:            `regex.extractAll('a b c', r'(\S*)\s*') == ['a', 'b', 'c']`,
-			estimatedCost:   cost.RangedCostEstimate(23, 30),
-			estimatedCostV0: costV0(23, 29),
+			estimatedCost:   cost.RangedCostEstimate(24, 30),
+			estimatedCostV0: costV0(24, 29),
 			actualCost:      27,
 		},
 		{
 			expr:            `regex.extractAll('testuser@gmail.com, a@y.com, 2312321wsamkldjq2w2@sdad.com', r'(?P<username>\w+)@') == ['testuser', 'a', '2312321wsamkldjq2w2']`,
-			estimatedCost:   cost.RangedCostEstimate(49, 108),
-			estimatedCostV0: costV0(50, 108),
+			estimatedCost:   cost.RangedCostEstimate(50, 108),
+			estimatedCostV0: costV0(51, 108),
 			actualCost:      53,
 		},
 		{
 			expr:            "regex.replace('hello world hello', 'hello', 'hi') == 'hi world hi'",
-			estimatedCost:   cost.RangedCostEstimate(4, 671),
-			estimatedCostV0: costV0(23, 40),
+			estimatedCost:   cost.RangedCostEstimate(5, 671),
+			estimatedCostV0: costV0(22, 40),
 			actualCost:      17,
+			actualCostV0:    actualV0(16),
 		},
 		{
 			expr:            `regex.replace('ac', 'a(b)?c', r'[\1]') == '[]'`,
-			estimatedCost:   cost.RangedCostEstimate(2, 41),
+			estimatedCost:   cost.RangedCostEstimate(3, 41),
 			estimatedCostV0: costV0(5, 11),
 			actualCost:      5,
+			actualCostV0:    actualV0(4),
 		},
 		{
 			expr:            "regex.replace('apple pie', 'p', 'X') == 'aXXle Xie'",
-			estimatedCost:   cost.RangedCostEstimate(2, 112),
+			estimatedCost:   cost.RangedCostEstimate(3, 112),
 			estimatedCostV0: costV0(11, 11),
 			actualCost:      12,
+			actualCostV0:    actualV0(11),
 		},
 		{
 			expr:            "regex.replace('aaaaaa', 'a', '-what-') == '-what--what--what--what--what--what-'",
-			estimatedCost:   cost.RangedCostEstimate(2, 306),
+			estimatedCost:   cost.RangedCostEstimate(3, 306),
 			estimatedCostV0: costV0(8, 41),
 			actualCost:      42,
+			actualCostV0:    actualV0(41),
 		},
 		// --- Constant Cost Cases ---
 		// These cases demonstrate that the cost is independent of the `count` arg.
@@ -383,32 +393,37 @@ func TestRegexCosts(t *testing.T) {
 		//  string for all matches, so the dominant cost is constant.
 		{
 			expr:            "regex.replace('banana', 'a', 'x', 0) == 'banana'",
-			estimatedCost:   cost.RangedCostEstimate(2, 58),
+			estimatedCost:   cost.RangedCostEstimate(3, 58),
 			estimatedCostV0: costV0(8, 8),
 			actualCost:      9,
+			actualCostV0:    actualV0(8),
 		},
 		{
 			expr:            "regex.replace('banana', 'a', 'x', 1) == 'bxnana'",
-			estimatedCost:   cost.RangedCostEstimate(2, 58),
+			estimatedCost:   cost.RangedCostEstimate(3, 58),
 			estimatedCostV0: costV0(8, 8),
 			actualCost:      9,
+			actualCostV0:    actualV0(8),
 		},
 		{
 			expr:            "regex.replace('banana', 'a', 'x', 100) == 'bxnxnx'",
-			estimatedCost:   cost.RangedCostEstimate(2, 58),
+			estimatedCost:   cost.RangedCostEstimate(3, 58),
 			estimatedCostV0: costV0(8, 8),
 			actualCost:      9,
+			actualCostV0:    actualV0(8),
 		},
 		{
 			expr:            `regex.replace('foo bar', r'(foo bar)', r'\1\1\1\1\1' ) == 'foo barfoo barfoo barfoo barfoo bar'`,
-			estimatedCost:   cost.RangedCostEstimate(3, 654),
+			estimatedCost:   cost.RangedCostEstimate(4, 654),
 			estimatedCostV0: costV0(11, 77),
 			actualCost:      42,
 		},
 		{
-			expr:          `regex.replace('foo bar', r'(foo bar)', '') == ''`,
-			estimatedCost: cost.RangedCostEstimate(3, 10),
-			actualCost:    3,
+			expr:            `regex.replace('foo bar', r'(foo bar)', '') == ''`,
+			estimatedCost:   cost.RangedCostEstimate(4, 11),
+			estimatedCostV0: costV0(3, 10),
+			actualCost:      4,
+			actualCostV0:    actualV0(3),
 		},
 	}
 	for _, test := range tests {
@@ -429,7 +444,7 @@ func TestRegexCosts(t *testing.T) {
 			testCheckCost(t, env, cAst, tc.hints, tc.estimatedCost, tc.estimatedCostV0)
 			asts = append(asts, cAst)
 			for _, ast := range asts {
-				testEvalWithCost(t, env, ast, tc.in, tc.actualCost)
+				testEvalWithCost(t, env, ast, tc.in, tc.actualCost, ledgerV0(tc.actualCostV0)...)
 			}
 		})
 	}

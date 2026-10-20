@@ -495,6 +495,19 @@ func costV0(lo, hi uint64) *cost.CostEstimate {
 	return &est
 }
 
+// actualV0 returns a ModelVersion0 runtime cost expectation for a cost table entry.
+func actualV0(n uint64) *uint64 {
+	return &n
+}
+
+// ledgerV0 passes an optional ModelVersion0 runtime cost expectation to testEvalWithCost.
+func ledgerV0(n *uint64) []uint64 {
+	if n == nil {
+		return nil
+	}
+	return []uint64{*n}
+}
+
 // testCheckCost asserts the estimated cost at the latest cost model revision and at ModelVersion0,
 // so that a case the revision moved shows both numbers side by side.
 //
@@ -525,9 +538,16 @@ func testCheckCost(t *testing.T, env *cel.Env, ast *cel.Ast, hints map[string]ui
 	if !reflect.DeepEqual(est, wantLegacy) {
 		t.Errorf("env.EstimateCost(version 0) got %v, wanted %v", est, wantLegacy)
 	}
+	checkCostGoldenV0Estimate(t, env, ast, testCostHintEstimator{hints: hints})
 }
 
-func testEvalWithCost(t *testing.T, env *cel.Env, ast *cel.Ast, in any, wantCost uint64) {
+// testEvalWithCost asserts the tracked cost at the latest cost model revision and, for a checked
+// ast, at ModelVersion0.
+//
+// wantCostV0 is omitted for the common case where the revision leaves the charge alone. Omitting
+// it asserts that equivalence, so that the cases which supply it are an exact ledger of the
+// charges the revision changed.
+func testEvalWithCost(t *testing.T, env *cel.Env, ast *cel.Ast, in any, wantCost uint64, wantCostV0 ...uint64) {
 	t.Helper()
 	prgOpts := []cel.ProgramOption{}
 	if ast.IsChecked() {
@@ -550,6 +570,28 @@ func testEvalWithCost(t *testing.T, env *cel.Env, ast *cel.Ast, in any, wantCost
 	if det.ActualCost() != nil && *det.ActualCost() != wantCost {
 		t.Errorf("prg.Eval() had cost %v, wanted %v", *det.ActualCost(), wantCost)
 	}
+	if !ast.IsChecked() {
+		return
+	}
+	wantLegacy := wantCost
+	if len(wantCostV0) > 0 {
+		wantLegacy = wantCostV0[0]
+	}
+	envV0, err := env.Extend(cel.CostModelVersion(0))
+	if err != nil {
+		t.Fatalf("env.Extend(CostModelVersion(0)) failed: %v", err)
+	}
+	prgV0, err := envV0.Program(ast, cel.CostTracking(nil))
+	if err != nil {
+		t.Fatalf("env.Program(version 0) failed: %v", err)
+	}
+	if _, det, err = prgV0.Eval(data); err != nil {
+		t.Fatalf("prg.Eval(version 0) failed: %v", err)
+	}
+	if *det.ActualCost() != wantLegacy {
+		t.Errorf("prg.Eval(version 0) had cost %v, wanted %v", *det.ActualCost(), wantLegacy)
+	}
+	checkCostGoldenV0Actual(t, env, ast, in)
 }
 
 type testCostHintEstimator struct {

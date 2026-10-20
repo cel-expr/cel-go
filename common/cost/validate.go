@@ -267,6 +267,8 @@ func describeQuantityExpr(expr QuantityExpr) (string, []QuantityExpr) {
 		return "List", []QuantityExpr{e.lenExpr, e.elemExpr}
 	case mapExpr:
 		return "Map", []QuantityExpr{e.sizeExpr, e.keyExpr, e.valExpr}
+	case optionalExpr:
+		return "Optional", []QuantityExpr{e.valueExpr}
 	default:
 		return fmt.Sprintf("%T", expr), nil
 	}

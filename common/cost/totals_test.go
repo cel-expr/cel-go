@@ -22,10 +22,11 @@ import (
 )
 
 // estimateModelCost compiles a single-argument global model with the given sizing strategy and
-// returns its cost estimate for an argument of the given size.
+// returns its cost estimate for an argument of the given size. The model is exempt from minCallCost,
+// so that the estimate is the bare quantity's.
 func estimateModelCost(t *testing.T, cost QuantityExpr, strategy SizingStrategy, arg SizeEstimate) CostEstimate {
 	t.Helper()
-	m := Overload("test", EvalCost(cost))
+	m := Overload("test", argumentsOnly(), EvalCost(cost))
 	if err := m.Validate(); err != nil {
 		t.Fatalf("Validate() failed: %v", err)
 	}
@@ -35,10 +36,11 @@ func estimateModelCost(t *testing.T, cost QuantityExpr, strategy SizingStrategy,
 }
 
 // trackModelCost compiles a single-argument global model and returns its tracked cost for the
-// given argument value.
+// given argument value. The model is exempt from minCallCost, so that the cost is the bare
+// quantity's.
 func trackModelCost(t *testing.T, cost QuantityExpr, strategy SizingStrategy, arg ref.Val) uint64 {
 	t.Helper()
-	m := Overload("test", EvalCost(cost))
+	m := Overload("test", argumentsOnly(), EvalCost(cost))
 	return *m.FunctionTrackerWithOptions(WithSizingStrategy(strategy))([]ref.Val{arg}, nil)
 }
 
@@ -139,7 +141,7 @@ func TestTotalsOfTypedOperands(t *testing.T) {
 	for _, tc := range tests {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			m := Overload("test", EvalCost(tc.total))
+			m := Overload("test", argumentsOnly(), EvalCost(tc.total))
 			est := m.FunctionEstimatorWithOptions(WithSizingStrategy(tc.strategy))(
 				nil, nil, []AstNode{typedArgNode(tc.argType, tc.arg)})
 			if est.CostEstimate != tc.want {

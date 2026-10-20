@@ -497,6 +497,10 @@ func (c *coster) costCall(e ast.Expr) CostEstimate {
 	for i, arg := range args {
 		argCosts[i] = c.cost(arg)
 	}
+	if call.FunctionName() == operators.Conditional && len(args) == 3 && c.modelVersion >= 1 {
+		argCosts[1] = conditionalBranchCost(args[1], argCosts[1])
+		argCosts[2] = conditionalBranchCost(args[2], argCosts[2])
+	}
 
 	overloadIDs := c.checkedAST.GetOverloadIDs(e.ID())
 	if len(overloadIDs) == 0 {
@@ -533,22 +537,71 @@ func (c *coster) costCall(e ast.Expr) CostEstimate {
 	for _, overload := range overloadIDs {
 		overloadCost := c.functionCost(e, call.FunctionName(), overload, targetType, argTypes, argCosts)
 		fnCost = fnCost.Union(overloadCost.CostEstimate)
-		resultSize = mergeSizeEstimatePtr(resultSize, overloadCost.ResultSize)
+		overloadSize := overloadCost.ResultSize
+		optIndex := c.modelVersion >= 1 && isOptionalIndex(overload)
 		// build and track the field path for index operations
 		if field, ok := c.indexFieldPath(overload); ok && len(args) > 0 {
 			if targetPath := c.getPath(args[0]); len(targetPath) > 0 {
 				c.addPath(e, append(targetPath, field))
-			} else if containerSize := c.computeSize(args[0]); containerSize != nil && containerSize.Elem != nil {
+			} else if containerSize := c.indexedContainerSize(overload, args[0]); containerSize != nil && containerSize.Elem != nil {
 				elemSize := *containerSize.Elem
-				resultSize = &elemSize
+				overloadSize = &elemSize
 			}
 		}
-		if resultSize == nil {
-			resultSize = c.computeSize(e)
+		if overloadSize == nil {
+			if optIndex {
+				overloadSize = c.optionalValueSize(e)
+			} else {
+				overloadSize = c.computeSize(e)
+			}
 		}
+		if optIndex && overloadSize != nil {
+			wrapped := optionalSizeOf(*overloadSize)
+			overloadSize = &wrapped
+		}
+		resultSize = mergeSizeEstimatePtr(resultSize, overloadSize)
 	}
 	c.setSize(e, resultSize)
 	return sum.Add(fnCost)
+}
+
+// isOptionalIndex reports whether an overload is an optional index operation, l[?i] or m[?k], which
+// returns an optional holding the element it selects.
+func isOptionalIndex(overloadID string) bool {
+	switch overloadID {
+	case overloads.OptIndexList, overloads.OptIndexMap, overloads.OptIndexOptionalList, overloads.OptIndexOptionalMap:
+		return true
+	}
+	return false
+}
+
+// indexedContainerSize returns the size of the container an index operation selects from. From
+// version 1 the operand of an optional index on an optional receiver is the optional, whose element
+// is the container.
+func (c *coster) indexedContainerSize(overloadID string, operand ast.Expr) *SizeEstimate {
+	size := c.computeSize(operand)
+	if size == nil || c.modelVersion < 1 {
+		return size
+	}
+	switch overloadID {
+	case overloads.OptIndexOptionalList, overloads.OptIndexOptionalMap:
+		return size.Elem
+	}
+	return size
+}
+
+// optionalValueSize estimates the value an optional-typed expression holds from the size hints for
+// its path and the value's type.
+func (c *coster) optionalValueSize(e ast.Expr) *SizeEstimate {
+	t := c.getType(e)
+	if t.Kind() != types.OpaqueKind || len(t.Parameters()) != 1 {
+		return nil
+	}
+	node := astNode{path: c.getPath(e), t: t.Parameters()[0]}
+	if size, ok := c.sizingStrategy.EstimateSize(c.newEstimateContext(), node); ok {
+		return &size
+	}
+	return nil
 }
 
 func (c *coster) needsCallNodes(overloadIDs []string) bool {
@@ -743,6 +796,26 @@ func accumulatedEntrySize(sz SizeEstimate) SizeEstimate {
 	return entry
 }
 
+// conditionalBranchCost is the cost of a conditional's branch from cost model version 1.
+//
+// A branch which is an attribute chain rooted at an identifier, such as x, m.a or x[0], is resolved
+// as part of the conditional's attribute: the interpreter charges the condition and the branch's
+// qualifiers, but not the resolution of the branch's root identifier, which the estimate of the
+// branch includes. A branch rooted at a nested conditional is priced by that conditional, and a
+// computed branch is charged in full.
+func conditionalBranchCost(branch ast.Expr, cost CostEstimate) CostEstimate {
+	if !isAttributeChain(branch) || attributeChainRoot(branch).Kind() != ast.IdentKind {
+		return cost
+	}
+	if branch.Kind() == ast.SelectKind && branch.AsSelect().IsTestOnly() {
+		return cost
+	}
+	return CostEstimate{
+		Min: SafeSubtract(cost.Min, SelectAndIdentCost),
+		Max: SafeSubtract(cost.Max, SelectAndIdentCost),
+	}
+}
+
 // isConditionalCall reports whether e is a call to the conditional operator.
 func isConditionalCall(e ast.Expr) bool {
 	return e.Kind() == ast.CallKind && e.AsCall().FunctionName() == operators.Conditional
@@ -858,7 +931,8 @@ func mustReadVar(e ast.Expr, name string) bool {
 	}
 }
 
-func calculateArgCost(overloadID string, argCosts []CostEstimate) CostEstimate {
+// calculateArgCost combines the costs of a call's arguments at the given cost model version.
+func calculateArgCost(overloadID string, argCosts []CostEstimate, version uint32) CostEstimate {
 	switch overloadID {
 	case overloads.LogicalOr, overloads.LogicalAnd:
 		if len(argCosts) == 2 {
@@ -871,8 +945,9 @@ func calculateArgCost(overloadID string, argCosts []CostEstimate) CostEstimate {
 	case overloads.OptionalOrOptional, overloads.OptionalOrValueValue:
 		// The alternative is evaluated only when the receiver is empty, so it contributes to the
 		// upper bound alone. These are member overloads, which means the receiver is costed by
-		// the caller and argCosts holds only the alternative.
-		if len(argCosts) == 1 {
+		// the caller and argCosts holds only the alternative. Before version 1 the alternative
+		// was summed like any other argument.
+		if len(argCosts) == 1 && version >= 1 {
 			return CostEstimate{Min: 0, Max: argCosts[0].Max}
 		}
 	}
@@ -884,7 +959,7 @@ func calculateArgCost(overloadID string, argCosts []CostEstimate) CostEstimate {
 }
 
 func (c *coster) functionCost(e ast.Expr, function, overloadID string, target *AstNode, args []AstNode, argCosts []CostEstimate) CallEstimate {
-	argCost := calculateArgCost(overloadID, argCosts)
+	argCost := calculateArgCost(overloadID, argCosts, c.modelVersion)
 	c.est.callID = e.ID()
 	estCtx := c.getEstimator()
 	if estimator, found := c.overloadEstimators.fns[overloadID]; found {
@@ -1062,7 +1137,7 @@ func (c *coster) computeSize(e ast.Expr) *SizeEstimate {
 		}
 		// Without an Estimator to supply hints, only a container's size needs the strategy.
 		if t := c.getType(e); c.estimator == nil && !isContainerKind(t.Kind()) {
-			if size := computeTypeSize(t); size != nil {
+			if size := computeTypeSize(t, c.modelVersion); size != nil {
 				c.computedSizes[e.ID()] = *size
 				return size
 			}
@@ -1084,7 +1159,7 @@ func (c *coster) computeSize(e ast.Expr) *SizeEstimate {
 	if size := computeExprSize(e); size != nil {
 		return size
 	}
-	if size := computeTypeSize(c.getType(e)); size != nil {
+	if size := computeTypeSize(c.getType(e), c.modelVersion); size != nil {
 		return size
 	}
 	return nil
@@ -1124,11 +1199,36 @@ func computeExprSize(expr ast.Expr) *SizeEstimate {
 }
 
 // computeTypeSize returns a fixed unit size estimate if the type is a constant-size scalar.
-func computeTypeSize(t *types.Type) *SizeEstimate {
+// computeTypeSize returns the size every value of a type has at the given cost model version, or nil
+// if values of the type vary in size.
+//
+// A scalar has size 1. An optional of a scalar has size 1 before version 1, and from version 1 is 1
+// plus the scalar, which is its element; see Optional.
+func computeTypeSize(t *types.Type, version uint32) *SizeEstimate {
 	if isScalar(t) {
 		return &unitSizeEstimate
 	}
+	if isOptionalType(t) && isScalar(t.Parameters()[0]) {
+		if version < 1 {
+			return &unitSizeEstimate
+		}
+		size := optionalSizeOf(unitSizeEstimate)
+		return &size
+	}
 	return nil
+}
+
+// isOptionalType reports whether t is an optional type with a value type.
+func isOptionalType(t *types.Type) bool {
+	return t.Kind() == types.OpaqueKind && t.TypeName() == "optional_type" && len(t.Parameters()) == 1
+}
+
+// optionalSizeOf returns the size of an optional which holds a value of size v, from cost model
+// version 1: 1 plus the value, whose size is the optional's element. See Optional.
+func optionalSizeOf(v SizeEstimate) SizeEstimate {
+	size := RangedSizeEstimate(SafeAdd(1, v.Min), SafeAdd(1, v.Max))
+	size.Elem = &v
+	return size
 }
 
 // isScalar returns true if the given type is known to be of a constant size at
@@ -1138,10 +1238,6 @@ func isScalar(t *types.Type) bool {
 	switch t.Kind() {
 	case types.BoolKind, types.DoubleKind, types.DurationKind, types.IntKind, types.TimestampKind, types.UintKind, types.TypeKind:
 		return true
-	case types.OpaqueKind:
-		if t.TypeName() == "optional_type" {
-			return isScalar(t.Parameters()[0])
-		}
 	}
 	return false
 }

@@ -173,9 +173,10 @@ const (
 	OptionalOrValueValue = "optional_orValue_value"
 )
 
-// Optional function overloads which wrap or unwrap a value, and so need to be referenced in cost
-// computations to carry the wrapped value's size through the optional.
+// Optional function overloads which create, wrap or unwrap a value, and so need to be referenced in
+// cost computations to carry the wrapped value's size through the optional.
 const (
+	OptionalNone           = "optional_none"
 	OptionalOf             = "optional_of"
 	OptionalOfNonZeroValue = "optional_ofNonZeroValue"
 	OptionalValue          = "optional_value"

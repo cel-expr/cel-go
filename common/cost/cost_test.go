@@ -1134,15 +1134,17 @@ func TestCostEstimateAndTracking(t *testing.T) {
 			vars:      []*decls.VariableDecl{decls.NewVariable("input", types.BytesType)},
 			hints:     map[string]uint64{"input": 500},
 			in:        map[string]any{"input": randSeq(500)},
-			wantEst:   estPtr(cost.CostEstimate{Min: 1, Max: 51}),
+			wantEst:   estPtr(cost.CostEstimate{Min: 2, Max: 51}),
+			wantEstV0: estPtr(cost.CostEstimate{Min: 1, Max: 51}),
 			wantTrack: trackPtr(51),
 		},
 		{
-			name:    "bytes to string conversion equality",
-			expr:    `string(input) == string(input)`,
-			vars:    []*decls.VariableDecl{decls.NewVariable("input", types.BytesType)},
-			hints:   map[string]uint64{"input": 500},
-			wantEst: estPtr(cost.CostEstimate{Min: 2, Max: 152}),
+			name:      "bytes to string conversion equality",
+			expr:      `string(input) == string(input)`,
+			vars:      []*decls.VariableDecl{decls.NewVariable("input", types.BytesType)},
+			hints:     map[string]uint64{"input": 500},
+			wantEst:   estPtr(cost.CostEstimate{Min: 5, Max: 152}),
+			wantEstV0: estPtr(cost.CostEstimate{Min: 3, Max: 152}),
 		},
 		{
 			name:      "string to bytes conversion",
@@ -1150,15 +1152,17 @@ func TestCostEstimateAndTracking(t *testing.T) {
 			vars:      []*decls.VariableDecl{decls.NewVariable("input", types.StringType)},
 			hints:     map[string]uint64{"input": 500},
 			in:        map[string]any{"input": string(randSeq(500))},
-			wantEst:   estPtr(cost.CostEstimate{Min: 1, Max: 51}),
+			wantEst:   estPtr(cost.CostEstimate{Min: 2, Max: 51}),
+			wantEstV0: estPtr(cost.CostEstimate{Min: 1, Max: 51}),
 			wantTrack: trackPtr(51),
 		},
 		{
-			name:    "string to bytes conversion equality",
-			expr:    `bytes(input) == bytes(input)`,
-			vars:    []*decls.VariableDecl{decls.NewVariable("input", types.StringType)},
-			hints:   map[string]uint64{"input": 500},
-			wantEst: estPtr(cost.CostEstimate{Min: 2, Max: 302}),
+			name:      "string to bytes conversion equality",
+			expr:      `bytes(input) == bytes(input)`,
+			vars:      []*decls.VariableDecl{decls.NewVariable("input", types.StringType)},
+			hints:     map[string]uint64{"input": 500},
+			wantEst:   estPtr(cost.CostEstimate{Min: 5, Max: 302}),
+			wantEstV0: estPtr(cost.CostEstimate{Min: 3, Max: 302}),
 		},
 		{
 			name:      "int to string conversion",
@@ -1175,7 +1179,8 @@ func TestCostEstimateAndTracking(t *testing.T) {
 			},
 			hints:     map[string]uint64{"input": 500, "arg1": 500},
 			in:        map[string]any{"input": string(randSeq(500)), "arg1": string(randSeq(500))},
-			wantEst:   estPtr(cost.CostEstimate{Min: 2, Max: 2502}),
+			wantEst:   estPtr(cost.CostEstimate{Min: 3, Max: 2502}),
+			wantEstV0: estPtr(cost.CostEstimate{Min: 2, Max: 2502}),
 			wantTrack: trackPtr(2502),
 		},
 		{
@@ -1211,7 +1216,8 @@ func TestCostEstimateAndTracking(t *testing.T) {
 			},
 			hints:     map[string]uint64{"arg1": 500},
 			in:        map[string]any{"input": "idc", "arg1": string(randSeq(500))},
-			wantEst:   estPtr(cost.CostEstimate{Min: 2, Max: 52}),
+			wantEst:   estPtr(cost.CostEstimate{Min: 3, Max: 52}),
+			wantEstV0: estPtr(cost.CostEstimate{Min: 2, Max: 52}),
 			wantTrack: trackPtr(52),
 		},
 		{
@@ -1223,7 +1229,8 @@ func TestCostEstimateAndTracking(t *testing.T) {
 			},
 			hints:     map[string]uint64{"arg1": 500},
 			in:        map[string]any{"input": "idc", "arg1": string(randSeq(500))},
-			wantEst:   estPtr(cost.CostEstimate{Min: 2, Max: 52}),
+			wantEst:   estPtr(cost.CostEstimate{Min: 3, Max: 52}),
+			wantEstV0: estPtr(cost.CostEstimate{Min: 2, Max: 52}),
 			wantTrack: trackPtr(52),
 		},
 		{
@@ -1256,7 +1263,8 @@ func TestCostEstimateAndTracking(t *testing.T) {
 			},
 			hints:     map[string]uint64{"input1": 1, "input2": 1},
 			in:        map[string]any{"input1": []*proto3pb.TestAllTypes{{}}, "input2": []*proto3pb.TestAllTypes{{}}, "x": 1},
-			wantEst:   estPtr(cost.CostEstimate{Min: 4, Max: 7}),
+			wantEst:   estPtr(cost.CostEstimate{Min: 3, Max: 6}),
+			wantEstV0: estPtr(cost.CostEstimate{Min: 4, Max: 7}),
 			wantTrack: trackPtr(6),
 		},
 		{
@@ -1333,9 +1341,10 @@ func TestCostEstimateAndTracking(t *testing.T) {
 				decls.NewVariable("str1", types.StringType),
 				decls.NewVariable("str2", types.StringType),
 			},
-			hints:   map[string]uint64{"str1": 10, "str2": 10},
-			in:      map[string]any{"str1": "val1", "str2": "val2222222"},
-			wantEst: estPtr(cost.CostEstimate{Min: 2, Max: 6}),
+			hints:     map[string]uint64{"str1": 10, "str2": 10},
+			in:        map[string]any{"str1": "val1", "str2": "val2222222"},
+			wantEst:   estPtr(cost.CostEstimate{Min: 4, Max: 6}),
+			wantEstV0: estPtr(cost.CostEstimate{Min: 2, Max: 6}),
 			// Version 1 charges contains as ⌈7 * 14 / 100⌉ = 1 rather than ⌈0.7⌉ * ⌈1.4⌉ = 2.
 			wantTrack: trackPtr(5),
 		},
@@ -1368,7 +1377,8 @@ func TestCostEstimateAndTracking(t *testing.T) {
 						return nil
 					}),
 			},
-			wantEst:   estPtr(cost.CostEstimate{Min: 2, Max: 12}),
+			wantEst:   estPtr(cost.CostEstimate{Min: 3, Max: 12}),
+			wantEstV0: estPtr(cost.CostEstimate{Min: 2, Max: 12}),
 			wantTrack: trackPtr(10),
 		},
 		{
@@ -1442,7 +1452,8 @@ func TestCostEstimateAndTracking(t *testing.T) {
 				decls.NewVariable("timestamp1", types.TimestampType),
 				decls.NewVariable("timestamp2", types.TimestampType),
 			},
-			wantEst: estPtr(cost.CostEstimate{Min: 4, Max: math.MaxUint64}),
+			wantEst:   estPtr(cost.CostEstimate{Min: 5, Max: math.MaxUint64}),
+			wantEstV0: estPtr(cost.CostEstimate{Min: 5, Max: 1844674407370955268}),
 		},
 		{
 			name: "timestamp equality check",
@@ -1467,7 +1478,8 @@ func TestCostEstimateAndTracking(t *testing.T) {
 			expr:      `[1,2,3,4,5].filter(x, x % 2 == 0)`,
 			vars:      []*decls.VariableDecl{},
 			in:        map[string]any{},
-			wantEst:   estPtr(cost.CostEstimate{Min: 41, Max: 101}),
+			wantEst:   estPtr(cost.CostEstimate{Min: 36, Max: 101}),
+			wantEstV0: estPtr(cost.CostEstimate{Min: 41, Max: 101}),
 			wantTrack: trackPtr(62),
 		},
 		{
@@ -1483,7 +1495,8 @@ func TestCostEstimateAndTracking(t *testing.T) {
 			expr:      `[1,2,3,4,5].map(x, x).filter(x, x % 2 == 0)`,
 			vars:      []*decls.VariableDecl{},
 			in:        map[string]any{},
-			wantEst:   estPtr(cost.CostEstimate{Min: 117, Max: 177}),
+			wantEst:   estPtr(cost.CostEstimate{Min: 112, Max: 177}),
+			wantEstV0: estPtr(cost.CostEstimate{Min: 117, Max: 177}),
 			wantTrack: trackPtr(138),
 		},
 		{
@@ -1800,9 +1813,10 @@ func TestCostEstimateAndTracking(t *testing.T) {
 			wantEst: estPtr(cost.CostEstimate{Min: 2, Max: 302}),
 		},
 		{
-			name:    "two-var all: map literal",
-			expr:    `{"a": 1, "b": 2}.all(k, v, k != "" && v > 0)`,
-			wantEst: estPtr(cost.CostEstimate{Min: 37, Max: 43}),
+			name:      "two-var all: map literal",
+			expr:      `{"a": 1, "b": 2}.all(k, v, k != "" && v > 0)`,
+			wantEst:   estPtr(cost.CostEstimate{Min: 37, Max: 45}),
+			wantEstV0: estPtr(cost.CostEstimate{Min: 37, Max: 43}),
 		},
 		{
 			name:    "two-var all: map variable with hints",
@@ -1823,14 +1837,16 @@ func TestCostEstimateAndTracking(t *testing.T) {
 			wantEst: estPtr(cost.CostEstimate{Min: 39, Max: 47}),
 		},
 		{
-			name:    "two-var existsOne: list literal",
-			expr:    `[1, 2, 3].existsOne(i, v, v == 1)`,
-			wantEst: estPtr(cost.CostEstimate{Min: 21, Max: 24}),
+			name:      "two-var existsOne: list literal",
+			expr:      `[1, 2, 3].existsOne(i, v, v == 1)`,
+			wantEst:   estPtr(cost.CostEstimate{Min: 18, Max: 24}),
+			wantEstV0: estPtr(cost.CostEstimate{Min: 21, Max: 24}),
 		},
 		{
-			name:    "two-var exists_one: list literal",
-			expr:    `[1, 2, 3].exists_one(i, v, v == 1)`,
-			wantEst: estPtr(cost.CostEstimate{Min: 21, Max: 24}),
+			name:      "two-var exists_one: list literal",
+			expr:      `[1, 2, 3].exists_one(i, v, v == 1)`,
+			wantEst:   estPtr(cost.CostEstimate{Min: 18, Max: 24}),
+			wantEstV0: estPtr(cost.CostEstimate{Min: 21, Max: 24}),
 		},
 		{
 			name:      "two-var transformList: 3-arg list literal",
@@ -1841,7 +1857,8 @@ func TestCostEstimateAndTracking(t *testing.T) {
 		{
 			name:      "two-var transformList: 4-arg with filter list literal",
 			expr:      `[1, 2, 3].transformList(i, v, i % 2 == 0, i + v)`,
-			wantEst:   estPtr(cost.CostEstimate{Min: 33, Max: 75}),
+			wantEst:   estPtr(cost.CostEstimate{Min: 30, Max: 75}),
+			wantEstV0: estPtr(cost.CostEstimate{Min: 33, Max: 75}),
 			wantTrack: trackPtr(60),
 		},
 		{
@@ -1859,7 +1876,8 @@ func TestCostEstimateAndTracking(t *testing.T) {
 		{
 			name:      "two-var transformMap: 4-arg with filter map literal",
 			expr:      `{"a": 1, "b": 2}.transformMap(k, v, v > 1, v + 1)`,
-			wantEst:   estPtr(cost.CostEstimate{Min: 67, Max: 75}),
+			wantEst:   estPtr(cost.CostEstimate{Min: 65, Max: 75}),
+			wantEstV0: estPtr(cost.CostEstimate{Min: 67, Max: 75}),
 			wantTrack: trackPtr(70),
 		},
 		{
@@ -1871,7 +1889,8 @@ func TestCostEstimateAndTracking(t *testing.T) {
 		{
 			name:      "two-var transformMapEntry: 4-arg with filter map literal",
 			expr:      `{"a": 1, "b": 2}.transformMapEntry(k, v, v > 1, {v: k})`,
-			wantEst:   estPtr(cost.CostEstimate{Min: 67, Max: 133}),
+			wantEst:   estPtr(cost.CostEstimate{Min: 65, Max: 133}),
+			wantEstV0: estPtr(cost.CostEstimate{Min: 67, Max: 133}),
 			wantTrack: trackPtr(99),
 		},
 		{
@@ -2451,25 +2470,25 @@ func TestZeroMaxContainerChildHintsModelVersion0(t *testing.T) {
 			name:   "zero_max_list_index_comparison",
 			expr:   `self_list[3] == 0.0`,
 			wantV0: cost.FixedCostEstimate(2),
-			wantV1: cost.RangedCostEstimate(2, 3),
+			wantV1: cost.FixedCostEstimate(3),
 		},
 		{
 			name:   "zero_max_map_index_comparison",
 			expr:   `self_map['k'] == 0.0`,
 			wantV0: cost.FixedCostEstimate(2),
-			wantV1: cost.RangedCostEstimate(2, 3),
+			wantV1: cost.FixedCostEstimate(3),
 		},
 		{
 			name:   "zero_max_nested_list_index_comparison",
 			expr:   `nested_list[0][3] == 0.0`,
 			wantV0: cost.FixedCostEstimate(3),
-			wantV1: cost.RangedCostEstimate(3, 4),
+			wantV1: cost.FixedCostEstimate(4),
 		},
 		{
 			name:   "zero_max_nested_map_index_comparison",
 			expr:   `nested_map['k'][3] == 0.0`,
 			wantV0: cost.FixedCostEstimate(3),
-			wantV1: cost.RangedCostEstimate(3, 4),
+			wantV1: cost.FixedCostEstimate(4),
 		},
 	}
 

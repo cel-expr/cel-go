@@ -377,7 +377,7 @@ func TestVersion1Revisions(t *testing.T) {
 				est := StandardOverloadEstimatorsWithOptions(ModelVersion(1))[overloads.OptionalOf](nil, nil, []AstNode{arg})
 				return boundsOf(*est.ResultSize)
 			},
-			want: "[5, 5]",
+			want: "[6, 6]",
 		},
 	}
 	for _, tc := range cases {
