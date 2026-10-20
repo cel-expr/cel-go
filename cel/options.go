@@ -893,9 +893,12 @@ func CostSizingStrategy(strategy cost.SizingStrategy) EnvOption {
 // estimation and tracking, so an environment's estimates and charges come from one consistent set
 // of rules.
 //
-// If this option is not set, the latest cost model version is used. Use this only to hold estimates
-// stable against a baseline recorded under an earlier release; see cost.ModelVersion for the
-// per-revision details.
+// If this option is not set, the latest cost model version is used. Use this only as a temporary
+// migration aid to hold estimates stable against a baseline recorded under an earlier release.
+// Because version 0 preserves legacy behaviors with known soundness gaps where static estimates can
+// underestimate runtime cost, callers are strongly encouraged to switch to CostModelVersion(1) or
+// higher (or omit this option to use the latest revision) for improved soundness; see
+// cost.ModelVersion for the per-revision details.
 func CostModelVersion(version uint32) EnvOption {
 	return func(e *Env) (*Env, error) {
 		e.costConfig.version = &version

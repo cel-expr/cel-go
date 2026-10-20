@@ -240,6 +240,14 @@ func WithSizingStrategy(strategy SizingStrategy) ModelOption {
 // Revisions apply to both estimation and runtime tracking, so that an estimate and the charge it
 // predicts are always computed by the same rules. Pinning a version therefore holds both stable.
 //
+// Caveat: Pinning to version 0 preserves legacy behavior from v0.32.0 and earlier, which contains
+// known soundness gaps where static estimates can underestimate actual runtime cost (for example,
+// when a caller's Estimator overrides computed loop variable sizes via bare "@items" paths, when
+// selecting or indexing into computed containers, or when evaluating non-literal integer bounds).
+// Callers are strongly encouraged to switch to ModelVersion(1) or higher (or leave the version
+// unset to use the latest revision) for improved soundness between estimated bounds and tracked
+// runtime cost.
+//
 // Version 1:
 //   - Min() is computed as the exact minimum of its operands' intervals, where v0.32.0 reported a
 //     lower bound of 1 for any interval whose upper bound is non-zero. The change moves only the
@@ -249,6 +257,15 @@ func WithSizingStrategy(strategy SizingStrategy) ModelOption {
 //     report the size they wrap or unwrap, the two `or` forms report the union of the receiver and
 //     the alternative, and the optional index forms record the same `@items` and `@values` field
 //     path their non-optional counterparts do.
+//   - Optional field and index qualifiers (`m.?k`, `l[?0]`) charge 1 at runtime even when the
+//     field or index is absent, matching static estimation and non-optional qualification.
+//   - Selecting or indexing into a computed expression (such as `[1, 2][0]` or `{"a": 1}.a`)
+//     charges the attribute traversal cost of 1 during estimation to match runtime tracking.
+//   - Comprehension loop variables over computed (pathless) ranges retain their propagated element
+//     or key sizes rather than recording bare `@items`, `@indices`, `@keys`, or `@values` paths
+//     that a caller's Estimator could override with a smaller bound.
+//   - The default sizing strategy skips `@items`, `@keys`, and `@values` child size hints when a
+//     container's maximum size is 0.
 //   - Extension estimators in ext/lists (distinct, sort, sortBy, slice, range, flatten),
 //     ext/strings (join, split, substring, replace), and ext/regex (extract, extractAll, replace)
 //     align their Min/Max cost and result-size bounds with their runtime cost trackers.

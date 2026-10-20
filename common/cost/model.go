@@ -1241,7 +1241,7 @@ func (m OverloadModel) buildTracker(strategy SizingStrategy, version uint32) Fun
 
 // versionOf reports the cost model version of an EstimateContext.
 func versionOf(ctx EstimateContext) uint32 {
-	if e, ok := ctx.(*estimatorEvalContext); ok && e.estimator == nil {
+	if e, ok := ctx.(*estimatorEvalContext); ok && (e.estimator == nil || e.coster != nil) {
 		return e.version
 	}
 	return ModelVersionOf(ctx.Estimator())

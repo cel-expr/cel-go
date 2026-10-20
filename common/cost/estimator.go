@@ -181,8 +181,18 @@ func newCoster(checked *ast.AST, estimator Estimator, opts ...Option) (*coster, 
 	if !c.modelRules.isDefault() {
 		c.standardOverloadEstimators = StandardOverloadEstimatorsWithOptions(c.modelRules.modelOptions()...)
 	}
-	c.est = versionedEstimator{coster: c, delegate: estimator, version: c.modelVersion, strategy: c.sizingStrategy}
-	c.evalCtx = estimatorEvalContext{coster: c, estimator: estimator, strategy: c.sizingStrategy}
+	c.est = versionedEstimator{
+		coster:   c,
+		delegate: estimator,
+		version:  c.modelVersion,
+		strategy: c.sizingStrategy,
+	}
+	c.evalCtx = estimatorEvalContext{
+		coster:    c,
+		estimator: estimator,
+		strategy:  c.sizingStrategy,
+		version:   c.modelVersion,
+	}
 	return c, nil
 }
 
@@ -256,7 +266,7 @@ func (c *coster) pushIterKey(varName string, rangeExpr ast.Expr) {
 		size = rangeSize.Key
 	}
 	var varPath []string
-	if path := c.getPath(rangeExpr); len(path) > 0 {
+	if path := c.getPath(rangeExpr); len(path) > 0 || c.modelVersion < 1 {
 		varPath = append(path, subpath)
 	}
 	c.localVars.push(varName, rangeExpr, varPath, size)
@@ -275,7 +285,7 @@ func (c *coster) pushIterValue(varName string, rangeExpr ast.Expr) {
 		subpath = "@items"
 	}
 	var varPath []string
-	if path := c.getPath(rangeExpr); len(path) > 0 {
+	if path := c.getPath(rangeExpr); len(path) > 0 || c.modelVersion < 1 {
 		varPath = append(path, subpath)
 	}
 	c.localVars.push(varName, rangeExpr, varPath, size)
@@ -294,7 +304,7 @@ func (c *coster) pushIterSingle(varName string, rangeExpr ast.Expr) {
 		size = rangeSize.Key
 	}
 	var varPath []string
-	if path := c.getPath(rangeExpr); len(path) > 0 {
+	if path := c.getPath(rangeExpr); len(path) > 0 || c.modelVersion < 1 {
 		varPath = append(path, subpath)
 	}
 	c.localVars.push(varName, rangeExpr, varPath, size)
@@ -426,7 +436,7 @@ func attributeChainRoot(e ast.Expr) ast.Expr {
 
 // relativeAttributeCost is the cost of qualifying a value which was computed rather than named.
 func (c *coster) relativeAttributeCost(operand ast.Expr) CostEstimate {
-	if isAttributeChain(operand) {
+	if c.modelVersion < 1 || isAttributeChain(operand) {
 		return CostEstimate{}
 	}
 	return FixedCostEstimate(SelectAndIdentCost)
@@ -1034,6 +1044,13 @@ func (c *coster) computeSize(e ast.Expr) *SizeEstimate {
 	if e.Kind() == ast.IdentKind {
 		varName := e.AsIdent()
 		if v, ok := c.peekLocalVar(varName); ok && v.size != nil {
+			if c.modelVersion < 1 && c.estimator != nil {
+				node := astNode{expr: e, path: c.getPath(e), t: c.getType(e)}
+				if size := c.estimator.EstimateSize(node); size != nil {
+					c.computedSizes[e.ID()] = *size
+					return size
+				}
+			}
 			return v.size
 		}
 	}

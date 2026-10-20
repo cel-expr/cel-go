@@ -1503,19 +1503,22 @@ func TestCostEstimateAndTracking(t *testing.T) {
 			wantTrack: trackPtr(162),
 		},
 		{
-			name:    ".map list literal selection",
-			expr:    `[1,2,3,4,5].map(x, x)[4]`,
-			wantEst: estPtr(cost.CostEstimate{Min: 88, Max: 88}),
+			name:      ".map list literal selection",
+			expr:      `[1,2,3,4,5].map(x, x)[4]`,
+			wantEst:   estPtr(cost.CostEstimate{Min: 88, Max: 88}),
+			wantEstV0: estPtr(cost.CostEstimate{Min: 87, Max: 87}),
 		},
 		{
-			name:    "nested array selection",
-			expr:    `[[1,2],[1,2],[1,2],[1,2],[1,2]][4]`,
-			wantEst: estPtr(cost.CostEstimate{Min: 62, Max: 62}),
+			name:      "nested array selection",
+			expr:      `[[1,2],[1,2],[1,2],[1,2],[1,2]][4]`,
+			wantEst:   estPtr(cost.CostEstimate{Min: 62, Max: 62}),
+			wantEstV0: estPtr(cost.CostEstimate{Min: 61, Max: 61}),
 		},
 		{
-			name:    "nested map selection",
-			expr:    `{'a': [1,2], 'b': [1,2], 'c': [1,2], 'd': [1,2], 'e': [1,2]}.b`,
-			wantEst: estPtr(cost.CostEstimate{Min: 82, Max: 82}),
+			name:      "nested map selection",
+			expr:      `{'a': [1,2], 'b': [1,2], 'c': [1,2], 'd': [1,2], 'e': [1,2]}.b`,
+			wantEst:   estPtr(cost.CostEstimate{Min: 82, Max: 82}),
+			wantEstV0: estPtr(cost.CostEstimate{Min: 81, Max: 81}),
 		},
 		{
 			name:    "comprehension on nested list",
@@ -1561,29 +1564,34 @@ func TestCostEstimateAndTracking(t *testing.T) {
 			wantEst: estPtr(cost.CostEstimate{Min: 21, Max: 234}),
 		},
 		{
-			name:    "literal map access",
-			expr:    `{'hello': 'hi'}['hello'] != {'hello': 'bye'}['hello']`,
-			wantEst: estPtr(cost.CostEstimate{Min: 65, Max: 65}),
+			name:      "literal map access",
+			expr:      `{'hello': 'hi'}['hello'] != {'hello': 'bye'}['hello']`,
+			wantEst:   estPtr(cost.CostEstimate{Min: 65, Max: 65}),
+			wantEstV0: estPtr(cost.CostEstimate{Min: 63, Max: 63}),
 		},
 		{
-			name:    "literal list access",
-			expr:    `['hello', 'hi'][0] != ['hello', 'bye'][1]`,
-			wantEst: estPtr(cost.CostEstimate{Min: 25, Max: 25}),
+			name:      "literal list access",
+			expr:      `['hello', 'hi'][0] != ['hello', 'bye'][1]`,
+			wantEst:   estPtr(cost.CostEstimate{Min: 25, Max: 25}),
+			wantEstV0: estPtr(cost.CostEstimate{Min: 23, Max: 23}),
 		},
 		{
-			name:    "literal map optional access",
-			expr:    `{'hello': 'hi'}[?'hello']`,
-			wantEst: estPtr(cost.CostEstimate{Min: 32, Max: 32}),
+			name:      "literal map optional access",
+			expr:      `{'hello': 'hi'}[?'hello']`,
+			wantEst:   estPtr(cost.CostEstimate{Min: 32, Max: 32}),
+			wantEstV0: estPtr(cost.CostEstimate{Min: 31, Max: 31}),
 		},
 		{
-			name:    "literal map optional select",
-			expr:    `{'hello': 'hi'}.?hello`,
-			wantEst: estPtr(cost.CostEstimate{Min: 32, Max: 32}),
+			name:      "literal map optional select",
+			expr:      `{'hello': 'hi'}.?hello`,
+			wantEst:   estPtr(cost.CostEstimate{Min: 32, Max: 32}),
+			wantEstV0: estPtr(cost.CostEstimate{Min: 31, Max: 31}),
 		},
 		{
-			name:    "literal list optional access",
-			expr:    `['hello', 'hi'][?0]`,
-			wantEst: estPtr(cost.CostEstimate{Min: 12, Max: 12}),
+			name:      "literal list optional access",
+			expr:      `['hello', 'hi'][?0]`,
+			wantEst:   estPtr(cost.CostEstimate{Min: 12, Max: 12}),
+			wantEstV0: estPtr(cost.CostEstimate{Min: 11, Max: 11}),
 		},
 		{
 			name: "optional select chain",
@@ -2205,3 +2213,288 @@ func TestCustomSizingStrategy(t *testing.T) {
 		t.Errorf("got cost %v, wanted {Min: 2, Max: 2}", res)
 	}
 }
+
+func TestIterVarComputedRangeModelVersion0(t *testing.T) {
+	allTypes := types.NewObjectType("google.expr.proto3.test.TestAllTypes")
+	env, err := testCelEnv.Extend(cel.VariableDecls(
+		decls.NewVariable("self", allTypes),
+	))
+	if err != nil {
+		t.Fatalf("env.Extend() failed: %v", err)
+	}
+
+	hints := map[string]uint64{
+		"self.repeated_int64": 10,
+		"@items":              0,
+		"@indices":            0,
+		"@keys":               0,
+		"@values":             0,
+	}
+	est := testCostEstimator{hints: hints}
+
+	tests := []struct {
+		name   string
+		expr   string
+		wantV0 cost.CostEstimate
+		wantV1 cost.CostEstimate
+	}{
+		{
+			name:   "single_iter_var_over_computed_list",
+			expr:   `self.repeated_int64.map(e, e * 20).exists(e, e == 60)`,
+			wantV0: cost.RangedCostEstimate(14, 204),
+			wantV1: cost.RangedCostEstimate(14, 214),
+		},
+		{
+			name:   "nested_comprehension_over_computed_list",
+			expr:   `self.repeated_int64.map(e, [e, e]).exists(l, l.exists(e, e == 60))`,
+			wantV0: cost.RangedCostEstimate(14, 314),
+			wantV1: cost.RangedCostEstimate(14, 434),
+		},
+		{
+			name:   "two_var_comprehension_over_computed_list",
+			expr:   `self.repeated_int64.map(e, e * 20).exists(i, v, i == 0 && v == 60)`,
+			wantV0: cost.RangedCostEstimate(14, 214),
+			wantV1: cost.RangedCostEstimate(14, 234),
+		},
+		{
+			name:   "two_var_comprehension_over_computed_map",
+			expr:   `{'a': 'x', 'b': 'y'}.transformMap(k, v, v + 'z').exists(k, v, k == 'a' && v == 'xz')`,
+			wantV0: cost.RangedCostEstimate(80, 84),
+			wantV1: cost.RangedCostEstimate(80, 88),
+		},
+		{
+			name:   "string_iter_var_over_computed_list",
+			expr:   `self.repeated_int64.map(e, 'abc').exists(s, s == 'abc')`,
+			wantV0: cost.RangedCostEstimate(14, 184),
+			wantV1: cost.RangedCostEstimate(14, 194),
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			checked, iss := env.Compile(tc.expr)
+			if iss.Err() != nil {
+				t.Fatalf("env.Compile(%q) failed: %v", tc.expr, iss.Err())
+			}
+			gotV0, err := cost.Cost(checked.NativeRep(), est, cost.ModelVersion(0))
+			if err != nil {
+				t.Fatalf("Cost(ModelVersion(0)) failed: %v", err)
+			}
+			if gotV0 != tc.wantV0 {
+				t.Errorf("Cost(ModelVersion(0)) = %v, want %v", gotV0, tc.wantV0)
+			}
+			gotV1, err := cost.Cost(checked.NativeRep(), est, cost.ModelVersion(1))
+			if err != nil {
+				t.Fatalf("Cost(ModelVersion(1)) failed: %v", err)
+			}
+			if gotV1 != tc.wantV1 {
+				t.Errorf("Cost(ModelVersion(1)) = %v, want %v", gotV1, tc.wantV1)
+			}
+		})
+	}
+
+	// Verify that when the Estimator returns nil for "@items", version 0 falls back to v.size.
+	t.Run("estimator_returns_nil_falls_back_to_v_size", func(t *testing.T) {
+		checked, iss := env.Compile(`self.repeated_int64.map(e, 'abc').exists(s, s == 'abc')`)
+		if iss.Err() != nil {
+			t.Fatalf("env.Compile() failed: %v", iss.Err())
+		}
+		noItemsHintEst := testCostEstimator{hints: map[string]uint64{"self.repeated_int64": 10}}
+		gotV0, err := cost.Cost(checked.NativeRep(), noItemsHintEst, cost.ModelVersion(0))
+		if err != nil {
+			t.Fatalf("Cost(ModelVersion(0)) failed: %v", err)
+		}
+		gotV1, err := cost.Cost(checked.NativeRep(), noItemsHintEst, cost.ModelVersion(1))
+		if err != nil {
+			t.Fatalf("Cost(ModelVersion(1)) failed: %v", err)
+		}
+		if gotV0 != gotV1 {
+			t.Errorf("when Estimator returns nil for @items, gotV0 = %v, want %v (same as V1)", gotV0, gotV1)
+		}
+	})
+}
+
+func TestAbsentOptionalQualifierModelVersion0(t *testing.T) {
+	var nilTracker *cost.Tracker
+	if got := nilTracker.ModelVersion(); got != math.MaxUint32 {
+		t.Errorf("(*Tracker)(nil).ModelVersion() = %d, want %d", got, uint32(math.MaxUint32))
+	}
+
+	env, err := testCelEnv.Extend(cel.VariableDecls(
+		decls.NewVariable("m", types.NewMapType(types.StringType, types.StringType)),
+		decls.NewVariable("l", types.NewListType(types.StringType)),
+		decls.NewVariable("d", types.DynType),
+	))
+	if err != nil {
+		t.Fatalf("env.Extend() failed: %v", err)
+	}
+
+	tests := []struct {
+		name      string
+		expr      string
+		in        map[string]any
+		wantTrack uint64
+		wantV0    uint64
+		wantErr   bool
+	}{
+		{
+			name:      "absent_optional_select",
+			expr:      `m.?absent`,
+			in:        map[string]any{"m": map[string]string{"present": "v"}},
+			wantTrack: 2,
+			wantV0:    1,
+		},
+		{
+			name:      "present_optional_select",
+			expr:      `m.?present`,
+			in:        map[string]any{"m": map[string]string{"present": "v"}},
+			wantTrack: 2,
+			wantV0:    2,
+		},
+		{
+			name:      "absent_optional_index_map",
+			expr:      `m[?'absent']`,
+			in:        map[string]any{"m": map[string]string{"present": "v"}},
+			wantTrack: 2,
+			wantV0:    1,
+		},
+		{
+			name:      "absent_optional_index_list",
+			expr:      `l[?5]`,
+			in:        map[string]any{"l": []string{"a"}},
+			wantTrack: 2,
+			wantV0:    1,
+		},
+		{
+			name:      "error_optional_index_wrong_key_type",
+			expr:      `d[?'bad_list_index']`,
+			in:        map[string]any{"d": []string{"a"}},
+			wantTrack: 2,
+			wantV0:    2,
+			wantErr:   true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			checked, iss := env.Compile(tc.expr)
+			if iss.Err() != nil {
+				t.Fatalf("env.Compile(%q) failed: %v", tc.expr, iss.Err())
+			}
+			ctx := constructActivation(t, tc.in)
+
+			prgV1, err := env.Program(checked,
+				cel.CostTracking(nil),
+				cel.CostTrackerOptions(cost.ModelVersion(1)))
+			if err != nil {
+				t.Fatalf("env.Program(v1) failed: %v", err)
+			}
+			_, detV1, err := prgV1.Eval(ctx)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("Eval(v1) err = %v, wantErr %v", err, tc.wantErr)
+			}
+			if detV1.ActualCost() == nil || *detV1.ActualCost() != tc.wantTrack {
+				t.Errorf("ActualCost(ModelVersion(1)) = %v, want %d", detV1.ActualCost(), tc.wantTrack)
+			}
+
+			prgV0, err := env.Program(checked,
+				cel.CostTracking(nil),
+				cel.CostTrackerOptions(cost.ModelVersion(0)))
+			if err != nil {
+				t.Fatalf("env.Program(v0) failed: %v", err)
+			}
+			_, detV0, err := prgV0.Eval(ctx)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("Eval(v0) err = %v, wantErr %v", err, tc.wantErr)
+			}
+			if detV0.ActualCost() == nil || *detV0.ActualCost() != tc.wantV0 {
+				t.Errorf("ActualCost(ModelVersion(0)) = %v, want %d", detV0.ActualCost(), tc.wantV0)
+			}
+		})
+	}
+}
+
+func TestZeroMaxContainerChildHintsModelVersion0(t *testing.T) {
+	env, err := testCelEnv.Extend(cel.VariableDecls(
+		decls.NewVariable("self_list", types.NewListType(types.DoubleType)),
+		decls.NewVariable("self_map", types.NewMapType(types.StringType, types.DoubleType)),
+		decls.NewVariable("nested_list", types.NewListType(types.NewListType(types.DoubleType))),
+		decls.NewVariable("nested_map", types.NewMapType(types.StringType, types.NewListType(types.DoubleType))),
+	))
+	if err != nil {
+		t.Fatalf("env.Extend() failed: %v", err)
+	}
+
+	hints := map[string]uint64{
+		"self_list":                 0,
+		"self_list.@items":          0,
+		"self_map":                  0,
+		"self_map.@keys":            0,
+		"self_map.@values":          0,
+		"nested_list":               0,
+		"nested_list.@items":        0,
+		"nested_list.@items.@items": 0,
+		"nested_map":                0,
+		"nested_map.@keys":          0,
+		"nested_map.@values":        0,
+		"nested_map.@values.@items": 0,
+	}
+	est := testCostEstimator{hints: hints}
+
+	tests := []struct {
+		name   string
+		expr   string
+		wantV0 cost.CostEstimate
+		wantV1 cost.CostEstimate
+	}{
+		{
+			name:   "zero_max_list_index_comparison",
+			expr:   `self_list[3] == 0.0`,
+			wantV0: cost.FixedCostEstimate(2),
+			wantV1: cost.RangedCostEstimate(2, 3),
+		},
+		{
+			name:   "zero_max_map_index_comparison",
+			expr:   `self_map['k'] == 0.0`,
+			wantV0: cost.FixedCostEstimate(2),
+			wantV1: cost.RangedCostEstimate(2, 3),
+		},
+		{
+			name:   "zero_max_nested_list_index_comparison",
+			expr:   `nested_list[0][3] == 0.0`,
+			wantV0: cost.FixedCostEstimate(3),
+			wantV1: cost.RangedCostEstimate(3, 4),
+		},
+		{
+			name:   "zero_max_nested_map_index_comparison",
+			expr:   `nested_map['k'][3] == 0.0`,
+			wantV0: cost.FixedCostEstimate(3),
+			wantV1: cost.RangedCostEstimate(3, 4),
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			checked, iss := env.Compile(tc.expr)
+			if iss.Err() != nil {
+				t.Fatalf("env.Compile(%q) failed: %v", tc.expr, iss.Err())
+			}
+			gotV0, err := cost.Cost(checked.NativeRep(), est, cost.ModelVersion(0))
+			if err != nil {
+				t.Fatalf("Cost(ModelVersion(0)) failed: %v", err)
+			}
+			if gotV0 != tc.wantV0 {
+				t.Errorf("Cost(ModelVersion(0)) = %v, want %v", gotV0, tc.wantV0)
+			}
+			gotV1, err := cost.Cost(checked.NativeRep(), est, cost.ModelVersion(1))
+			if err != nil {
+				t.Fatalf("Cost(ModelVersion(1)) failed: %v", err)
+			}
+			if gotV1 != tc.wantV1 {
+				t.Errorf("Cost(ModelVersion(1)) = %v, want %v", gotV1, tc.wantV1)
+			}
+		})
+	}
+}
+
+

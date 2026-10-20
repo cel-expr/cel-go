@@ -128,6 +128,7 @@ type Tracker struct {
 	limitExceededHandler     func()
 	cost                     uint64
 	presenceTestHasCost      bool
+	modelVersion             uint32
 }
 
 // NewTracker creates a new Tracker with a given estimator and a set of functional TrackerOption values.
@@ -149,6 +150,7 @@ func NewTracker(estimator ActualCostEstimator, opts ...TrackerOption) (*Tracker,
 		}
 	}
 	tracker := b.tracker
+	tracker.modelVersion = b.modelVersion
 	tracker.overloadTrackers = b.overloadTrackers.fns
 	// The package-level trackers are compiled under the default rules.
 	tracker.standardOverloadTrackers = stdOverloadTrackers
@@ -175,6 +177,14 @@ func (c *Tracker) ActualCost() uint64 {
 // PresenceTestHasCost returns whether presence testing has a cost.
 func (c *Tracker) PresenceTestHasCost() bool {
 	return c.presenceTestHasCost
+}
+
+// ModelVersion returns the cost model version configured on the tracker.
+func (c *Tracker) ModelVersion() uint32 {
+	if c == nil {
+		return defaultModelVersion
+	}
+	return c.modelVersion
 }
 
 // CreateList records list literal construction cost.

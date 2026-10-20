@@ -201,7 +201,7 @@ latest revision by default.
 | Version | Corrects |
 |---|---|
 | `0` | The model as released in `v0.32.0`. |
-| `1` | Core `Min()` interval bounds, exact rational `Scale` normalization, `optional` size propagation, and extension (`ext/sets`, `ext/math`, `ext/encoders`, `ext/strings`, `ext/regex`, `ext/network`, `ext/lists`) cost and result-size models. |
+| `1` | Core `Min()` interval bounds, exact rational `Scale` normalization, `optional` size propagation and qualifier tracking, computed-operand attribute and comprehension variable sizing, and extension (`ext/sets`, `ext/math`, `ext/encoders`, `ext/strings`, `ext/regex`, `ext/network`, `ext/lists`) cost and result-size models. |
 
 Specifically, version `1` corrects:
 * **Core `Min()` and `Scale()` (`common/cost`)**: `Min()` computes the exact
@@ -210,11 +210,24 @@ Specifically, version `1` corrects:
   nested and multiplied rational factors so products round once. The `Min()`
   correction moves only the lower bound of an estimate, never a charge, so it
   applies at every revision, including version `0`.
-* **Optionals (`common/cost`)**: `optional.of`, `optional.ofNonZeroValue`, and
-  `value()` preserve the wrapped value's `SizeEstimate` (including container
-  `Key` and `Elem` metadata); `or` and `orValue` report the union of their
-  branches' sizes; and optional index operators (`_[?_]`) record the same
-  `@items` and `@values` field paths as standard indexing.
+* **Optionals (`common/cost`, `interpreter`)**: `optional.of`,
+  `optional.ofNonZeroValue`, and `value()` preserve the wrapped value's
+  `SizeEstimate` (including container `Key` and `Elem` metadata); `or` and
+  `orValue` report the union of their branches' sizes; optional index operators
+  (`_[?_]`) record the same `@items` and `@values` field paths as standard
+  indexing; and optional field and index qualifiers (`m.?k`, `l[?0]`) charge $1$
+  at runtime even when the field or element is absent, matching static
+  estimation and non-optional qualification.
+* **Core AST & Sizing (`common/cost`)**:
+  * Comprehension loop variables over computed (pathless) ranges retain their
+    propagated element or key sizes rather than recording bare `@items`,
+    `@indices`, `@keys`, or `@values` paths that a caller's `Estimator` could
+    override with a smaller bound.
+  * Selecting or indexing into a computed expression (such as `[1, 2][0]` or
+    `{"a": 1}.a`) includes the attribute traversal cost of $1$ during estimation
+    to match runtime tracking.
+  * `DefaultSizingStrategy` skips `@items`, `@keys`, and `@values` child size
+    hints when a container's maximum size is $0$.
 * **Sets, Math, Encoders, and Network (`ext/sets`, `ext/math`, `ext/encoders`, `ext/network`)**:
   * Migrates extension overloads from hand-written estimators and trackers to
     declarative `OverloadModel`s (using `Length` for strategy-independent
@@ -251,21 +264,41 @@ Specifically, version `1` corrects:
     with `replaceCostTracker`.
 
 Custom `cost.FunctionEstimator` callbacks can inspect the active model revision
-via [`cost.ModelVersionOf(estimator)`](https://github.com/cel-expr/cel-go/blob/master/common/cost/model.go).
+via [`cost.ModelVersionOf(estimator)`](https://github.com/cel-expr/cel-go/blob/master/common/cost/model.go),
+and runtime cost trackers expose their configured revision via
+[`Tracker.ModelVersion()`](https://github.com/cel-expr/cel-go/blob/master/common/cost/tracker.go).
 
 > [!IMPORTANT]
 > Selecting a model version via `cel.CostModelVersion` or `cost.ModelVersion`
-> applies to **both static estimation and runtime tracking** for overloads that
-> declare a [`BeforeVersion`](https://github.com/cel-expr/cel-go/blob/master/common/cost/model.go)
-> clause, ensuring that an expression's estimated bounds and runtime charge are
-> always evaluated under the same rules.
+> applies to **both static estimation and runtime tracking**, ensuring that an
+> expression's estimated bounds and runtime charge are always evaluated under
+> the same revision rules.
 
 > [!WARNING]
-> Pinning is an escape hatch, not a supported configuration. Every revision
-> corrects a defect, so an older revision is by construction less accurate.
-> Staying on version `0` means a saturated upper bound below any optional,
-> which rejects programs that would never have reached the limit, and a lower
-> bound that is wrong in both directions.
+> **Caveats of `ModelVersion(0)` — switch to `ModelVersion(1)` or higher for soundness.**
+> Pinning to version `0` is a temporary migration aid for deployments with
+> pre-recorded cost budgets, not a recommended configuration. Because version
+> `0` reproduces legacy `v0.32.0` behavior, it retains both severe overestimates
+> and **soundness gaps** where the static `Max` estimate can underestimate the
+> actual runtime tracked cost ($\text{Actual} > \text{Max}$):
+> * **Comprehension loop variables over computed ranges**: A caller's
+>   `Estimator` returning a small bound (such as `{0, 0}`) for bare `@items`,
+>   `@indices`, `@keys`, or `@values` paths overrides the propagated size of
+>   elements produced by a prior step (e.g., `.map(...).exists(...)`), causing
+>   each loop iteration's body to be underpriced relative to runtime tracking.
+> * **Computed-operand selection and indexing**: Selecting a field or indexing
+>   into a computed expression (e.g., `[1, 2][0]` or `{"a": 1}.a`) charges $0$
+>   for the traversal during static estimation while the runtime tracker charges
+>   $1$.
+> * **Extension and `optional` bounds**: Non-literal integer arguments (such as
+>   `lists.range(n)`), multi-character `strings.join` elements, and empty
+>    separator splits can exceed version `0` static bounds at runtime, while any
+>   value wrapped in an `optional` loses its size metadata and saturates upper
+>   bounds to `math.MaxUint64`.
+>
+> Callers should migrate to `ModelVersion(1)` or higher (or leave the version
+> unset to use the latest revision) as soon as possible for improved soundness
+> ($\text{Min} \le \text{Actual} \le \text{Max}$) and tighter interval accuracy.
 
 ---
 

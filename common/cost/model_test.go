@@ -20,6 +20,7 @@ import (
 	"strings"
 	"testing"
 
+	"cel.dev/cel-go/common/ast"
 	"cel.dev/cel-go/common/types"
 	"cel.dev/cel-go/common/types/ref"
 )
@@ -1272,6 +1273,47 @@ func TestModel_EstimatorEvalContextMethods(t *testing.T) {
 	litNode := NewAstNode(nil, nil, types.IntType, nil)
 	if sz := succStratECtx.Size(litNode); sz != FixedSizeEstimate(1) {
 		t.Errorf("succStratECtx.Size = %v, want 1", sz)
+	}
+}
+
+type versionRecordingStrategy struct {
+	defaultSizingStrategy
+	versions []uint32
+}
+
+func (s *versionRecordingStrategy) EstimateSize(ctx EstimateContext, node AstNode) (SizeEstimate, bool) {
+	s.versions = append(s.versions, versionOf(ctx))
+	return s.defaultSizingStrategy.EstimateSize(ctx, node)
+}
+
+func TestCosterEvalContextVersionWithEstimator(t *testing.T) {
+	fac := ast.NewExprFactory()
+	expr := fac.NewCall(2, "size", fac.NewIdent(1, "x"))
+	checked := ast.NewCheckedAST(ast.NewAST(expr, nil), map[int64]*types.Type{
+		1: types.StringType,
+		2: types.IntType,
+	}, map[int64]*ast.ReferenceInfo{
+		2: ast.NewFunctionReference("size_string"),
+	})
+
+	for _, wantVersion := range []uint32{0, 1, defaultModelVersion} {
+		strat := &versionRecordingStrategy{}
+		rawEstimator := testHintsEstimator{hints: map[string]uint64{"x": 10}}
+		est, err := Cost(checked, rawEstimator, WithSizingStrategy(strat), ModelVersion(wantVersion))
+		if err != nil {
+			t.Fatalf("Cost() failed: %v", err)
+		}
+		if est != FixedCostEstimate(2) {
+			t.Errorf("Cost() = %v, want 2", est)
+		}
+		if len(strat.versions) == 0 {
+			t.Fatalf("expected SizingStrategy.EstimateSize to be called during Cost()")
+		}
+		for _, got := range strat.versions {
+			if got != wantVersion {
+				t.Errorf("SizingStrategy observed versionOf(ctx) = %d at ModelVersion(%d), want %d", got, wantVersion, wantVersion)
+			}
+		}
 	}
 }
 

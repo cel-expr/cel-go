@@ -147,7 +147,7 @@ func resolveListSizes(ctx EstimateContext, node AstNode, elemType *types.Type, l
 	if elemSize == nil && listSize != nil {
 		elemSize = cloneSizeEstimate(listSize.Elem)
 	}
-	if listSize == nil || listSize.Max > 0 {
+	if listSize == nil || listSize.Max > 0 || (ctx != nil && versionOf(ctx) < 1) {
 		elemSize = resolveChildSize(ctx, node.Path(), "@items", elemType, elemSize)
 	}
 	// If neither the list length nor element size is known for an AST expression node
@@ -175,7 +175,7 @@ func resolveMapSizes(ctx EstimateContext, node AstNode, keyType, valType *types.
 		}
 	}
 	// Query subpaths @keys and @values if hints were not provided on the parent map node.
-	if mapSize == nil || mapSize.Max > 0 {
+	if mapSize == nil || mapSize.Max > 0 || (ctx != nil && versionOf(ctx) < 1) {
 		keySize = resolveChildSize(ctx, node.Path(), "@keys", keyType, keySize)
 		valSize = resolveChildSize(ctx, node.Path(), "@values", valType, valSize)
 	}

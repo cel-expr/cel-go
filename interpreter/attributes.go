@@ -1500,7 +1500,8 @@ func applyQualifiers(vars Activation, obj any, qualifiers []Qualifier) (any, boo
 			var present bool
 			qualObj, present, err = qual.QualifyIfPresent(vars, obj, false)
 			if hasFrame {
-				if costs := frame.CostTracker(); costs != nil {
+				if costs := frame.CostTracker(); costs != nil &&
+					(present || err != nil || costs.ModelVersion() >= 1) {
 					costs.Qualify(qual.ID())
 				}
 			}
