@@ -2723,6 +2723,41 @@ func BenchmarkCheck(b *testing.B) {
 	}
 }
 
+// BenchmarkCheckLongConjunction checks a conjunction of n terms that each use
+// a macro and a parameterized overload, so that every term adds type
+// parameters to the checker's substitution mapping.
+func BenchmarkCheckLongConjunction(b *testing.B) {
+	p, err := parser.NewParser(parser.Macros(parser.AllMacros...))
+	if err != nil {
+		b.Fatalf("parser.NewParser() failed: %v", err)
+	}
+	for _, n := range []int{25, 50, 100, 200, 400} {
+		terms := make([]string, n)
+		for i := range terms {
+			terms[i] = fmt.Sprintf(`["a%d"].map(s, s + "x").size() > 0`, i)
+		}
+		src := common.NewTextSource(strings.Join(terms, " && "))
+		b.Run(fmt.Sprintf("terms=%d", n), func(b *testing.B) {
+			pAst, errs := p.Parse(src)
+			if len(errs.GetErrors()) > 0 {
+				b.Fatalf("Parse() failed: %v", errs.ToDisplayString())
+			}
+			env, err := NewEnv(containers.DefaultContainer, newTestRegistry(b), CrossTypeNumericComparisons(true))
+			if err != nil {
+				b.Fatalf("NewEnv() failed: %v", err)
+			}
+			env.AddFunctions(stdlib.Functions()...)
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				if _, errs := Check(pAst, src, env); len(errs.GetErrors()) > 0 {
+					b.Fatalf("Check() failed: %v", errs.ToDisplayString())
+				}
+			}
+		})
+	}
+}
+
 func TestAddDuplicateDeclarations(t *testing.T) {
 	reg, err := types.NewRegistry(types.ProtoTypeDefs(&proto2pb.TestAllTypes{}, &proto3pb.TestAllTypes{}))
 	if err != nil {
