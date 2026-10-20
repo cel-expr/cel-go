@@ -2655,7 +2655,10 @@ func BenchmarkCheck(b *testing.B) {
 			if len(errors.GetErrors()) > 0 {
 				b.Fatalf("Unexpected parse errors: %v", errors.ToDisplayString())
 			}
-			reg, err := types.NewRegistry(types.ProtoTypeDefs(&proto2pb.TestAllTypes{}, &proto3pb.TestAllTypes{}))
+			reg, err := types.NewRegistry(
+				types.JSONFieldNames(tc.env.jsonFieldNames),
+				types.ProtoTypeDefs(&proto2pb.TestAllTypes{}, &proto3pb.TestAllTypes{}),
+			)
 			if err != nil {
 				b.Fatalf("types.NewRegistry() failed: %v", err)
 			}
@@ -2671,6 +2674,9 @@ func BenchmarkCheck(b *testing.B) {
 			opts := []Option{CrossTypeNumericComparisons(true)}
 			if len(tc.opts) != 0 {
 				opts = tc.opts
+			}
+			if tc.env.jsonFieldNames {
+				opts = append(opts, JSONFieldNames(true))
 			}
 			env, err := NewEnv(cont, reg, opts...)
 			if err != nil {
