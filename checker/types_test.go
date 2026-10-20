@@ -15,6 +15,7 @@
 package checker
 
 import (
+	"maps"
 	"testing"
 
 	"cel.dev/cel-go/common/types"
@@ -169,6 +170,14 @@ func TestIsAssignable_TypeType(t *testing.T) {
 			wantAssign: false,
 		},
 		{
+			// T is bound to string before int fails to match string, and the
+			// failure leaves no binding behind.
+			name:       "typeParam_boundBeforeMismatch",
+			from:       types.NewTypeTypeWithParam(types.NewMapType(types.NewTypeParamType("T"), types.IntType)),
+			to:         types.NewTypeTypeWithParam(types.NewMapType(types.StringType, types.StringType)),
+			wantAssign: false,
+		},
+		{
 			name: "occursCheck_failsOnTransitiveCycle",
 			from: types.NewTypeTypeWithParam(types.NewTypeParamType("R")),
 			to:   types.NewTypeTypeWithParam(types.NewTypeTypeWithParam(types.NewTypeParamType("T"))),
@@ -185,21 +194,24 @@ func TestIsAssignable_TypeType(t *testing.T) {
 			if tc.setup != nil {
 				tc.setup(m)
 			}
+			before := maps.Clone(m.mapping)
 			result := isAssignable(m, tc.from, tc.to)
 			if tc.wantAssign {
-				if result == nil {
-					t.Fatalf("isAssignable(%v, %v) = nil, want non-nil", tc.from, tc.to)
+				if !result {
+					t.Fatalf("isAssignable(%v, %v) = false, want true", tc.from, tc.to)
 				}
 				for paramName, wantType := range tc.wantSubs {
-					gotType, found := result.find(types.NewTypeParamType(paramName))
+					gotType, found := m.find(types.NewTypeParamType(paramName))
 					if !found {
 						t.Errorf("type param %q not found in substitutions", paramName)
 					} else if !gotType.IsExactType(wantType) {
 						t.Errorf("type param %q = %v, want %v", paramName, gotType, wantType)
 					}
 				}
-			} else if result != nil {
-				t.Fatalf("isAssignable(%v, %v) = %v, want nil", tc.from, tc.to, result)
+			} else if result {
+				t.Fatalf("isAssignable(%v, %v) = true, want false", tc.from, tc.to)
+			} else if !maps.Equal(m.mapping, before) {
+				t.Errorf("isAssignable(%v, %v) failed but changed the mapping from %v to %v", tc.from, tc.to, before, m.mapping)
 			}
 		})
 	}

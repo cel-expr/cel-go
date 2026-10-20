@@ -646,23 +646,11 @@ func (c *checker) newTypeVar() *types.Type {
 }
 
 func (c *checker) isAssignable(t1, t2 *types.Type) bool {
-	subs := isAssignable(c.mappings, t1, t2)
-	if subs != nil {
-		c.mappings = subs
-		return true
-	}
-
-	return false
+	return isAssignable(c.mappings, t1, t2)
 }
 
 func (c *checker) isAssignableList(l1, l2 []*types.Type) bool {
-	subs := isAssignableList(c.mappings, l1, l2)
-	if subs != nil {
-		c.mappings = subs
-		return true
-	}
-
-	return false
+	return isAssignableList(c.mappings, l1, l2)
 }
 
 func maybeUnwrapString(e ast.Expr) (string, bool) {
