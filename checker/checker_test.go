@@ -2697,7 +2697,7 @@ func BenchmarkCheck(b *testing.B) {
 			}
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				cAst, errors := Check(pAst, src, env)
+				cAst, errors := Check(ast.Copy(pAst), src, env)
 				if len(errors.GetErrors()) > 0 {
 					errorString := errors.ToDisplayString()
 					if tc.err != "" {
