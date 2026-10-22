@@ -117,6 +117,23 @@ func TestDoubleCompare(t *testing.T) {
 			out: IntOne,
 		},
 		{
+			// 2^53+1 has no double representation, so it must not compare equal to 2^53.
+			a:   Double(1 << 53),
+			b:   Int(1<<53) + 1,
+			out: IntNegOne,
+		},
+		{
+			a:   Double(1 << 53),
+			b:   Uint(1<<53) + 1,
+			out: IntNegOne,
+		},
+		{
+			// MaxInt64 rounds up to 2^63 as a double, but remains below it as an int.
+			a:   Double(1 << 63),
+			b:   Int(math.MaxInt64),
+			out: IntOne,
+		},
+		{
 			a:   Double(1),
 			b:   String("1"),
 			out: NoSuchOverloadErr(),
@@ -405,6 +422,26 @@ func TestDoubleEqual(t *testing.T) {
 		{
 			a:   Double(math.NaN()),
 			b:   Int(10),
+			out: False,
+		},
+		{
+			a:   Double(1 << 53),
+			b:   Int(1<<53) + 1,
+			out: False,
+		},
+		{
+			a:   Double(1 << 53),
+			b:   Uint(1<<53) + 1,
+			out: False,
+		},
+		{
+			a:   Double(1 << 63),
+			b:   Int(math.MaxInt64),
+			out: False,
+		},
+		{
+			a:   Double(math.MaxUint64),
+			b:   Uint(math.MaxUint64),
 			out: False,
 		},
 	}
