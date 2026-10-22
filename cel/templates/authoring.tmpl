@@ -31,11 +31,13 @@
 {{- end -}}
 
 {{define "overload" -}}
-{{if .Children}}{{range .Children}}{{range split .Description}}      {{.}}
+{{if .Signature}}      {{.Signature}}
+{{end -}}
+{{if .Children -}}
+{{range .Children}}{{range split .Description}}        Example: {{.}}
 {{end}}
 {{- end -}}
-{{else}}      {{.Signature}}
-{{end}}
+{{- end -}}
 {{- end -}}
 
 {{define "function" -}}
@@ -44,12 +46,24 @@
 {{range .Children}}{{template "overload" .}}{{end}}
 {{- end -}}
 
-{{.Persona}}
+{{- if .Persona}}{{.Persona}}
 
-{{.FormatRules}}
+{{end -}}
+{{- if .FormatRules}}{{.FormatRules}}
 
-{{if or .Variables .Macros .Functions -}}
+{{end -}}
+{{- if or .Container .Imports .Variables .Macros .Functions -}}
 Only use the following variables, macros, and functions in expressions.
+{{if .Container}}
+Container: `{{.Container}}`
+{{end -}}
+{{if .Imports}}
+Imports:
+
+{{range .Imports -}}
+* `{{.}}`
+{{end -}}
+{{- end -}}
 {{if .Variables}}
 Variables:
 
@@ -71,8 +85,12 @@ Functions:
 {{range .Functions}}* {{template "function" .}}
 {{end -}}
 {{- end -}}
-{{- end -}}
+{{if not (or .Variables .Macros .Functions)}}
+{{end -}}
+{{end -}}
+{{- if .GeneralUsage}}{{.GeneralUsage}}
 
-{{.GeneralUsage}}
+{{end -}}
+{{- if .UserPrompt}}{{.UserPrompt}}
+{{end -}}
 
-{{.UserPrompt}}

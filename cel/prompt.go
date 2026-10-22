@@ -21,8 +21,10 @@ import (
 	"text/template"
 
 	"cel.dev/cel-go/common"
+	"cel.dev/cel-go/common/decls"
 	"cel.dev/cel-go/common/operators"
 	"cel.dev/cel-go/common/overloads"
+	"cel.dev/cel-go/common/stdlib"
 	"cel.dev/cel-go/common/types"
 )
 
@@ -60,8 +62,33 @@ func splitImpl(str string) []string {
 	return trimmed
 }
 
+// PromptOption configures behavior for an authoring Prompt.
+type PromptOption func(*Prompt) (*Prompt, error)
+
+// PromptVerbose configures whether standard library definitions and generic LLM prompt scaffolding
+// (Persona, FormatRules, GeneralUsage) are included in the prompt.
+// By default, these are omitted to produce a compact prompt.
+func PromptVerbose(verbose bool) PromptOption {
+	return func(p *Prompt) (*Prompt, error) {
+		p.verbose = verbose
+		return p, nil
+	}
+}
+
+// PromptFieldPaths configures whether reachable field paths on struct variables are documented in the prompt.
+func PromptFieldPaths(fieldPaths bool) PromptOption {
+	return func(p *Prompt) (*Prompt, error) {
+		p.fieldPaths = fieldPaths
+		return p, nil
+	}
+}
+
 // AuthoringPrompt creates a prompt template from a CEL environment for the purpose of AI-assisted authoring.
-func AuthoringPrompt(env *Env) (*Prompt, error) {
+//
+// By default, generic LLM prompt scaffolding (Persona, FormatRules, GeneralUsage) and unmodified
+// standard library functions and macros are omitted from the rendered prompt unless
+// PromptVerbose(true) is specified.
+func AuthoringPrompt(env *Env, opts ...PromptOption) (*Prompt, error) {
 	funcMap := template.FuncMap{
 		"split":          splitImpl,
 		"newlineToSpace": func(str string) string { return strings.ReplaceAll(str, "\n", " ") },
@@ -71,24 +98,29 @@ func AuthoringPrompt(env *Env) (*Prompt, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Prompt{
-		Persona:      defaultPersona,
-		FormatRules:  defaultFormatRules,
-		GeneralUsage: defaultGeneralUsage,
-		tmpl:         tmpl,
-		env:          env,
-	}, nil
+	p := &Prompt{
+		tmpl: tmpl,
+		env:  env,
+	}
+	for _, opt := range opts {
+		p, err = opt(p)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if p.verbose {
+		p.Persona = defaultPersona
+		p.FormatRules = defaultFormatRules
+		p.GeneralUsage = defaultGeneralUsage
+	}
+	return p, nil
 }
 
 // AuthoringPromptWithFieldPaths creates a prompt template from a CEL environment for the purpose of AI-assisted authoring.
 // Includes documentation for all of the reachable field paths in the environment.
-func AuthoringPromptWithFieldPaths(env *Env) (*Prompt, error) {
-	p, err := AuthoringPrompt(env)
-	if err != nil {
-		return nil, err
-	}
-	p.fieldPaths = true
-	return p, nil
+func AuthoringPromptWithFieldPaths(env *Env, opts ...PromptOption) (*Prompt, error) {
+	allOpts := append([]PromptOption{PromptFieldPaths(true)}, opts...)
+	return AuthoringPrompt(env, allOpts...)
 }
 
 // Prompt represents the core components of an LLM prompt based on a CEL environment.
@@ -111,6 +143,9 @@ type Prompt struct {
 	// fieldPaths is a flag to include reachable field paths in the prompt.
 	fieldPaths bool
 
+	// verbose is a flag to include standard library functions, macros, and prompt scaffolding in the prompt.
+	verbose bool
+
 	// env reference used to collect variables, functions, and macros available to the prompt.
 	env *Env
 }
@@ -123,10 +158,22 @@ type promptVariable struct {
 type promptInst struct {
 	*Prompt
 
+	Container  string
+	Imports    []string
 	Variables  []*promptVariable
 	Macros     []*common.Doc
 	Functions  []*common.Doc
 	UserPrompt string
+}
+
+func isStdLibSubsetted(e *Env) bool {
+	if lib, ok := e.libraries["cel.lib.std"]; ok {
+		if subsetter, ok := lib.(LibrarySubsetter); ok {
+			subset := subsetter.LibrarySubset()
+			return subset != nil && !subset.Disabled
+		}
+	}
+	return false
 }
 
 // Render renders the user prompt with the associated context from the prompt template
@@ -139,6 +186,15 @@ type promptInst struct {
 // itself, not in data values interpolated at render time.
 func (p *Prompt) Render(userPrompt string) string {
 	var buffer strings.Builder
+	container := p.env.Container.Name()
+	var imports []string
+	for _, imp := range p.env.Container.AliasSet() {
+		imports = append(imports, imp)
+	}
+	sort.Strings(imports)
+
+	filterStdLib := !p.verbose && !isStdLibSubsetted(p.env)
+
 	vars := make([]*promptVariable, len(p.env.Variables()))
 	for i, v := range p.env.Variables() {
 		vars[i] = &promptVariable{Doc: v.Documentation()}
@@ -165,14 +221,43 @@ func (p *Prompt) Render(userPrompt string) string {
 	sort.SliceStable(vars, func(i, j int) bool {
 		return vars[i].Name < vars[j].Name
 	})
-	macs := make([]*common.Doc, len(p.env.Macros()))
-	for i, m := range p.env.Macros() {
-		macs[i] = m.(common.Documentor).Documentation()
+
+	stdMacroKeys := map[string]bool{}
+	if filterStdLib {
+		for _, m := range StandardMacros {
+			stdMacroKeys[m.MacroKey()] = true
+		}
+	}
+	macs := make([]*common.Doc, 0, len(p.env.Macros()))
+	for _, m := range p.env.Macros() {
+		if filterStdLib && stdMacroKeys[m.MacroKey()] {
+			continue
+		}
+		macs = append(macs, m.(common.Documentor).Documentation())
+	}
+
+	stdOverloads := map[string][]string{}
+	if filterStdLib {
+		for _, fnDecl := range stdlib.Functions() {
+			overloads := make([]string, 0, len(fnDecl.OverloadDecls()))
+			for _, o := range fnDecl.OverloadDecls() {
+				overloads = append(overloads, o.ID())
+			}
+			stdOverloads[fnDecl.Name()] = overloads
+		}
 	}
 	funcs := make([]*common.Doc, 0, len(p.env.Functions()))
 	for _, f := range p.env.Functions() {
 		if _, hidden := hiddenFunctions[f.Name()]; hidden {
 			continue
+		}
+		if filterStdLib {
+			if excludedOverloads, found := stdOverloads[f.Name()]; found {
+				f = f.Subset(decls.ExcludeOverloads(excludedOverloads...))
+				if f == nil {
+					continue
+				}
+			}
 		}
 		funcs = append(funcs, f.Documentation())
 	}
@@ -181,6 +266,8 @@ func (p *Prompt) Render(userPrompt string) string {
 	})
 	inst := &promptInst{
 		Prompt:     p,
+		Container:  container,
+		Imports:    imports,
 		Variables:  vars,
 		Macros:     macs,
 		Functions:  funcs,

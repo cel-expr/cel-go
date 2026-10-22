@@ -1065,6 +1065,9 @@ func TestFunctionAsCELFunction(t *testing.T) {
 			assertFuncEquals(t, gotFn, tc.want.(*decls.FunctionDecl))
 		})
 	}
+	if _, err := (&Overload{}).AsFunctionOption(tp); err == nil {
+		t.Errorf("(&Overload{}).AsFunctionOption() got nil error, wanted error")
+	}
 }
 
 func TestTypeDescAsCELTypeErrors(t *testing.T) {

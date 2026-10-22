@@ -15,338 +15,498 @@ Functions:
 
 * !_ - logically negate a boolean value.
 
-      !true // false
-      !false // true
-      !error // error
+      !bool -> bool
+        Example: !true // false
+        Example: !false // true
+        Example: !error // error
 
 * -_ - negate a numeric value
 
-      -(3.14) // -3.14
-      -(5) // -5
+      -double -> double
+        Example: -(3.14) // -3.14
+      -int -> int
+        Example: -(5) // -5
 
 * @in - test whether a value exists in a list, or a key exists in a map
 
-      2 in [1, 2, 3] // true
-      "a" in ["b", "c"] // false
-      'key1' in {'key1': 'value1', 'key2': 'value2'} // true
-      3 in {1: "one", 2: "two"} // false
+      <A> in list(<A>) -> bool
+        Example: 2 in [1, 2, 3] // true
+        Example: "a" in ["b", "c"] // false
+      <A> in map(<A>, <B>) -> bool
+        Example: 'key1' in {'key1': 'value1', 'key2': 'value2'} // true
+        Example: 3 in {1: "one", 2: "two"} // false
 
 * _!=_ - compare two values of the same type for inequality
 
-      1 != 2     // true
-      "a" != "a" // false
-      3.0 != 3.1 // true
+      <A> != <A> -> bool
+        Example: 1 != 2     // true
+        Example: "a" != "a" // false
+        Example: 3.0 != 3.1 // true
 
 * _%_ - compute the modulus of one integer into another
 
-      3 % 2 // 1
-      6u % 3u // 0u
+      int % int -> int
+        Example: 3 % 2 // 1
+      uint % uint -> uint
+        Example: 6u % 3u // 0u
 
 * _&&_ - logically AND two boolean values. Errors and unknown values are valid inputs and will not halt evaluation.
 
-      true && true   // true
-      true && false  // false
-      error && true  // error
-      error && false // false
+      bool && bool -> bool
+        Example: true && true   // true
+        Example: true && false  // false
+        Example: error && true  // error
+        Example: error && false // false
 
 * _*_ - multiply two numbers
 
-      3.5 * 40.0 // 140.0
-      -2 * 6 // -12
-      13u * 3u // 39u
+      double * double -> double
+        Example: 3.5 * 40.0 // 140.0
+      int * int -> int
+        Example: -2 * 6 // -12
+      uint * uint -> uint
+        Example: 13u * 3u // 39u
 
 * _+_ - adds two numeric values or concatenates two strings, bytes, or lists.
 
-      b'hi' + bytes('ya') // b'hiya'
-      3.14 + 1.59 // 4.73
-      duration('1m') + duration('1s') // duration('1m1s')
-      duration('24h') + timestamp('2023-01-01T00:00:00Z') // timestamp('2023-01-02T00:00:00Z')
-      timestamp('2023-01-01T00:00:00Z') + duration('24h1m2s') // timestamp('2023-01-02T00:01:02Z')
-      1 + 2 // 3
-      [1] + [2, 3] // [1, 2, 3]
-      "Hello, " + "world!" // "Hello, world!"
-      22u + 33u // 55u
+      bytes + bytes -> bytes
+        Example: b'hi' + bytes('ya') // b'hiya'
+      double + double -> double
+        Example: 3.14 + 1.59 // 4.73
+      google.protobuf.Duration + google.protobuf.Duration -> google.protobuf.Duration
+        Example: duration('1m') + duration('1s') // duration('1m1s')
+      google.protobuf.Duration + google.protobuf.Timestamp -> google.protobuf.Timestamp
+        Example: duration('24h') + timestamp('2023-01-01T00:00:00Z') // timestamp('2023-01-02T00:00:00Z')
+      google.protobuf.Timestamp + google.protobuf.Duration -> google.protobuf.Timestamp
+        Example: timestamp('2023-01-01T00:00:00Z') + duration('24h1m2s') // timestamp('2023-01-02T00:01:02Z')
+      int + int -> int
+        Example: 1 + 2 // 3
+      list(<A>) + list(<A>) -> list(<A>)
+        Example: [1] + [2, 3] // [1, 2, 3]
+      string + string -> string
+        Example: "Hello, " + "world!" // "Hello, world!"
+      uint + uint -> uint
+        Example: 22u + 33u // 55u
 
 * _-_ - subtract two numbers, or two time-related values
 
-      10.5 - 2.0 // 8.5
-      duration('1m') - duration('1s') // duration('59s')
-      5 - 3 // 2
-      timestamp('2023-01-10T12:00:00Z')
-        - duration('12h') // timestamp('2023-01-10T00:00:00Z')
-      timestamp('2023-01-10T12:00:00Z')
-        - timestamp('2023-01-10T00:00:00Z') // duration('12h')
-      // the subtraction result must be positive, otherwise an overflow
-      // error is generated.
-      42u - 3u // 39u
+      double - double -> double
+        Example: 10.5 - 2.0 // 8.5
+      google.protobuf.Duration - google.protobuf.Duration -> google.protobuf.Duration
+        Example: duration('1m') - duration('1s') // duration('59s')
+      int - int -> int
+        Example: 5 - 3 // 2
+      google.protobuf.Timestamp - google.protobuf.Duration -> google.protobuf.Timestamp
+        Example: timestamp('2023-01-10T12:00:00Z')
+        Example:   - duration('12h') // timestamp('2023-01-10T00:00:00Z')
+      google.protobuf.Timestamp - google.protobuf.Timestamp -> google.protobuf.Duration
+        Example: timestamp('2023-01-10T12:00:00Z')
+        Example:   - timestamp('2023-01-10T00:00:00Z') // duration('12h')
+      uint - uint -> uint
+        Example: // the subtraction result must be positive, otherwise an overflow
+        Example: // error is generated.
+        Example: 42u - 3u // 39u
 
 * _/_ - divide two numbers
 
-      7.0 / 2.0 // 3.5
-      10 / 2 // 5
-      42u / 2u // 21u
+      double / double -> double
+        Example: 7.0 / 2.0 // 3.5
+      int / int -> int
+        Example: 10 / 2 // 5
+      uint / uint -> uint
+        Example: 42u / 2u // 21u
 
 * _<=_ - compare two values and return true if the first value is less than or equal to the second
 
-      false <= true // true
-      -2 <= 3 // true
-      1 <= 1.1 // true
-      1 <= 2u // true
-      -1 <= 0u // true
-      1u <= 2u // true
-      1u <= 1.0 // true
-      1u <= 1.1 // true
-      1u <= 23 // true
-      2.0 <= 2.4 // true
-      2.1 <= 3 // true
-      2.0 <= 2u // true
-      -1.0 <= 1u // true
-      'a' <= 'b' // true
-      'a' <= 'a' // true
-      'cat' <= 'cab' // false
-      b'hello' <= b'world' // true
-      timestamp('2001-01-01T02:03:04Z') <= timestamp('2002-02-02T02:03:04Z') // true
-      duration('1ms') <= duration('1s') // true
+      bool <= bool -> bool
+        Example: false <= true // true
+      int <= int -> bool
+        Example: -2 <= 3 // true
+      int <= double -> bool
+        Example: 1 <= 1.1 // true
+      int <= uint -> bool
+        Example: 1 <= 2u // true
+        Example: -1 <= 0u // true
+      uint <= uint -> bool
+        Example: 1u <= 2u // true
+      uint <= double -> bool
+        Example: 1u <= 1.0 // true
+        Example: 1u <= 1.1 // true
+      uint <= int -> bool
+        Example: 1u <= 23 // true
+      double <= double -> bool
+        Example: 2.0 <= 2.4 // true
+      double <= int -> bool
+        Example: 2.1 <= 3 // true
+      double <= uint -> bool
+        Example: 2.0 <= 2u // true
+        Example: -1.0 <= 1u // true
+      string <= string -> bool
+        Example: 'a' <= 'b' // true
+        Example: 'a' <= 'a' // true
+        Example: 'cat' <= 'cab' // false
+      bytes <= bytes -> bool
+        Example: b'hello' <= b'world' // true
+      google.protobuf.Timestamp <= google.protobuf.Timestamp -> bool
+        Example: timestamp('2001-01-01T02:03:04Z') <= timestamp('2002-02-02T02:03:04Z') // true
+      google.protobuf.Duration <= google.protobuf.Duration -> bool
+        Example: duration('1ms') <= duration('1s') // true
 
 * _<_ - compare two values and return true if the first value is less than the second
 
-      false < true // true
-      -2 < 3 // true
-      1 < 0 // false
-      1 < 1.1 // true
-      1 < 2u // true
-      1u < 2u // true
-      1u < 0.9 // false
-      1u < 23 // true
-      1u < -1 // false
-      2.0 < 2.4 // true
-      2.1 < 3 // true
-      2.3 < 2u // false
-      -1.0 < 1u // true
-      'a' < 'b' // true
-      'cat' < 'cab' // false
-      b'hello' < b'world' // true
-      timestamp('2001-01-01T02:03:04Z') < timestamp('2002-02-02T02:03:04Z') // true
-      duration('1ms') < duration('1s') // true
+      bool < bool -> bool
+        Example: false < true // true
+      int < int -> bool
+        Example: -2 < 3 // true
+        Example: 1 < 0 // false
+      int < double -> bool
+        Example: 1 < 1.1 // true
+      int < uint -> bool
+        Example: 1 < 2u // true
+      uint < uint -> bool
+        Example: 1u < 2u // true
+      uint < double -> bool
+        Example: 1u < 0.9 // false
+      uint < int -> bool
+        Example: 1u < 23 // true
+        Example: 1u < -1 // false
+      double < double -> bool
+        Example: 2.0 < 2.4 // true
+      double < int -> bool
+        Example: 2.1 < 3 // true
+      double < uint -> bool
+        Example: 2.3 < 2u // false
+        Example: -1.0 < 1u // true
+      string < string -> bool
+        Example: 'a' < 'b' // true
+        Example: 'cat' < 'cab' // false
+      bytes < bytes -> bool
+        Example: b'hello' < b'world' // true
+      google.protobuf.Timestamp < google.protobuf.Timestamp -> bool
+        Example: timestamp('2001-01-01T02:03:04Z') < timestamp('2002-02-02T02:03:04Z') // true
+      google.protobuf.Duration < google.protobuf.Duration -> bool
+        Example: duration('1ms') < duration('1s') // true
 
 * _==_ - compare two values of the same type for equality
 
-      1 == 1 // true
-      'hello' == 'world' // false
-      bytes('hello') == b'hello' // true
-      duration('1h') == duration('60m') // true
-      dyn(3.0) == 3 // true
+      <A> == <A> -> bool
+        Example: 1 == 1 // true
+        Example: 'hello' == 'world' // false
+        Example: bytes('hello') == b'hello' // true
+        Example: duration('1h') == duration('60m') // true
+        Example: dyn(3.0) == 3 // true
 
 * _>=_ - compare two values and return true if the first value is greater than or equal to the second
 
-      true >= false // true
-      3 >= -2 // true
-      2 >= 1.1 // true
-      1 >= 1.0 // true
-      3 >= 2u // true
-      2u >= 1u // true
-      2u >= 1.9 // true
-      23u >= 1 // true
-      1u >= 1 // true
-      2.4 >= 2.0 // true
-      3.1 >= 3 // true
-      2.3 >= 2u // true
-      'b' >= 'a' // true
-      b'world' >= b'hello' // true
-      timestamp('2001-01-01T02:03:04Z') >= timestamp('2001-01-01T02:03:04Z') // true
-      duration('60s') >= duration('1m') // true
+      bool >= bool -> bool
+        Example: true >= false // true
+      int >= int -> bool
+        Example: 3 >= -2 // true
+      int >= double -> bool
+        Example: 2 >= 1.1 // true
+        Example: 1 >= 1.0 // true
+      int >= uint -> bool
+        Example: 3 >= 2u // true
+      uint >= uint -> bool
+        Example: 2u >= 1u // true
+      uint >= double -> bool
+        Example: 2u >= 1.9 // true
+      uint >= int -> bool
+        Example: 23u >= 1 // true
+        Example: 1u >= 1 // true
+      double >= double -> bool
+        Example: 2.4 >= 2.0 // true
+      double >= int -> bool
+        Example: 3.1 >= 3 // true
+      double >= uint -> bool
+        Example: 2.3 >= 2u // true
+      string >= string -> bool
+        Example: 'b' >= 'a' // true
+      bytes >= bytes -> bool
+        Example: b'world' >= b'hello' // true
+      google.protobuf.Timestamp >= google.protobuf.Timestamp -> bool
+        Example: timestamp('2001-01-01T02:03:04Z') >= timestamp('2001-01-01T02:03:04Z') // true
+      google.protobuf.Duration >= google.protobuf.Duration -> bool
+        Example: duration('60s') >= duration('1m') // true
 
 * _>_ - compare two values and return true if the first value is greater than the second
 
-      true > false // true
-      3 > -2 // true
-      2 > 1.1 // true
-      3 > 2u // true
-      2u > 1u // true
-      2u > 1.9 // true
-      23u > 1 // true
-      0u > -1 // true
-      2.4 > 2.0 // true
-      3.1 > 3 // true
-      3.0 > 3 // false
-      2.3 > 2u // true
-      'b' > 'a' // true
-      b'world' > b'hello' // true
-      timestamp('2002-02-02T02:03:04Z') > timestamp('2001-01-01T02:03:04Z') // true
-      duration('1ms') > duration('1us') // true
+      bool > bool -> bool
+        Example: true > false // true
+      int > int -> bool
+        Example: 3 > -2 // true
+      int > double -> bool
+        Example: 2 > 1.1 // true
+      int > uint -> bool
+        Example: 3 > 2u // true
+      uint > uint -> bool
+        Example: 2u > 1u // true
+      uint > double -> bool
+        Example: 2u > 1.9 // true
+      uint > int -> bool
+        Example: 23u > 1 // true
+        Example: 0u > -1 // true
+      double > double -> bool
+        Example: 2.4 > 2.0 // true
+      double > int -> bool
+        Example: 3.1 > 3 // true
+        Example: 3.0 > 3 // false
+      double > uint -> bool
+        Example: 2.3 > 2u // true
+      string > string -> bool
+        Example: 'b' > 'a' // true
+      bytes > bytes -> bool
+        Example: b'world' > b'hello' // true
+      google.protobuf.Timestamp > google.protobuf.Timestamp -> bool
+        Example: timestamp('2002-02-02T02:03:04Z') > timestamp('2001-01-01T02:03:04Z') // true
+      google.protobuf.Duration > google.protobuf.Duration -> bool
+        Example: duration('1ms') > duration('1us') // true
 
 * _?_:_ - The ternary operator tests a boolean predicate and returns the left-hand side (truthy) expression if true, or the right-hand side (falsy) expression if false
 
-      'hello'.contains('lo') ? 'hi' : 'bye' // 'hi'
-      32 % 3 == 0 ? 'divisible' : 'not divisible' // 'not divisible'
+      bool ? <T> : <T> -> <T>
+        Example: 'hello'.contains('lo') ? 'hi' : 'bye' // 'hi'
+        Example: 32 % 3 == 0 ? 'divisible' : 'not divisible' // 'not divisible'
 
 * _[_] - select a value from a list by index, or value from a map by key
 
-      [1, 2, 3][1] // 2
-      {'key': 'value'}['key'] // 'value'
-      {'key': 'value'}['missing'] // error
+      list(<A>)[int] -> <A>
+        Example: [1, 2, 3][1] // 2
+      map(<A>, <B>)[<A>] -> <B>
+        Example: {'key': 'value'}['key'] // 'value'
+        Example: {'key': 'value'}['missing'] // error
 
 * _||_ - logically OR two boolean values. Errors and unknown values are valid inputs and will not halt evaluation.
 
-      true || false // true
-      false || false // false
-      error || true // true
-      error || error // true
+      bool || bool -> bool
+        Example: true || false // true
+        Example: false || false // false
+        Example: error || true // true
+        Example: error || error // true
 
 * bool - convert a value to a boolean
 
-      bool(true) // true
-      bool('true') // true
-      bool('false') // false
+      bool(bool) -> bool
+        Example: bool(true) // true
+      bool(string) -> bool
+        Example: bool('true') // true
+        Example: bool('false') // false
 
 * bytes - convert a value to bytes
 
-      bytes(b'abc') // b'abc'
-      bytes('hello') // b'hello'
+      bytes(bytes) -> bytes
+        Example: bytes(b'abc') // b'abc'
+      bytes(string) -> bytes
+        Example: bytes('hello') // b'hello'
 
 * contains - test whether a string contains a substring
 
-      'hello world'.contains('o w') // true
-      'hello world'.contains('goodbye') // false
+      string.contains(string) -> bool
+        Example: 'hello world'.contains('o w') // true
+        Example: 'hello world'.contains('goodbye') // false
 
 * double - convert a value to a double
 
-      double(1.23) // 1.23
-      double(123) // 123.0
-      double('1.23') // 1.23
-      double(123u) // 123.0
+      double(double) -> double
+        Example: double(1.23) // 1.23
+      double(int) -> double
+        Example: double(123) // 123.0
+      double(string) -> double
+        Example: double('1.23') // 1.23
+      double(uint) -> double
+        Example: double(123u) // 123.0
 
 * duration - convert a value to a google.protobuf.Duration
 
-      duration(duration('1s')) // duration('1s')
-      duration('1h2m3s') // duration('3723s')
+      duration(google.protobuf.Duration) -> google.protobuf.Duration
+        Example: duration(duration('1s')) // duration('1s')
+      duration(string) -> google.protobuf.Duration
+        Example: duration('1h2m3s') // duration('3723s')
 
 * dyn - indicate that the type is dynamic for type-checking purposes
 
-      dyn(1) // 1
+      dyn(<A>) -> dyn
+        Example: dyn(1) // 1
 
 * endsWith - test whether a string ends with a substring suffix
 
-      'hello world'.endsWith('world') // true
-      'hello world'.endsWith('hello') // false
+      string.endsWith(string) -> bool
+        Example: 'hello world'.endsWith('world') // true
+        Example: 'hello world'.endsWith('hello') // false
 
 * getDate - get the 1-based day of the month from a timestamp, UTC unless an IANA timezone is specified.
 
-      timestamp('2023-07-14T10:30:45.123Z').getDate() // 14
-      timestamp('2023-07-01T05:00:00Z').getDate('America/Los_Angeles') // 30
+      google.protobuf.Timestamp.getDate() -> int
+        Example: timestamp('2023-07-14T10:30:45.123Z').getDate() // 14
+      google.protobuf.Timestamp.getDate(string) -> int
+        Example: timestamp('2023-07-01T05:00:00Z').getDate('America/Los_Angeles') // 30
 
 * getDayOfMonth - get the 0-based day of the month from a timestamp, UTC unless an IANA timezone is specified.
 
-      timestamp('2023-07-14T10:30:45.123Z').getDayOfMonth() // 13
-      timestamp('2023-07-01T05:00:00Z').getDayOfMonth('America/Los_Angeles') // 29
+      google.protobuf.Timestamp.getDayOfMonth() -> int
+        Example: timestamp('2023-07-14T10:30:45.123Z').getDayOfMonth() // 13
+      google.protobuf.Timestamp.getDayOfMonth(string) -> int
+        Example: timestamp('2023-07-01T05:00:00Z').getDayOfMonth('America/Los_Angeles') // 29
 
 * getDayOfWeek - get the 0-based day of the week from a timestamp, UTC unless an IANA timezone is specified.
 
-      timestamp('2023-07-14T10:30:45.123Z').getDayOfWeek() // 5
-      timestamp('2023-07-16T05:00:00Z').getDayOfWeek('America/Los_Angeles') // 6
+      google.protobuf.Timestamp.getDayOfWeek() -> int
+        Example: timestamp('2023-07-14T10:30:45.123Z').getDayOfWeek() // 5
+      google.protobuf.Timestamp.getDayOfWeek(string) -> int
+        Example: timestamp('2023-07-16T05:00:00Z').getDayOfWeek('America/Los_Angeles') // 6
 
 * getDayOfYear - get the 0-based day of the year from a timestamp, UTC unless an IANA timezone is specified.
 
-      timestamp('2023-01-02T00:00:00Z').getDayOfYear() // 1
-      timestamp('2023-01-01T05:00:00Z').getDayOfYear('America/Los_Angeles') // 364
+      google.protobuf.Timestamp.getDayOfYear() -> int
+        Example: timestamp('2023-01-02T00:00:00Z').getDayOfYear() // 1
+      google.protobuf.Timestamp.getDayOfYear(string) -> int
+        Example: timestamp('2023-01-01T05:00:00Z').getDayOfYear('America/Los_Angeles') // 364
 
 * getFullYear - get the 0-based full year from a timestamp, UTC unless an IANA timezone is specified.
 
-      timestamp('2023-07-14T10:30:45.123Z').getFullYear() // 2023
-      timestamp('2023-01-01T05:30:00Z').getFullYear('-08:00') // 2022
+      google.protobuf.Timestamp.getFullYear() -> int
+        Example: timestamp('2023-07-14T10:30:45.123Z').getFullYear() // 2023
+      google.protobuf.Timestamp.getFullYear(string) -> int
+        Example: timestamp('2023-01-01T05:30:00Z').getFullYear('-08:00') // 2022
 
 * getHours - get the hours portion from a timestamp, or convert a duration to hours
 
-      timestamp('2023-07-14T10:30:45.123Z').getHours() // 10
-      timestamp('2023-07-14T10:30:45.123Z').getHours('America/Los_Angeles') // 2
-      duration('3723s').getHours() // 1
+      google.protobuf.Timestamp.getHours() -> int
+        Example: timestamp('2023-07-14T10:30:45.123Z').getHours() // 10
+      google.protobuf.Timestamp.getHours(string) -> int
+        Example: timestamp('2023-07-14T10:30:45.123Z').getHours('America/Los_Angeles') // 2
+      google.protobuf.Duration.getHours() -> int
+        Example: duration('3723s').getHours() // 1
 
 * getMilliseconds - get the milliseconds portion from a timestamp
 
-      timestamp('2023-07-14T10:30:45.123Z').getMilliseconds() // 123
-      timestamp('2023-07-14T10:30:45.123Z').getMilliseconds('America/Los_Angeles') // 123
+      google.protobuf.Timestamp.getMilliseconds() -> int
+        Example: timestamp('2023-07-14T10:30:45.123Z').getMilliseconds() // 123
+      google.protobuf.Timestamp.getMilliseconds(string) -> int
+        Example: timestamp('2023-07-14T10:30:45.123Z').getMilliseconds('America/Los_Angeles') // 123
       google.protobuf.Duration.getMilliseconds() -> int
 
 * getMinutes - get the minutes portion from a timestamp, or convert a duration to minutes
 
-      timestamp('2023-07-14T10:30:45.123Z').getMinutes() // 30
-      timestamp('2023-07-14T10:30:45.123Z').getMinutes('America/Los_Angeles') // 30
-      duration('3723s').getMinutes() // 62
+      google.protobuf.Timestamp.getMinutes() -> int
+        Example: timestamp('2023-07-14T10:30:45.123Z').getMinutes() // 30
+      google.protobuf.Timestamp.getMinutes(string) -> int
+        Example: timestamp('2023-07-14T10:30:45.123Z').getMinutes('America/Los_Angeles') // 30
+      google.protobuf.Duration.getMinutes() -> int
+        Example: duration('3723s').getMinutes() // 62
 
 * getMonth - get the 0-based month from a timestamp, UTC unless an IANA timezone is specified.
 
-      timestamp('2023-07-14T10:30:45.123Z').getMonth() // 6
-      timestamp('2023-01-01T05:30:00Z').getMonth('America/Los_Angeles') // 11
+      google.protobuf.Timestamp.getMonth() -> int
+        Example: timestamp('2023-07-14T10:30:45.123Z').getMonth() // 6
+      google.protobuf.Timestamp.getMonth(string) -> int
+        Example: timestamp('2023-01-01T05:30:00Z').getMonth('America/Los_Angeles') // 11
 
 * getSeconds - get the seconds portion from a timestamp, or convert a duration to seconds
 
-      timestamp('2023-07-14T10:30:45.123Z').getSeconds() // 45
-      timestamp('2023-07-14T10:30:45.123Z').getSeconds('America/Los_Angeles') // 45
-      duration('3723.456s').getSeconds() // 3723
+      google.protobuf.Timestamp.getSeconds() -> int
+        Example: timestamp('2023-07-14T10:30:45.123Z').getSeconds() // 45
+      google.protobuf.Timestamp.getSeconds(string) -> int
+        Example: timestamp('2023-07-14T10:30:45.123Z').getSeconds('America/Los_Angeles') // 45
+      google.protobuf.Duration.getSeconds() -> int
+        Example: duration('3723.456s').getSeconds() // 3723
 
 * int - convert a value to an int
 
-      int(123) // 123
-      int(123.45) // 123
-      int(duration('1s')) // 1000000000
-      int('123') // 123
-      int('-456') // -456
-      int(timestamp('1970-01-01T00:00:01Z')) // 1
-      int(123u) // 123
+      int(int) -> int
+        Example: int(123) // 123
+      int(double) -> int
+        Example: int(123.45) // 123
+      int(google.protobuf.Duration) -> int
+        Example: int(duration('1s')) // 1000000000
+      int(string) -> int
+        Example: int('123') // 123
+        Example: int('-456') // -456
+      int(google.protobuf.Timestamp) -> int
+        Example: int(timestamp('1970-01-01T00:00:01Z')) // 1
+      int(uint) -> int
+        Example: int(123u) // 123
 
 * matches - test whether a string matches an RE2 regular expression
 
-      matches('123-456', '^[0-9]+(-[0-9]+)?$') // true
-      matches('hello', '^h.*o$') // true
-      '123-456'.matches('^[0-9]+(-[0-9]+)?$') // true
-      'hello'.matches('^h.*o$') // true
+      matches(string, string) -> bool
+        Example: matches('123-456', '^[0-9]+(-[0-9]+)?$') // true
+        Example: matches('hello', '^h.*o$') // true
+      string.matches(string) -> bool
+        Example: '123-456'.matches('^[0-9]+(-[0-9]+)?$') // true
+        Example: 'hello'.matches('^h.*o$') // true
 
 * size - compute the size of a list or map, the number of characters in a string, or the number of bytes in a sequence
 
-      size(b'123') // 3
-      b'123'.size() // 3
-      size([1, 2, 3]) // 3
-      [1, 2, 3].size() // 3
-      size({'a': 1, 'b': 2}) // 2
-      {'a': 1, 'b': 2}.size() // 2
-      size('hello') // 5
-      'hello'.size() // 5
+      size(bytes) -> int
+        Example: size(b'123') // 3
+      bytes.size() -> int
+        Example: b'123'.size() // 3
+      size(list(<A>)) -> int
+        Example: size([1, 2, 3]) // 3
+      list(<A>).size() -> int
+        Example: [1, 2, 3].size() // 3
+      size(map(<A>, <B>)) -> int
+        Example: size({'a': 1, 'b': 2}) // 2
+      map(<A>, <B>).size() -> int
+        Example: {'a': 1, 'b': 2}.size() // 2
+      size(string) -> int
+        Example: size('hello') // 5
+      string.size() -> int
+        Example: 'hello'.size() // 5
 
 * startsWith - test whether a string starts with a substring prefix
 
-      'hello world'.startsWith('hello') // true
-      'hello world'.startsWith('world') // false
+      string.startsWith(string) -> bool
+        Example: 'hello world'.startsWith('hello') // true
+        Example: 'hello world'.startsWith('world') // false
 
 * string - convert a value to a string
 
-      string('hello') // 'hello'
-      string(true) // 'true'
-      string(b'hello') // 'hello'
-      string(-1.23e4) // '-12300'
-      string(duration('1h30m')) // '5400s'
-      string(-123) // '-123'
-      string(timestamp('1970-01-01T00:00:00Z')) // '1970-01-01T00:00:00Z'
-      string(123u) // '123'
+      string(string) -> string
+        Example: string('hello') // 'hello'
+      string(bool) -> string
+        Example: string(true) // 'true'
+      string(bytes) -> string
+        Example: string(b'hello') // 'hello'
+      string(double) -> string
+        Example: string(-1.23e4) // '-12300'
+      string(google.protobuf.Duration) -> string
+        Example: string(duration('1h30m')) // '5400s'
+      string(int) -> string
+        Example: string(-123) // '-123'
+      string(google.protobuf.Timestamp) -> string
+        Example: string(timestamp('1970-01-01T00:00:00Z')) // '1970-01-01T00:00:00Z'
+      string(uint) -> string
+        Example: string(123u) // '123'
 
 * timestamp - convert a value to a google.protobuf.Timestamp
 
-      timestamp(timestamp('2023-01-01T00:00:00Z')) // timestamp('2023-01-01T00:00:00Z')
-      timestamp(1) // timestamp('1970-01-01T00:00:01Z')
-      timestamp('2025-01-01T12:34:56Z') // timestamp('2025-01-01T12:34:56Z')
+      timestamp(google.protobuf.Timestamp) -> google.protobuf.Timestamp
+        Example: timestamp(timestamp('2023-01-01T00:00:00Z')) // timestamp('2023-01-01T00:00:00Z')
+      timestamp(int) -> google.protobuf.Timestamp
+        Example: timestamp(1) // timestamp('1970-01-01T00:00:01Z')
+      timestamp(string) -> google.protobuf.Timestamp
+        Example: timestamp('2025-01-01T12:34:56Z') // timestamp('2025-01-01T12:34:56Z')
 
 * type - convert a value to its type identifier
 
-      type(1) // int
-      type('hello') // string
-      type(int) // type
-      type(type) // type
+      type(<A>) -> type
+        Example: type(1) // int
+        Example: type('hello') // string
+        Example: type(int) // type
+        Example: type(type) // type
 
 * uint - convert a value to a uint
 
-      uint(123u) // 123u
-      uint(123.45) // 123u
-      uint(123) // 123u
-      uint('123') // 123u
+      uint(uint) -> uint
+        Example: uint(123u) // 123u
+      uint(double) -> uint
+        Example: uint(123.45) // 123u
+      uint(int) -> uint
+        Example: uint(123) // 123u
+      uint(string) -> uint
+        Example: uint('123') // 123u
 
 CEL supports Protocol Buffer and JSON types, as well as simple types and aggregate types.
 
