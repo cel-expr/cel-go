@@ -1670,6 +1670,7 @@ func TestNativeMapFindBranches(t *testing.T) {
 		{name: "int overflow", mapper: mInt, key: Int(math.MaxInt64), wantVal: nil, wantFound: false},
 		{name: "int underflow", mapper: mInt, key: Int(math.MinInt64), wantVal: nil, wantFound: false},
 		{name: "int miss", mapper: mInt, key: Int(99), wantVal: nil, wantFound: false},
+		{name: "int wrong type", mapper: mInt, key: String("wrong"), wantVal: nil, wantFound: false},
 
 		{name: "int32 hit Int", mapper: mInt32, key: Int(30), wantVal: String("thirty"), wantFound: true},
 		{name: "int32 overflow", mapper: mInt32, key: Int(math.MaxInt64), wantVal: nil, wantFound: false},
@@ -1684,6 +1685,7 @@ func TestNativeMapFindBranches(t *testing.T) {
 		{name: "uint hit Uint", mapper: mUint, key: Uint(50), wantVal: String("fifty"), wantFound: true},
 		{name: "uint overflow", mapper: mUint, key: Uint(math.MaxUint64), wantVal: nil, wantFound: false},
 		{name: "uint miss", mapper: mUint, key: Uint(99), wantVal: nil, wantFound: false},
+		{name: "uint wrong type", mapper: mUint, key: String("wrong"), wantVal: nil, wantFound: false},
 
 		{name: "uint32 hit Uint", mapper: mUint32, key: Uint(60), wantVal: String("sixty"), wantFound: true},
 		{name: "uint32 overflow", mapper: mUint32, key: Uint(math.MaxUint64), wantVal: nil, wantFound: false},
@@ -1709,6 +1711,76 @@ func TestNativeMapFindBranches(t *testing.T) {
 			val, found := tc.mapper.Find(tc.key)
 			if found != tc.wantFound || val != tc.wantVal {
 				t.Errorf("Find(%v) got %v, %v, want %v, %v", tc.key, val, found, tc.wantVal, tc.wantFound)
+			}
+		})
+	}
+}
+
+// TestNativeMapContainsNoAllocs guards against presence tests (`k in m`) regressing to value
+// conversion. Values are chosen so that converting them to a ref.Val would allocate: ints above
+// the runtime's small-int cache, non-empty strings, and raw structs boxed via packAny.
+func TestNativeMapContainsNoAllocs(t *testing.T) {
+	type rawStruct struct {
+		Name  string
+		Count int
+	}
+	adapter := DefaultTypeAdapter
+	tests := []struct {
+		name   string
+		mapper traits.Mapper
+		hit    ref.Val
+		miss   ref.Val
+	}{
+		{
+			name:   "string_int64",
+			mapper: NewMap(adapter, map[string]int64{"a": 1 << 20}),
+			hit:    String("a"),
+			miss:   String("b"),
+		},
+		{
+			name:   "string_string",
+			mapper: NewMap(adapter, map[string]string{"a": "value"}),
+			hit:    String("a"),
+			miss:   String("b"),
+		},
+		{
+			name:   "string_struct",
+			mapper: NewMap(adapter, map[string]rawStruct{"a": {Name: "n", Count: 1 << 20}}),
+			hit:    String("a"),
+			miss:   String("b"),
+		},
+		{
+			name:   "int_struct",
+			mapper: NewMap(adapter, map[int]rawStruct{1000: {Name: "n", Count: 1 << 20}}),
+			hit:    Int(1000),
+			miss:   Int(1001),
+		},
+		{
+			name:   "uint64_float64",
+			mapper: NewMap(adapter, map[uint64]float64{1000: 1.5}),
+			hit:    Uint(1000),
+			miss:   Uint(1001),
+		},
+		{
+			name:   "refval_refval",
+			mapper: NewRefValMap(adapter, map[ref.Val]ref.Val{Int(1000): String("value")}),
+			hit:    Uint(1000), // exercises the cross-numeric fallback lookup
+			miss:   Int(1001),
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.mapper.Contains(tc.hit); got != True {
+				t.Fatalf("Contains(%v) = %v, want true", tc.hit, got)
+			}
+			if got := tc.mapper.Contains(tc.miss); got != False {
+				t.Fatalf("Contains(%v) = %v, want false", tc.miss, got)
+			}
+			if allocs := testing.AllocsPerRun(100, func() {
+				tc.mapper.Contains(tc.hit)
+				tc.mapper.Contains(tc.miss)
+			}); allocs != 0 {
+				t.Errorf("Contains allocated %v allocs/run, want 0", allocs)
 			}
 		})
 	}

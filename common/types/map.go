@@ -646,7 +646,7 @@ func (m *nativeMap[K, V]) valToRefVal(v V) ref.Val {
 		return Bytes(*(*[]byte)(unsafe.Pointer(&v)))
 	default:
 		if m.valTypePtr != nil {
-			return m.Adapter.NativeToValue(packAny(m.valTypePtr, unsafe.Pointer(&v)))
+			return m.Adapter.NativeToValue(packAny(m.valTypePtr, unsafe.Pointer(heapCopy(v))))
 		}
 		return m.Adapter.NativeToValue(v)
 	}
@@ -654,7 +654,7 @@ func (m *nativeMap[K, V]) valToRefVal(v V) ref.Val {
 
 func (m *nativeMap[K, V]) rawValToAny(v V) any {
 	if m.valTypePtr != nil {
-		return packAny(m.valTypePtr, unsafe.Pointer(&v))
+		return packAny(m.valTypePtr, unsafe.Pointer(heapCopy(v)))
 	}
 	if m.qualifyRawVal && anyDataPtr(v) == nil {
 		return NullValue
@@ -725,149 +725,123 @@ func (m *nativeMap[K, V]) valToFoldAny(v V) any {
 }
 
 func (m *nativeMap[K, V]) Find(key ref.Val) (ref.Val, bool) {
-	if len(m.mapVal) == 0 {
+	v, found := m.findVal(key)
+	if !found {
 		return nil, false
 	}
+	return m.valToRefVal(v), true
+}
+
+// findVal resolves key to the stored native value without converting it to a ref.Val, so that
+// presence tests (`in`, has(), optional selection) do not pay for value conversion.
+func (m *nativeMap[K, V]) findVal(key ref.Val) (v V, found bool) {
+	if len(m.mapVal) == 0 {
+		return v, false
+	}
+	var k K
 	switch any((*K)(nil)).(type) {
 	case *string:
-		strKey, ok := key.(String)
+		sk, ok := key.(String)
 		if !ok {
-			return nil, false
+			return v, false
 		}
-		k := *(*K)(unsafe.Pointer(&strKey))
-		v, found := m.mapVal[k]
-		if !found {
-			return nil, false
-		}
-		return m.valToRefVal(v), true
+		k = *(*K)(unsafe.Pointer(&sk))
 	case *int64:
 		ik, ok := toInt64Key(key)
 		if !ok {
-			return nil, false
+			return v, false
 		}
-		k := *(*K)(unsafe.Pointer(&ik))
-		v, found := m.mapVal[k]
-		if !found {
-			return nil, false
-		}
-		return m.valToRefVal(v), true
+		k = *(*K)(unsafe.Pointer(&ik))
 	case *int:
 		ik, ok := toInt64Key(key)
 		if !ok || ik < math.MinInt || ik > math.MaxInt {
-			return nil, false
+			return v, false
 		}
 		iv := int(ik)
-		k := *(*K)(unsafe.Pointer(&iv))
-		v, found := m.mapVal[k]
-		if !found {
-			return nil, false
-		}
-		return m.valToRefVal(v), true
+		k = *(*K)(unsafe.Pointer(&iv))
 	case *int32:
 		ik, ok := toInt64Key(key)
 		if !ok || ik < math.MinInt32 || ik > math.MaxInt32 {
-			return nil, false
+			return v, false
 		}
 		iv := int32(ik)
-		k := *(*K)(unsafe.Pointer(&iv))
-		v, found := m.mapVal[k]
-		if !found {
-			return nil, false
-		}
-		return m.valToRefVal(v), true
+		k = *(*K)(unsafe.Pointer(&iv))
 	case *uint64:
 		uk, ok := toUint64Key(key)
 		if !ok {
-			return nil, false
+			return v, false
 		}
-		k := *(*K)(unsafe.Pointer(&uk))
-		v, found := m.mapVal[k]
-		if !found {
-			return nil, false
-		}
-		return m.valToRefVal(v), true
+		k = *(*K)(unsafe.Pointer(&uk))
 	case *uint:
 		uk, ok := toUint64Key(key)
 		if !ok || uk > math.MaxUint {
-			return nil, false
+			return v, false
 		}
 		uv := uint(uk)
-		k := *(*K)(unsafe.Pointer(&uv))
-		v, found := m.mapVal[k]
-		if !found {
-			return nil, false
-		}
-		return m.valToRefVal(v), true
+		k = *(*K)(unsafe.Pointer(&uv))
 	case *uint32:
 		uk, ok := toUint64Key(key)
 		if !ok || uk > math.MaxUint32 {
-			return nil, false
+			return v, false
 		}
 		uv := uint32(uk)
-		k := *(*K)(unsafe.Pointer(&uv))
-		v, found := m.mapVal[k]
-		if !found {
-			return nil, false
-		}
-		return m.valToRefVal(v), true
+		k = *(*K)(unsafe.Pointer(&uv))
 	case *bool:
 		bk, ok := key.(Bool)
 		if !ok {
-			return nil, false
+			return v, false
 		}
 		bv := bool(bk)
-		k := *(*K)(unsafe.Pointer(&bv))
-		v, found := m.mapVal[k]
-		if !found {
-			return nil, false
-		}
-		return m.valToRefVal(v), true
+		k = *(*K)(unsafe.Pointer(&bv))
 	case *ref.Val:
-		k := *(*K)(unsafe.Pointer(&key))
-		if v, found := m.mapVal[k]; found {
-			return m.valToRefVal(v), true
-		}
-		switch kv := key.(type) {
-		case Double:
-			if ik, ok := doubleToInt64Lossless(float64(kv)); ok {
-				var alt ref.Val = Int(ik)
-				if v, found := m.mapVal[*(*K)(unsafe.Pointer(&alt))]; found {
-					return m.valToRefVal(v), true
-				}
-			}
-			if uk, ok := doubleToUint64Lossless(float64(kv)); ok {
-				var alt ref.Val = Uint(uk)
-				if v, found := m.mapVal[*(*K)(unsafe.Pointer(&alt))]; found {
-					return m.valToRefVal(v), true
-				}
-			}
-		case Int:
-			if uk, ok := int64ToUint64Lossless(int64(kv)); ok {
-				var alt ref.Val = Uint(uk)
-				if v, found := m.mapVal[*(*K)(unsafe.Pointer(&alt))]; found {
-					return m.valToRefVal(v), true
-				}
-			}
-		case Uint:
-			if ik, ok := uint64ToInt64Lossless(uint64(kv)); ok {
-				var alt ref.Val = Int(ik)
-				if v, found := m.mapVal[*(*K)(unsafe.Pointer(&alt))]; found {
-					return m.valToRefVal(v), true
-				}
-			}
-		}
-		return nil, false
+		return m.findRefValKey(key)
 	default:
-		keyType := reflect.TypeFor[K]()
-		if rawK, err := key.ConvertToNative(keyType); err == nil {
-			if typedK, ok := rawK.(K); ok {
-				if v, found := m.mapVal[typedK]; found {
-					return m.valToRefVal(v), true
-				}
+		rawK, err := key.ConvertToNative(reflect.TypeFor[K]())
+		if err != nil {
+			return v, false
+		}
+		typedK, ok := rawK.(K)
+		if !ok {
+			return v, false
+		}
+		k = typedK
+	}
+	v, found = m.mapVal[k]
+	return v, found
+}
+
+// findRefValKey looks up a key in a map whose key type is ref.Val, falling back to numerically
+// equivalent keys of other numeric types (e.g. 1.0 -> 1 -> 1u) when there is no exact match.
+func (m *nativeMap[K, V]) findRefValKey(key ref.Val) (v V, found bool) {
+	if v, found = m.lookupRefVal(key); found {
+		return v, true
+	}
+	switch kv := key.(type) {
+	case Double:
+		if ik, ok := doubleToInt64Lossless(float64(kv)); ok {
+			if v, found = m.lookupRefVal(Int(ik)); found {
+				return v, true
 			}
 		}
-		return nil, false
+		if uk, ok := doubleToUint64Lossless(float64(kv)); ok {
+			return m.lookupRefVal(Uint(uk))
+		}
+	case Int:
+		if uk, ok := int64ToUint64Lossless(int64(kv)); ok {
+			return m.lookupRefVal(Uint(uk))
+		}
+	case Uint:
+		if ik, ok := uint64ToInt64Lossless(uint64(kv)); ok {
+			return m.lookupRefVal(Int(ik))
+		}
 	}
+	return v, false
+}
+
+// lookupRefVal performs a direct map lookup for maps whose key type K is ref.Val.
+func (m *nativeMap[K, V]) lookupRefVal(rk ref.Val) (V, bool) {
+	v, found := m.mapVal[*(*K)(unsafe.Pointer(&rk))]
+	return v, found
 }
 
 func (m *nativeMap[K, V]) valToQualifyAny(v V) any {
@@ -964,7 +938,7 @@ func (m *nativeMap[K, V]) FindNative(key any) (any, bool) {
 }
 
 func (m *nativeMap[K, V]) Contains(index ref.Val) ref.Val {
-	_, found := m.Find(index)
+	_, found := m.findVal(index)
 	return Bool(found)
 }
 
@@ -1543,4 +1517,12 @@ func isDelim(r rune) bool {
 
 func isLower(r rune) bool {
 	return r >= 'a' && r <= 'z'
+}
+
+// heapCopy returns a pointer to a fresh heap copy of v. Taking &v directly would move the parameter
+// to the heap on every call of the enclosing generic function, including calls that never box v.
+func heapCopy[V any](v V) *V {
+	p := new(V)
+	*p = v
+	return p
 }
