@@ -21,7 +21,7 @@ steps:
         #   entrypoint: sh
         #   # deploys folder of test results (with build id as folder name) to GCS
         #   args: ['-c', 'gcloud storage cp --recursive $(cat _DATE) gs://cel-conformance/test-logs/']
-        - name: 'golang:1.23.0'
+        - name: 'golang:1.26.10'
           # check the integrity of the vendor directory
           args: ['scripts/verify-vendor.sh']
         - name: 'gcr.io/cloud-builders/bazel:7.3.2'

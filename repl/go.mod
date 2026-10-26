@@ -1,6 +1,6 @@
 module cel.dev/cel-go/repl
 
-go 1.23.0
+go 1.26.10
 
 require (
 	cel.dev/cel-go v0.26.1

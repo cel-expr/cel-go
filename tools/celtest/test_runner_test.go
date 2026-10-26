@@ -161,7 +161,7 @@ func (customTagHandler) PolicyTag(ctx policy.ParserContext, id int64, tagName st
 	case "variable_types":
 		var varList []*variableType
 		if err := node.Decode(&varList); err != nil {
-			ctx.ReportErrorAtID(id, "invalid yaml variable_types node: %v, error: %w", node, err)
+			ctx.ReportErrorAtID(id, "invalid yaml variable_types node: %v, error: %v", node, err)
 			return
 		}
 		for _, v := range varList {

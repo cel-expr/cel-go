@@ -1,6 +1,6 @@
 module cel.dev/cel-go
 
-go 1.23.0
+go 1.26.10
 
 require (
 	cel.dev/expr v0.25.1

@@ -35,7 +35,7 @@ func (k8sAdmissionTagHandler) PolicyTag(ctx ParserContext, id int64, tagName str
 	case "metadata":
 		m := k8sMetadata{}
 		if err := node.Decode(&m); err != nil {
-			ctx.ReportErrorAtID(id, "invalid yaml metadata node: %v, error: %w", node, err)
+			ctx.ReportErrorAtID(id, "invalid yaml metadata node: %v, error: %v", node, err)
 			return
 		}
 	case "spec":
@@ -53,7 +53,7 @@ func (k8sAdmissionTagHandler) RuleTag(ctx ParserContext, id int64, tagName strin
 	case "matchConstraints":
 		m := k8sMatchConstraints{}
 		if err := node.Decode(&m); err != nil {
-			ctx.ReportErrorAtID(id, "invalid yaml matchConstraints node: %v, error: %w", node, err)
+			ctx.ReportErrorAtID(id, "invalid yaml matchConstraints node: %v, error: %v", node, err)
 			return
 		}
 	case "validations":
