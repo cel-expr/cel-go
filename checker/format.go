@@ -156,27 +156,27 @@ func formatFunctionDeclType(resultType *types.Type, argTypes []*types.Type, isIn
 }
 
 func formatFunctionInternal[T any](resultType T, argTypes []T, isInstance bool, format formatter) string {
-	result := ""
+	var result strings.Builder
 	if isInstance {
 		target := argTypes[0]
 		argTypes = argTypes[1:]
-		result += format(target)
-		result += "."
+		result.WriteString(format(target))
+		result.WriteString(".")
 	}
-	result += "("
+	result.WriteString("(")
 	for i, arg := range argTypes {
 		if i > 0 {
-			result += ", "
+			result.WriteString(", ")
 		}
-		result += format(arg)
+		result.WriteString(format(arg))
 	}
-	result += ")"
+	result.WriteString(")")
 	rt := format(resultType)
 	if rt != "" {
-		result += " -> "
-		result += rt
+		result.WriteString(" -> ")
+		result.WriteString(rt)
 	}
-	return result
+	return result.String()
 }
 
 // kindOf returns the kind of the type as defined in the checked.proto.

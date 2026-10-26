@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -633,20 +634,10 @@ func (lib *LibrarySubset) SubsetMacro(macroFunction string) bool {
 		return false
 	}
 	if len(lib.IncludeMacros) != 0 {
-		for _, name := range lib.IncludeMacros {
-			if name == macroFunction {
-				return true
-			}
-		}
-		return false
+		return slices.Contains(lib.IncludeMacros, macroFunction)
 	}
 	if len(lib.ExcludeMacros) != 0 {
-		for _, name := range lib.ExcludeMacros {
-			if name == macroFunction {
-				return false
-			}
-		}
-		return true
+		return !slices.Contains(lib.ExcludeMacros, macroFunction)
 	}
 	return true
 }

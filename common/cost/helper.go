@@ -256,7 +256,7 @@ func rationalOf(f float64) rational {
 	hPrev, h := uint64(0), uint64(1)
 	kPrev, k := uint64(1), uint64(0)
 	x := f
-	for i := 0; i < 64; i++ {
+	for range 64 {
 		a := math.Floor(x)
 		if a >= math.MaxUint64 {
 			return rational{}

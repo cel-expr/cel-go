@@ -67,7 +67,7 @@ func (s String) ConvertToNative(typeDesc reflect.Type) (any, error) {
 	switch typeDesc.Kind() {
 	case reflect.String:
 		return reflect.ValueOf(s).Convert(typeDesc).Interface(), nil
-	case reflect.Ptr:
+	case reflect.Pointer:
 		switch typeDesc {
 		case anyValueType:
 			// Primitives must be wrapped before being set on an Any field.
@@ -88,7 +88,7 @@ func (s String) ConvertToNative(typeDesc reflect.Type) (any, error) {
 		if reflect.TypeOf(sv).Implements(typeDesc) {
 			return sv, nil
 		}
-		if reflect.TypeOf(s).Implements(typeDesc) {
+		if reflect.TypeFor[String]().Implements(typeDesc) {
 			return s, nil
 		}
 	}

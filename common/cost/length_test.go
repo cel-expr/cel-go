@@ -53,7 +53,6 @@ func TestLengthEstimate(t *testing.T) {
 			arg: FixedSizeEstimate(4), want: UnknownCostEstimate()},
 	}
 	for _, tc := range tests {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			m := Overload("test", argumentsOnly(), EvalCost(Length(Arg(0))))
 			if err := m.Validate(); err != nil {

@@ -47,7 +47,7 @@ func TestNullConvertToNative(t *testing.T) {
 			out:    testPackAny(t, structpb.NewNullValue()),
 		},
 		{
-			goType: reflect.TypeOf(NullValue),
+			goType: reflect.TypeFor[Null](),
 			out:    NullValue,
 		},
 		{goType: boolWrapperType},
@@ -61,11 +61,11 @@ func TestNullConvertToNative(t *testing.T) {
 		{goType: uint64WrapperType},
 		{goType: durationValueType},
 		{goType: timestampValueType},
-		{goType: reflect.TypeOf((*dynamicpb.Message)(nil))},
-		{goType: reflect.TypeOf(&proto3pb.TestAllTypes{})},
-		{goType: reflect.TypeOf((*proto3pb.TestAllTypes)(nil))},
+		{goType: reflect.TypeFor[*dynamicpb.Message]()},
+		{goType: reflect.TypeFor[*proto3pb.TestAllTypes]()},
+		{goType: reflect.TypeFor[*proto3pb.TestAllTypes]()},
 		{
-			goType: reflect.TypeOf(1),
+			goType: reflect.TypeFor[int](),
 			err:    errors.New("type conversion error from 'null_type' to 'int'"),
 		},
 		{

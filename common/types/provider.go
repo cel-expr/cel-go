@@ -251,7 +251,7 @@ func (p *Registry) ensureMutable() {
 				p.structTypes[k] = cloned
 				if rt := cloned.ReflectType(); rt != nil {
 					p.reflectTypes[rt] = cloned
-					if rt.Kind() == reflect.Ptr {
+					if rt.Kind() == reflect.Pointer {
 						p.reflectTypes[rt.Elem()] = cloned
 					} else {
 						p.reflectTypes[reflect.PointerTo(rt)] = cloned
@@ -545,7 +545,7 @@ func (p *Registry) RegisterType(types ...ref.Type) error {
 			p.structTypes[typeName] = st
 			if rt := st.ReflectType(); rt != nil {
 				p.reflectTypes[rt] = st
-				if rt.Kind() == reflect.Ptr {
+				if rt.Kind() == reflect.Pointer {
 					p.reflectTypes[rt.Elem()] = st
 				} else {
 					p.reflectTypes[reflect.PointerTo(rt)] = st
@@ -593,7 +593,7 @@ func (p *Registry) findStructDescriptorByReflectType(rt reflect.Type) (StructTyp
 	if st, found := p.reflectTypes[rt]; found {
 		return st, true
 	}
-	if rt.Kind() == reflect.Ptr {
+	if rt.Kind() == reflect.Pointer {
 		if st, found := p.reflectTypes[rt.Elem()]; found {
 			return st, true
 		}
@@ -832,7 +832,7 @@ func (p *Registry) NativeToValue(value any) ref.Val {
 			}
 		}
 		refVal := reflect.ValueOf(v)
-		if refVal.Kind() == reflect.Ptr {
+		if refVal.Kind() == reflect.Pointer {
 			if refVal.IsNil() {
 				break
 			}
@@ -840,7 +840,7 @@ func (p *Registry) NativeToValue(value any) ref.Val {
 		}
 		switch refVal.Kind() {
 		case reflect.Array, reflect.Slice:
-			if refVal.Type().Elem() == reflect.TypeOf(byte(0)) {
+			if refVal.Type().Elem() == reflect.TypeFor[byte]() {
 				if refVal.CanAddr() {
 					return Bytes(refVal.Bytes())
 				}
@@ -1214,7 +1214,7 @@ func isQualifyRawStructType(rt reflect.Type) bool {
 	if rt.Kind() == reflect.Struct {
 		return rt != reflect.TypeFor[time.Time]()
 	}
-	if rt.Kind() == reflect.Ptr && rt.Elem().Kind() == reflect.Struct {
+	if rt.Kind() == reflect.Pointer && rt.Elem().Kind() == reflect.Struct {
 		return rt.Elem() != reflect.TypeFor[time.Time]()
 	}
 	return false

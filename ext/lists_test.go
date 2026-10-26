@@ -240,9 +240,9 @@ func TestListsSliceAndReverseNativeAndProto(t *testing.T) {
 	}
 
 	proto2Val := []*proto2pb.TestAllTypes{
-		{SingleInt32: proto.Int32(10), SingleString: proto.String("first")},
-		{SingleInt32: proto.Int32(20), SingleString: proto.String("second")},
-		{SingleInt32: proto.Int32(30), SingleString: proto.String("third")},
+		{SingleInt32: proto.Int32(10), SingleString: new("first")},
+		{SingleInt32: proto.Int32(20), SingleString: new("second")},
+		{SingleInt32: proto.Int32(30), SingleString: new("third")},
 	}
 	proto3Val := []*proto3pb.TestAllTypes{
 		{SingleInt32: 10, SingleString: "first"},

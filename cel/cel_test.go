@@ -239,7 +239,7 @@ func TestEval(t *testing.T) {
 			if err != nil {
 				t.Fatalf("env.Program() failed: %v", err)
 			}
-			for k := 0; k < 100; k++ {
+			for k := range 100 {
 				t.Run(fmt.Sprintf("[%d]", k), func(t *testing.T) {
 					t.Parallel()
 					prg.Eval(tc.in)
@@ -337,7 +337,7 @@ func TestAbbrevsDisambiguation(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := &exprpb.Expr{Id: 1}
-	got, err := out.ConvertToNative(reflect.TypeOf(want))
+	got, err := out.ConvertToNative(reflect.TypeFor[*exprpb.Expr]())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -717,7 +717,7 @@ func TestDynamicProto(t *testing.T) {
 	}
 	files := (&fds).GetFile()
 	fileCopy := make([]any, len(files))
-	for i := 0; i < len(files); i++ {
+	for i := range files {
 		fileCopy[i] = files[i]
 	}
 	pbFiles, err := protodesc.NewFiles(&fds)
@@ -772,7 +772,7 @@ func TestDynamicProtoFileDescriptors(t *testing.T) {
 	}
 	files := (&fds).GetFile()
 	fileCopy := make([]any, len(files))
-	for i := 0; i < len(files); i++ {
+	for i := range files {
 		fileCopy[i] = files[i]
 	}
 	pbFiles, err := protodesc.NewFiles(&fds)
@@ -1249,7 +1249,7 @@ func TestContextEval(t *testing.T) {
 
 	ctx := context.TODO()
 	items := make([]int64, 2000)
-	for i := int64(0); i < 2000; i++ {
+	for i := range int64(2000) {
 		items[i] = i
 	}
 	out, _, err := prg.ContextEval(ctx, map[string]any{"items": items})
@@ -1266,7 +1266,7 @@ func TestContextEval(t *testing.T) {
 	// input list is sized well beyond the interrupt check frequency to ensure the interrupt is
 	// observed mid-comprehension rather than after the evaluation completes.
 	interruptItems := make([]int64, interruptCheckFrequency*100)
-	for i := 0; i < len(interruptItems); i++ {
+	for i := range interruptItems {
 		interruptItems[i] = int64(i)
 	}
 	evalCtx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Minute))
@@ -1341,10 +1341,10 @@ func BenchmarkContextEval(b *testing.B) {
 
 	ctx := context.TODO()
 	items := make([]int64, 100)
-	for i := int64(0); i < 100; i++ {
+	for i := range int64(100) {
 		items[i] = i
 	}
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		out, _, err := prg.ContextEval(ctx, map[string]any{"items": items})
 		if err != nil {
 			b.Fatalf("prg.ContextEval() failed: %v", err)
@@ -1591,7 +1591,7 @@ func BenchmarkEvalOptions(b *testing.B) {
 			}
 			b.ResetTimer()
 			b.ReportAllocs()
-			for i := 0; i < bb.N; i++ {
+			for bb.Loop() {
 				_, _, err := prg.Eval(vars)
 				if err != nil {
 					b.Fatal(err)
@@ -1823,7 +1823,7 @@ func TestParseAndCheckConcurrently(t *testing.T) {
 	wgDone := sync.WaitGroup{}
 	wgDone.Add(concurrency)
 
-	for i := 0; i < concurrency; i++ {
+	for i := range concurrency {
 		go func(i int) {
 			defer wgDone.Done()
 			parseAndCheck(fmt.Sprintf("expr.id + %d", i))
@@ -3122,7 +3122,6 @@ func TestParserRecursionLimit(t *testing.T) {
 		},
 	}
 	for _, tc := range testCases {
-		tc := tc
 		t.Run(tc.expr, func(t *testing.T) {
 			env := testEnv(t, ParserRecursionLimit(10))
 			out, err := interpret(t, env,
@@ -3168,7 +3167,6 @@ func TestQuotedFields(t *testing.T) {
 		},
 	}
 	for _, tc := range testCases {
-		tc := tc
 		t.Run(tc.expr, func(t *testing.T) {
 			env := testEnv(t, ParserRecursionLimit(10),
 				EnableIdentifierEscapeSyntax())
@@ -4836,7 +4834,7 @@ func BenchmarkOptionalValues(b *testing.B) {
 		"y": types.OptionalNone,
 		"z": 42,
 	}
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		prg.Eval(input)
 	}
 }
@@ -4897,13 +4895,13 @@ func BenchmarkDynamicDispatch(b *testing.B) {
 		&& dyn([["hello"], ["world", "!"]]).first().first() == "hello"`)
 	b.ResetTimer()
 	b.Run("DirectDispatch", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			prg.Eval(NoVars())
 		}
 	})
 	b.ResetTimer()
 	b.Run("DynamicDispatch", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			prgDyn.Eval(NoVars())
 		}
 	})
@@ -4912,8 +4910,7 @@ func BenchmarkDynamicDispatch(b *testing.B) {
 func BenchmarkProgramPlan(b *testing.B) {
 	b.Run("NewEnv", func(b *testing.B) {
 		b.ReportAllocs()
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			_, err := NewEnv(
 				Variable("ai", IntType),
 				Variable("ar", MapType(StringType, StringType)),
@@ -4931,8 +4928,7 @@ func BenchmarkProgramPlan(b *testing.B) {
 
 	b.Run("ExtendEnv", func(b *testing.B) {
 		b.ReportAllocs()
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			_, err := baseEnv.Extend(
 				Variable("ai", IntType),
 				Variable("ar", MapType(StringType, StringType)),
@@ -4961,8 +4957,7 @@ func BenchmarkProgramPlan(b *testing.B) {
 
 	b.Run("Default", func(b *testing.B) {
 		b.ReportAllocs()
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			_, err := env.Program(astSimple)
 			if err != nil {
 				b.Fatalf("env.Program() failed: %v", err)
@@ -4972,8 +4967,7 @@ func BenchmarkProgramPlan(b *testing.B) {
 
 	b.Run("OptimizeUnneeded", func(b *testing.B) {
 		b.ReportAllocs()
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			_, err := env.Program(astSimple, EvalOptions(OptOptimize))
 			if err != nil {
 				b.Fatalf("env.Program() failed: %v", err)
@@ -4983,8 +4977,7 @@ func BenchmarkProgramPlan(b *testing.B) {
 
 	b.Run("OptimizeNeeded", func(b *testing.B) {
 		b.ReportAllocs()
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			_, err := env.Program(astOpt, EvalOptions(OptOptimize))
 			if err != nil {
 				b.Fatalf("env.Program() failed: %v", err)
@@ -6944,5 +6937,3 @@ func TestProtoMessageComprehensions(t *testing.T) {
 		})
 	}
 }
-
-

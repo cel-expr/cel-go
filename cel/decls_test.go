@@ -344,13 +344,11 @@ func TestSingletonFunctionBinding(t *testing.T) {
 	}
 
 	for _, tc := range dispatchTests {
-		tc := tc
 		t.Run(fmt.Sprintf("Parse(%s)", tc.expr), func(t *testing.T) {
 			testParse(t, env, tc.expr, tc.out)
 		})
 	}
 	for _, tc := range dispatchTests {
-		tc := tc
 		t.Run(fmt.Sprintf("Compile(%s)", tc.expr), func(t *testing.T) {
 			testCompile(t, env, tc.expr, tc.out)
 		})
@@ -512,13 +510,11 @@ func TestFunctionBinding(t *testing.T) {
 	}
 
 	for _, tc := range dispatchTests {
-		tc := tc
 		t.Run(fmt.Sprintf("Parse(%s)", tc.expr), func(t *testing.T) {
 			testParse(t, e, tc.expr, tc.out)
 		})
 	}
 	for _, tc := range dispatchTests {
-		tc := tc
 		t.Run(fmt.Sprintf("Compile(%s)", tc.expr), func(t *testing.T) {
 			testCompile(t, e, tc.expr, tc.out)
 		})
@@ -771,7 +767,6 @@ func TestExprDeclToDeclarationInvalid(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		tc := tc
 		t.Run(tc.in.String(), func(t *testing.T) {
 			_, err := ExprDeclToDeclaration(tc.in)
 			if err == nil || !strings.Contains(err.Error(), tc.out) {

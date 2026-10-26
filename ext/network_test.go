@@ -549,7 +549,7 @@ func TestNetwork_TypeConversions(t *testing.T) {
 
 	// IP Conversions
 	t.Run("IP ConvertToNative netip.Addr", func(t *testing.T) {
-		got, err := ipVal.ConvertToNative(reflect.TypeOf(netip.Addr{}))
+		got, err := ipVal.ConvertToNative(reflect.TypeFor[netip.Addr]())
 		if err != nil {
 			t.Fatalf("ConvertToNative failed: %v", err)
 		}
@@ -559,7 +559,7 @@ func TestNetwork_TypeConversions(t *testing.T) {
 	})
 
 	t.Run("IP ConvertToNative string", func(t *testing.T) {
-		got, err := ipVal.ConvertToNative(reflect.TypeOf(""))
+		got, err := ipVal.ConvertToNative(reflect.TypeFor[string]())
 		if err != nil {
 			t.Fatalf("ConvertToNative failed: %v", err)
 		}
@@ -569,7 +569,7 @@ func TestNetwork_TypeConversions(t *testing.T) {
 	})
 
 	t.Run("IP ConvertToNative unsupported", func(t *testing.T) {
-		_, err := ipVal.ConvertToNative(reflect.TypeOf(0))
+		_, err := ipVal.ConvertToNative(reflect.TypeFor[int]())
 		if err == nil {
 			t.Error("expected error, got nil")
 		}
@@ -601,7 +601,7 @@ func TestNetwork_TypeConversions(t *testing.T) {
 
 	// CIDR Conversions
 	t.Run("CIDR ConvertToNative netip.Prefix", func(t *testing.T) {
-		got, err := cidrVal.ConvertToNative(reflect.TypeOf(netip.Prefix{}))
+		got, err := cidrVal.ConvertToNative(reflect.TypeFor[netip.Prefix]())
 		if err != nil {
 			t.Fatalf("ConvertToNative failed: %v", err)
 		}
@@ -611,7 +611,7 @@ func TestNetwork_TypeConversions(t *testing.T) {
 	})
 
 	t.Run("CIDR ConvertToNative string", func(t *testing.T) {
-		got, err := cidrVal.ConvertToNative(reflect.TypeOf(""))
+		got, err := cidrVal.ConvertToNative(reflect.TypeFor[string]())
 		if err != nil {
 			t.Fatalf("ConvertToNative failed: %v", err)
 		}
@@ -621,7 +621,7 @@ func TestNetwork_TypeConversions(t *testing.T) {
 	})
 
 	t.Run("CIDR ConvertToNative unsupported", func(t *testing.T) {
-		_, err := cidrVal.ConvertToNative(reflect.TypeOf(0))
+		_, err := cidrVal.ConvertToNative(reflect.TypeFor[int]())
 		if err == nil {
 			t.Error("expected error, got nil")
 		}

@@ -104,7 +104,7 @@ func (p *astPruner) maybeCreateLiteral(id int64, val ref.Val) (ast.Expr, bool) {
 	if list, isList := val.(traits.Lister); isList {
 		sz := list.Size().(types.Int)
 		elemExprs := make([]ast.Expr, sz)
-		for i := types.Int(0); i < sz; i++ {
+		for i := range sz {
 			elem := list.Get(i)
 			if types.IsUnknownOrError(elem) {
 				return nil, false

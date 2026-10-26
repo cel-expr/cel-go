@@ -147,7 +147,7 @@ func TestUintConvertToNative_Any(t *testing.T) {
 }
 
 func TestUintConvertToNative_Error(t *testing.T) {
-	val, err := Uint(10000).ConvertToNative(reflect.TypeOf(int(0)))
+	val, err := Uint(10000).ConvertToNative(reflect.TypeFor[int]())
 	if err == nil {
 		t.Errorf("Got '%v', expected error", val)
 	}
@@ -173,14 +173,14 @@ func TestUintConvertToNative_Json(t *testing.T) {
 }
 
 func TestUintConvertToNative_Uint8(t *testing.T) {
-	val, err := Uint(128).ConvertToNative(reflect.TypeOf(uint8(0)))
+	val, err := Uint(128).ConvertToNative(reflect.TypeFor[uint8]())
 	if err != nil {
 		t.Fatalf("Uint.ConvertToNative(uint8) failed: %v", err)
 	}
 	if val.(uint8) != 128 {
 		t.Errorf("Got '%v', expected 128", val)
 	}
-	val, err = Uint(math.MaxUint8 + 1).ConvertToNative(reflect.TypeOf(uint8(0)))
+	val, err = Uint(math.MaxUint8 + 1).ConvertToNative(reflect.TypeFor[uint8]())
 	if err == nil {
 		t.Errorf("(MaxUint+1).ConvertToNative(uint8) did not error, got: %v", val)
 	} else if !strings.Contains(err.Error(), "unsigned integer overflow") {
@@ -189,14 +189,14 @@ func TestUintConvertToNative_Uint8(t *testing.T) {
 }
 
 func TestUintConvertToNative_Uint16(t *testing.T) {
-	val, err := Uint(20050).ConvertToNative(reflect.TypeOf(uint16(0)))
+	val, err := Uint(20050).ConvertToNative(reflect.TypeFor[uint16]())
 	if err != nil {
 		t.Fatalf("Uint.ConvertToNative(uint16) failed: %v", err)
 	}
 	if val.(uint16) != 20050 {
 		t.Errorf("Got '%v', expected 20050", val)
 	}
-	val, err = Uint(math.MaxUint16 + 1).ConvertToNative(reflect.TypeOf(uint16(0)))
+	val, err = Uint(math.MaxUint16 + 1).ConvertToNative(reflect.TypeFor[uint16]())
 	if err == nil {
 		t.Errorf("(MaxUint+1).ConvertToNative(uint16) did not error, got: %v", val)
 	} else if !strings.Contains(err.Error(), "unsigned integer overflow") {
@@ -205,14 +205,14 @@ func TestUintConvertToNative_Uint16(t *testing.T) {
 }
 
 func TestUintConvertToNative_Uint32(t *testing.T) {
-	val, err := Uint(20050).ConvertToNative(reflect.TypeOf(uint32(0)))
+	val, err := Uint(20050).ConvertToNative(reflect.TypeFor[uint32]())
 	if err != nil {
 		t.Fatalf("Uint.ConvertToNative(uint32) failed: %v", err)
 	}
 	if val.(uint32) != 20050 {
 		t.Errorf("Got '%v', expected 20050", val)
 	}
-	val, err = Uint(math.MaxUint32 + 1).ConvertToNative(reflect.TypeOf(uint32(0)))
+	val, err = Uint(math.MaxUint32 + 1).ConvertToNative(reflect.TypeFor[uint32]())
 	if err == nil {
 		t.Errorf("(MaxUint+1).ConvertToNative(uint32) did not error, got: %v", val)
 	} else if !strings.Contains(err.Error(), "unsigned integer overflow") {
@@ -221,8 +221,7 @@ func TestUintConvertToNative_Uint32(t *testing.T) {
 }
 
 func TestUintConvertToNative_Ptr_Uint32(t *testing.T) {
-	ptrType := uint32(0)
-	val, err := Uint(10000).ConvertToNative(reflect.TypeOf(&ptrType))
+	val, err := Uint(10000).ConvertToNative(reflect.TypeFor[*uint32]())
 	if err != nil {
 		t.Error(err)
 	} else if *val.(*uint32) != uint32(10000) {
@@ -231,8 +230,7 @@ func TestUintConvertToNative_Ptr_Uint32(t *testing.T) {
 }
 
 func TestUintConvertToNative_Ptr_Uint64(t *testing.T) {
-	ptrType := uint64(0)
-	val, err := Uint(18446744073709551612).ConvertToNative(reflect.TypeOf(&ptrType))
+	val, err := Uint(18446744073709551612).ConvertToNative(reflect.TypeFor[*uint64]())
 	if err != nil {
 		t.Error(err)
 	} else if *val.(*uint64) != uint64(18446744073709551612) {

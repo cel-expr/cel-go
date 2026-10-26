@@ -158,10 +158,10 @@ func (t Timestamp) Compare(other ref.Val) ref.Val {
 // ConvertToNative implements ref.Val.ConvertToNative.
 func (t Timestamp) ConvertToNative(typeDesc reflect.Type) (any, error) {
 	// If the timestamp is already assignable to the desired type return it.
-	if reflect.TypeOf(t.Time).AssignableTo(typeDesc) {
+	if reflect.TypeFor[time.Time]().AssignableTo(typeDesc) {
 		return t.Time, nil
 	}
-	if reflect.TypeOf(t).AssignableTo(typeDesc) {
+	if reflect.TypeFor[Timestamp]().AssignableTo(typeDesc) {
 		return t, nil
 	}
 	switch typeDesc {
@@ -345,7 +345,7 @@ func validateTimestampRange(t time.Time) (time.Time, error) {
 }
 
 var (
-	timestampValueType = reflect.TypeOf(&tpb.Timestamp{})
+	timestampValueType = reflect.TypeFor[*tpb.Timestamp]()
 
 	timestampZeroArgOverloads = map[string]func(time.Time) ref.Val{
 		overloads.TimeGetFullYear:     timestampGetFullYear,
@@ -444,8 +444,8 @@ func timeZone(tz ref.Val, visitor timestampVisitor) timestampVisitor {
 			return MaybeNoSuchOverloadErr(tz)
 		}
 		val := string(tz.(String))
-		ind := strings.Index(val, ":")
-		if ind == -1 {
+		before, after, ok := strings.Cut(val, ":")
+		if !ok {
 			loc, err := time.LoadLocation(val)
 			if err != nil {
 				return WrapErr(err)
@@ -455,11 +455,11 @@ func timeZone(tz ref.Val, visitor timestampVisitor) timestampVisitor {
 
 		// If the input is not the name of a timezone (for example, 'US/Central'), it should be a numerical offset from UTC
 		// in the format ^(+|-)([01]\d|2[0-3]):[0-5][0-9]$. The numerical input is parsed in terms of hours and minutes.
-		hr, err := strconv.Atoi(string(val[0:ind]))
+		hr, err := strconv.Atoi(string(before))
 		if err != nil {
 			return WrapErr(err)
 		}
-		min, err := strconv.Atoi(string(val[ind+1:]))
+		min, err := strconv.Atoi(string(after))
 		if err != nil {
 			return WrapErr(err)
 		}

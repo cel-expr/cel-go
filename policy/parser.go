@@ -16,6 +16,7 @@ package policy
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
@@ -949,10 +950,8 @@ func (p *parserImpl) assertYAMLType(id int64, node *yaml.Node, nodeTypes ...yaml
 		p.ReportErrorAtID(id, "unsupported yaml tag type: %v", node.LongTag())
 		return nil
 	}
-	for _, nodeType := range nodeTypes {
-		if nt == nodeType {
-			return &nt
-		}
+	if slices.Contains(nodeTypes, nt) {
+		return &nt
 	}
 	p.ReportErrorAtID(id, "got yaml node type %v, wanted type(s) %v", node.LongTag(), nodeTypes)
 	return nil

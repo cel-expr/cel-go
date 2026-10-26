@@ -16,7 +16,7 @@ package cel
 
 import (
 	"fmt"
-	"sort"
+	"slices"
 
 	"cel.dev/cel-go/common"
 	"cel.dev/cel-go/common/ast"
@@ -146,7 +146,7 @@ func normalizeIDs(idGen ast.IDGenerator, optimized ast.Expr, info *ast.SourceInf
 	for id := range info.MacroCalls() {
 		sortedMacroIDs = append(sortedMacroIDs, id)
 	}
-	sort.Slice(sortedMacroIDs, func(i, j int) bool { return sortedMacroIDs[i] < sortedMacroIDs[j] })
+	slices.Sort(sortedMacroIDs)
 
 	// First, update the macro call ids themselves.
 	callIDMap := map[int64]int64{}

@@ -32,7 +32,7 @@ type Bool bool
 
 var (
 	// boolWrapperType golang reflected type for protobuf bool wrapper type.
-	boolWrapperType = reflect.TypeOf(&wrapperspb.BoolValue{})
+	boolWrapperType = reflect.TypeFor[*wrapperspb.BoolValue]()
 )
 
 // Boolean constants
@@ -61,7 +61,7 @@ func (b Bool) ConvertToNative(typeDesc reflect.Type) (any, error) {
 	switch typeDesc.Kind() {
 	case reflect.Bool:
 		return reflect.ValueOf(b).Convert(typeDesc).Interface(), nil
-	case reflect.Ptr:
+	case reflect.Pointer:
 		switch typeDesc {
 		case anyValueType:
 			// Primitives must be wrapped to a wrapperspb.BoolValue before being packed into an Any.
@@ -83,7 +83,7 @@ func (b Bool) ConvertToNative(typeDesc reflect.Type) (any, error) {
 		if reflect.TypeOf(bv).Implements(typeDesc) {
 			return bv, nil
 		}
-		if reflect.TypeOf(b).Implements(typeDesc) {
+		if reflect.TypeFor[Bool]().Implements(typeDesc) {
 			return b, nil
 		}
 	}

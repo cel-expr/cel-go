@@ -72,7 +72,7 @@ func TestStringConvertToNative_Any(t *testing.T) {
 }
 
 func TestStringConvertToNative_Error(t *testing.T) {
-	val, err := String("hello").ConvertToNative(reflect.TypeOf(0))
+	val, err := String("hello").ConvertToNative(reflect.TypeFor[int]())
 	if err == nil {
 		t.Errorf("Got '%v', expected error", val)
 	}
@@ -89,8 +89,7 @@ func TestStringConvertToNative_Json(t *testing.T) {
 }
 
 func TestStringConvertToNative_Ptr(t *testing.T) {
-	ptrType := ""
-	val, err := String("hello").ConvertToNative(reflect.TypeOf(&ptrType))
+	val, err := String("hello").ConvertToNative(reflect.TypeFor[*string]())
 	if err != nil {
 		t.Error(err)
 	} else if *val.(*string) != "hello" {
@@ -99,7 +98,7 @@ func TestStringConvertToNative_Ptr(t *testing.T) {
 }
 
 func TestStringConvertToNative_String(t *testing.T) {
-	val, err := String("hello").ConvertToNative(reflect.TypeOf(""))
+	val, err := String("hello").ConvertToNative(reflect.TypeFor[string]())
 	if err != nil {
 		t.Error(err)
 	} else if val.(string) != "hello" {
@@ -110,7 +109,7 @@ func TestStringConvertToNative_String(t *testing.T) {
 type customString string
 
 func TestStringConvertToNative_CustomString(t *testing.T) {
-	val, err := String("hello").ConvertToNative(reflect.TypeOf(customString("")))
+	val, err := String("hello").ConvertToNative(reflect.TypeFor[customString]())
 	if err != nil {
 		t.Error(err)
 	} else if v, ok := val.(customString); !ok || v != "hello" {
@@ -201,7 +200,7 @@ func TestStringConvertToTimestampStrict(t *testing.T) {
 
 func BenchmarkStringConvertToTimestamp(b *testing.B) {
 	s := String("2025-01-01T12:34:56.123456789Z")
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		if IsError(s.ConvertToType(TimestampType)) {
 			b.Fatal("ConvertToType(TimestampType) errored, wanted a timestamp")
 		}

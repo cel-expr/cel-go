@@ -272,7 +272,7 @@ func request(auth *rpcpb.AttributeContext_Auth, t time.Time) map[string]any {
 // valueToJSON converts the CEL type to a protobuf JSON representation and
 // marshals the result to a string.
 func valueToJSON(val ref.Val) string {
-	v, err := val.ConvertToNative(reflect.TypeOf(&structpb.Value{}))
+	v, err := val.ConvertToNative(reflect.TypeFor[*structpb.Value]())
 	if err != nil {
 		glog.Exit(err)
 	}

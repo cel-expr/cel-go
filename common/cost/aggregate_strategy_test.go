@@ -259,7 +259,6 @@ func TestAggregateSizingStrategy_EstimateSize_List(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			got, ok := strat.EstimateSize(tc.ctx, tc.node)
 			if ok != tc.wantOk {

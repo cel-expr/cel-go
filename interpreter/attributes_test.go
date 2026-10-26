@@ -984,7 +984,7 @@ func BenchmarkResolverFieldQualifier(b *testing.B) {
 	attr.AddQualifier(makeQualifier(b, attrs, testExprTypeToType(b, fieldType), 3, "bb"))
 	b.ResetTimer()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, err := attr.Resolve(vars)
 		if err != nil {
 			b.Fatal(err)
@@ -1012,7 +1012,7 @@ func BenchmarkResolverOptionalFieldQualifier(b *testing.B) {
 	attr.AddQualifier(makeOptQualifier(b, attrs, types.NewOptionalType(fieldType), 3, types.String("bb")))
 	b.ResetTimer()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, err := attr.Resolve(vars)
 		if err != nil {
 			b.Fatal(err)
@@ -1446,7 +1446,7 @@ func BenchmarkResolverCustomQualifier(b *testing.B) {
 	fieldType := types.NewObjectType("google.expr.proto3.test.TestAllTypes.NestedMessage")
 	qualBB := makeQualifier(b, attrs, fieldType, 2, "bb")
 	attr.AddQualifier(qualBB)
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		attr.Resolve(vars)
 	}
 }
@@ -1899,8 +1899,7 @@ func BenchmarkIdentVsOtherAttributes(b *testing.B) {
 
 	b.Run("IdentAttribute_Single", func(b *testing.B) {
 		b.ReportAllocs()
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			out, err := identAttr.Resolve(vars)
 			if err != nil || out != 42 {
 				b.Fatalf("got %v, %v, want 42", out, err)
@@ -1910,8 +1909,7 @@ func BenchmarkIdentVsOtherAttributes(b *testing.B) {
 
 	b.Run("AbsoluteAttribute_SingleDotPrefixed", func(b *testing.B) {
 		b.ReportAllocs()
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			out, err := absSingleAttr.Resolve(vars)
 			if err != nil || out != 42 {
 				b.Fatalf("got %v, %v, want 42", out, err)
@@ -1921,8 +1919,7 @@ func BenchmarkIdentVsOtherAttributes(b *testing.B) {
 
 	b.Run("AbsoluteAttribute_Namespaced", func(b *testing.B) {
 		b.ReportAllocs()
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			out, err := absMultiAttr.Resolve(vars)
 			if err != nil || out != 42 {
 				b.Fatalf("got %v, %v, want 42", out, err)
@@ -1932,8 +1929,7 @@ func BenchmarkIdentVsOtherAttributes(b *testing.B) {
 
 	b.Run("MaybeAttribute_NoContainer", func(b *testing.B) {
 		b.ReportAllocs()
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			out, err := maybeNoCont.Resolve(vars)
 			if err != nil || out != 42 {
 				b.Fatalf("got %v, %v, want 42", out, err)
@@ -1943,8 +1939,7 @@ func BenchmarkIdentVsOtherAttributes(b *testing.B) {
 
 	b.Run("MaybeAttribute_WithContainer", func(b *testing.B) {
 		b.ReportAllocs()
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			out, err := maybeWithCont.Resolve(vars)
 			if err != nil || out != 42 {
 				b.Fatalf("got %v, %v, want 42", out, err)
@@ -1954,8 +1949,7 @@ func BenchmarkIdentVsOtherAttributes(b *testing.B) {
 
 	b.Run("IdentAttribute_Qualified", func(b *testing.B) {
 		b.ReportAllocs()
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			out, err := qualIdent.Resolve(vars)
 			if err != nil || out != "hello" {
 				b.Fatalf("got %v, %v, want hello", out, err)
@@ -1965,8 +1959,7 @@ func BenchmarkIdentVsOtherAttributes(b *testing.B) {
 
 	b.Run("MaybeAttribute_Qualified_NoContainer", func(b *testing.B) {
 		b.ReportAllocs()
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			out, err := qualMaybeNoCont.Resolve(vars)
 			if err != nil || out != "hello" {
 				b.Fatalf("got %v, %v, want hello", out, err)
@@ -1976,8 +1969,7 @@ func BenchmarkIdentVsOtherAttributes(b *testing.B) {
 
 	b.Run("MaybeAttribute_Qualified_WithContainer", func(b *testing.B) {
 		b.ReportAllocs()
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			out, err := qualMaybeWithCont.Resolve(vars)
 			if err != nil || out != "hello" {
 				b.Fatalf("got %v, %v, want hello", out, err)
@@ -1985,4 +1977,3 @@ func BenchmarkIdentVsOtherAttributes(b *testing.B) {
 		}
 	})
 }
-

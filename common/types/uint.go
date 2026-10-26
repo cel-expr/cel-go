@@ -32,9 +32,9 @@ import (
 type Uint uint64
 
 var (
-	uint32WrapperType = reflect.TypeOf(&wrapperspb.UInt32Value{})
+	uint32WrapperType = reflect.TypeFor[*wrapperspb.UInt32Value]()
 
-	uint64WrapperType = reflect.TypeOf(&wrapperspb.UInt64Value{})
+	uint64WrapperType = reflect.TypeFor[*wrapperspb.UInt64Value]()
 )
 
 // Uint constants
@@ -95,7 +95,7 @@ func (i Uint) ConvertToNative(typeDesc reflect.Type) (any, error) {
 		return reflect.ValueOf(v).Convert(typeDesc).Interface(), nil
 	case reflect.Uint64:
 		return reflect.ValueOf(i).Convert(typeDesc).Interface(), nil
-	case reflect.Ptr:
+	case reflect.Pointer:
 		switch typeDesc {
 		case anyValueType:
 			// Primitives must be wrapped before being set on an Any field.
@@ -139,7 +139,7 @@ func (i Uint) ConvertToNative(typeDesc reflect.Type) (any, error) {
 		if reflect.TypeOf(iv).Implements(typeDesc) {
 			return iv, nil
 		}
-		if reflect.TypeOf(i).Implements(typeDesc) {
+		if reflect.TypeFor[Uint]().Implements(typeDesc) {
 			return i, nil
 		}
 	}

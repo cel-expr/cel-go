@@ -578,7 +578,7 @@ func BenchmarkLexer(b *testing.B) {
 	buf := runes.NewBuffer(expr)
 	b.ResetTimer()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		lexer := newLexer(buf)
 		for {
 			tok := lexer.Lex()

@@ -19,6 +19,7 @@ import (
 	"maps"
 	"math"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"unicode"
@@ -307,13 +308,7 @@ func MergeUnknowns(unk1, unk2 *Unknown) *Unknown {
 		}
 
 		for _, at := range ats {
-			found := false
-			for _, et := range existing {
-				if at.Equal(et) {
-					found = true
-					break
-				}
-			}
+			found := slices.ContainsFunc(existing, at.Equal)
 			if !found {
 				existing = append(existing, at)
 			}

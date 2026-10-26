@@ -119,7 +119,7 @@ func TestProtoObjectConvertToNative(t *testing.T) {
 		objVal := reg.NativeToValue(msg)
 
 		// Proto Message
-		val, err := objVal.ConvertToNative(reflect.TypeOf(&exprpb.ParsedExpr{}))
+		val, err := objVal.ConvertToNative(reflect.TypeFor[*exprpb.ParsedExpr]())
 		if err != nil {
 			t.Error(err)
 		}
@@ -136,7 +136,7 @@ func TestProtoObjectConvertToNative(t *testing.T) {
 			t.Fatalf("reg.NewValue() failed: %v", dynPB)
 		}
 		dynVal := reg.NativeToValue(dynPB)
-		val, err = dynVal.ConvertToNative(reflect.TypeOf(msg))
+		val, err = dynVal.ConvertToNative(reflect.TypeFor[*exprpb.ParsedExpr]())
 		if err != nil {
 			t.Fatalf("dynVal.ConvertToNative() failed: %v", err)
 		}

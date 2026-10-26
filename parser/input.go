@@ -73,11 +73,7 @@ func (c *charStream) Seek(index int) {
 		c.pos = index
 		return
 	}
-	if index < c.buf.Len() {
-		c.pos = index
-	} else {
-		c.pos = c.buf.Len()
-	}
+	c.pos = min(index, c.buf.Len())
 }
 
 // Size implements (antlr.CharStream).Size.

@@ -496,8 +496,10 @@ func costV0(lo, hi uint64) *cost.CostEstimate {
 }
 
 // actualV0 returns a ModelVersion0 runtime cost expectation for a cost table entry.
+//
+//go:fix inline
 func actualV0(n uint64) *uint64 {
-	return &n
+	return new(n)
 }
 
 // ledgerV0 passes an optional ModelVersion0 runtime cost expectation to testEvalWithCost.

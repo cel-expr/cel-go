@@ -453,7 +453,7 @@ type navigableListImpl struct {
 func (l navigableListImpl) Elements() []Expr {
 	pbElems := l.Expr.AsList().Elements()
 	elems := make([]Expr, len(pbElems))
-	for i := 0; i < len(pbElems); i++ {
+	for i := range pbElems {
 		elems[i] = l.createChild(pbElems[i])
 	}
 	return elems

@@ -383,7 +383,7 @@ func overlappingMacroError(name string, argCount int) errorMsg {
 func formatError(errMsgs []errorMsg) error {
 	errStrs := make([]string, 0)
 	if len(errMsgs) > 0 {
-		for i := 0; i < len(errMsgs); i++ {
+		for i := range errMsgs {
 			if errMsgs[i] != "" {
 				errStrs = append(errStrs, string(errMsgs[i]))
 			}

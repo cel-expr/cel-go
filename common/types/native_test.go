@@ -592,7 +592,7 @@ func TestNativeTypesJsonSerialization(t *testing.T) {
 			if err != nil {
 				t.Fatalf("prg.Eval() failed: %v", err)
 			}
-			conv, err := out.ConvertToNative(reflect.TypeOf(&structpb.Value{}))
+			conv, err := out.ConvertToNative(reflect.TypeFor[*structpb.Value]())
 			if err != nil {
 				t.Fatalf("out.ConvertToNative(Value) failed: %v", err)
 			}
@@ -695,7 +695,7 @@ func TestNativeTypesErrors(t *testing.T) {
 		err        string
 	}{
 		{
-			nativeType: reflect.TypeOf(1),
+			nativeType: reflect.TypeFor[int](),
 			err:        "unsupported reflect.Type",
 		},
 		{
@@ -719,7 +719,7 @@ func TestNativeTypesErrors(t *testing.T) {
 }
 
 func TestNativeTypesConvertToNative(t *testing.T) {
-	env := testNativeEnv(t, ext.NativeTypes(reflect.TypeOf(TestNestedType{})))
+	env := testNativeEnv(t, ext.NativeTypes(reflect.TypeFor[TestNestedType]()))
 	adapter := env.CELTypeAdapter()
 	conversions := []struct {
 		in     any
@@ -794,7 +794,7 @@ func TestNativeTypesConvertToNative(t *testing.T) {
 }
 
 func TestConvertToTypeErrors(t *testing.T) {
-	env := testNativeEnv(t, ext.NativeTypes(reflect.TypeOf(TestNestedType{})))
+	env := testNativeEnv(t, ext.NativeTypes(reflect.TypeFor[TestNestedType]()))
 	adapter := env.CELTypeAdapter()
 	conversions := []struct {
 		in  any
@@ -978,7 +978,7 @@ func TestNativeTypeConvertToNative(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewNativeType() failed: %v", err)
 	}
-	out, err := nt.ConvertToNative(reflect.TypeOf(1))
+	out, err := nt.ConvertToNative(reflect.TypeFor[int]())
 	if err == nil {
 		t.Errorf("nt.ConvertToNative(1) produced %v, wanted error", out)
 	}
@@ -1575,7 +1575,7 @@ func TestNativeToValueDelegatesUnregisteredStructs(t *testing.T) {
 	custom := &recordingAdapter{base: types.DefaultTypeAdapter}
 	env, err := cel.NewEnv(
 		cel.CustomTypeAdapter(custom),
-		ext.NativeTypes(reflect.TypeOf(registeredNativeStruct{})),
+		ext.NativeTypes(reflect.TypeFor[registeredNativeStruct]()),
 	)
 	if err != nil {
 		t.Fatalf("cel.NewEnv() failed: %v", err)
@@ -1605,9 +1605,9 @@ func TestNativeToValueDelegatesUnregisteredStructs(t *testing.T) {
 func TestNativeObjectCalculateSize(t *testing.T) {
 	env, err := cel.NewEnv(
 		ext.NativeTypes(
-			reflect.TypeOf(TestAllTypes{}),
-			reflect.TypeOf(TestNestedType{}),
-			reflect.TypeOf(TestEmbeddedPointerTypes{}),
+			reflect.TypeFor[TestAllTypes](),
+			reflect.TypeFor[TestNestedType](),
+			reflect.TypeFor[TestEmbeddedPointerTypes](),
 		),
 	)
 	if err != nil {
@@ -1773,7 +1773,7 @@ func BenchmarkNativeTypesEval(b *testing.B) {
 			}
 			b.ResetTimer()
 			b.ReportAllocs()
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				prg.Eval(input)
 			}
 		})
@@ -1812,7 +1812,7 @@ func BenchmarkNativeToValue(b *testing.B) {
 		b.Run(bm.name, func(b *testing.B) {
 			b.ResetTimer()
 			b.ReportAllocs()
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				adapter.NativeToValue(bm.val)
 			}
 		})
@@ -1830,16 +1830,16 @@ func BenchmarkConvertToNative(b *testing.B) {
 		StringVal: "hello world",
 	}
 	celVal := adapter.NativeToValue(allTypes)
-	targetType := reflect.TypeOf(&TestAllTypes{})
+	targetType := reflect.TypeFor[*TestAllTypes]()
 
 	allTypesSlice := []*TestAllTypes{allTypes, allTypes}
 	celSliceVal := adapter.NativeToValue(allTypesSlice)
-	sliceTargetType := reflect.TypeOf([]*TestAllTypes{})
+	sliceTargetType := reflect.TypeFor[[]*TestAllTypes]()
 
 	b.Run("TestAllTypes", func(b *testing.B) {
 		b.ResetTimer()
 		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			_, err := celVal.ConvertToNative(targetType)
 			if err != nil {
 				b.Fatalf("ConvertToNative failed: %v", err)
@@ -1850,7 +1850,7 @@ func BenchmarkConvertToNative(b *testing.B) {
 	b.Run("SliceTestAllTypes", func(b *testing.B) {
 		b.ResetTimer()
 		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			_, err := celSliceVal.ConvertToNative(sliceTargetType)
 			if err != nil {
 				b.Fatalf("ConvertToNative failed: %v", err)
@@ -2064,7 +2064,7 @@ func BenchmarkListComprehensions(b *testing.B) {
 	valSlice := make([]TestAllTypes, 10)
 	strSlice := make([]string, 10)
 	intSlice := make([]int64, 10)
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		v := int32(i)
 		ptrSlice[i] = &TestAllTypes{Int32Val: v}
 		valSlice[i] = TestAllTypes{Int32Val: v}
@@ -2136,7 +2136,7 @@ func BenchmarkListComprehensions(b *testing.B) {
 			}
 			b.ResetTimer()
 			b.ReportAllocs()
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				out, _, err := prg.Eval(tc.in)
 				if err != nil || out != types.True {
 					b.Fatalf("Eval got (%v, %v), want true", out, err)
@@ -2375,7 +2375,7 @@ func BenchmarkMapComprehensions(b *testing.B) {
 	valMap := make(map[string]TestAllTypes, 10)
 	strMap := make(map[string]string, 10)
 	intMap := make(map[int64]bool, 10)
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		k := fmt.Sprintf("k%d", i)
 		v := fmt.Sprintf("v%d", i)
 		ptrMap[k] = &TestAllTypes{Int32Val: int32(i), StringVal: v}
@@ -2446,7 +2446,7 @@ func BenchmarkMapComprehensions(b *testing.B) {
 		b.Run(tc.name, func(b *testing.B) {
 			b.ResetTimer()
 			b.ReportAllocs()
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				out, _, err := tc.prg.Eval(tc.vars)
 				if err != nil || out != types.True {
 					b.Fatalf("Eval got (%v, %v), want true", out, err)
@@ -2517,7 +2517,7 @@ func BenchmarkMapLookup(b *testing.B) {
 		b.Run(tc.name, func(b *testing.B) {
 			b.ResetTimer()
 			b.ReportAllocs()
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				out, _, err := tc.prg.Eval(tc.vars)
 				if err != nil || out != types.True {
 					b.Fatalf("Eval got (%v, %v), want true", out, err)
@@ -2603,7 +2603,7 @@ func BenchmarkNewDynamicList(b *testing.B) {
 	nestedPtrs := make([]*TestNestedType, 10)
 	nestedVals := make([]TestNestedSliceType, 10)
 
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		s := fmt.Sprintf("item-%d", i)
 		tVal := TestAllTypes{Int32Val: int32(i), StringVal: s}
 		valArr[i] = tVal
@@ -2676,7 +2676,7 @@ func BenchmarkNewDynamicList(b *testing.B) {
 		b.Run(tc.name, func(b *testing.B) {
 			b.ResetTimer()
 			b.ReportAllocs()
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				out, _, err := tc.prg.Eval(tc.vars)
 				if err != nil || out != types.True {
 					b.Fatalf("Eval got (%v, %v), want true", out, err)
@@ -2686,7 +2686,7 @@ func BenchmarkNewDynamicList(b *testing.B) {
 	}
 	b.Run("ConstructAndFold_PtrSlice_NewDynamicList", func(b *testing.B) {
 		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			l := types.NewDynamicList(adapter, ptrSlice)
 			out, _, err := prgPtrFold.Eval(map[string]any{"ptrList": l})
 			if err != nil || out != types.True {
@@ -2696,7 +2696,7 @@ func BenchmarkNewDynamicList(b *testing.B) {
 	})
 	b.Run("ConstructAndFold_ValSlice_NewDynamicList", func(b *testing.B) {
 		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			l := types.NewDynamicList(adapter, valSlice)
 			out, _, err := prgValFold.Eval(map[string]any{"valList": l})
 			if err != nil || out != types.True {
@@ -3639,7 +3639,6 @@ func TestNativeTypeCoverageBoost(t *testing.T) {
 		t.Errorf("expected error converting to int")
 	}
 
-
 	// 14. getFieldValue direct calls
 	dummyAdapter := types.DefaultTypeAdapter
 	_ = dummyAdapter.NativeToValue([]byte("hello"))
@@ -3928,8 +3927,8 @@ type TestInnerAllFields struct {
 	NilDurPtr          *time.Duration
 	NilStructPtr       *TestNestedType
 	ZeroTime           time.Time
-	TaggedZero         int            `json:"num"`
-	OmitEmpty          int            `json:"omit,omitempty"`
+	TaggedZero         int `json:"num"`
+	OmitEmpty          int `json:"omit,omitempty"`
 }
 
 type TestOuterEmbeddedPointer struct {
@@ -4285,12 +4284,12 @@ func TestNativeCustomAdapterSliceMapExpressions(t *testing.T) {
 }
 
 type StructWithDynamicFields struct {
-	DynamicField   any
-	NilField       any
-	RefValField    ref.Val
-	SliceOfAny     []any
-	MapOfAny       map[string]any
-	CustomIface    fmt.Stringer
+	DynamicField any
+	NilField     any
+	RefValField  ref.Val
+	SliceOfAny   []any
+	MapOfAny     map[string]any
+	CustomIface  fmt.Stringer
 }
 
 type customStringer struct {
@@ -4525,4 +4524,3 @@ func TestNativeStructComprehensionsAndFieldSelection(t *testing.T) {
 		})
 	}
 }
-

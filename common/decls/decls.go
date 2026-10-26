@@ -18,6 +18,8 @@ package decls
 import (
 	"context"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 
 	chkdecls "cel.dev/cel-go/checker/decls"
@@ -175,9 +177,7 @@ func (f *FunctionDecl) Merge(other *FunctionDecl) (*FunctionDecl, error) {
 	// baseline copy of the overloads and their ordinals
 	copy(merged.overloadOrdinals, f.overloadOrdinals)
 	copy(merged.overloadDecls, f.overloadDecls)
-	for oID, o := range f.overloads {
-		merged.overloads[oID] = o
-	}
+	maps.Copy(merged.overloads, f.overloads)
 	// overloads and their ordinals are added from the left
 	for _, oID := range other.overloadOrdinals {
 		o := other.overloads[oID]
@@ -207,24 +207,14 @@ type OverloadSelector func(overload *OverloadDecl) bool
 // IncludeOverloads defines an OverloadSelector which allow-lists a set of overloads by their ids.
 func IncludeOverloads(overloadIDs ...string) OverloadSelector {
 	return func(overload *OverloadDecl) bool {
-		for _, oID := range overloadIDs {
-			if overload.id == oID {
-				return true
-			}
-		}
-		return false
+		return slices.Contains(overloadIDs, overload.id)
 	}
 }
 
 // ExcludeOverloads defines an OverloadSelector which deny-lists a set of overloads by their ids.
 func ExcludeOverloads(overloadIDs ...string) OverloadSelector {
 	return func(overload *OverloadDecl) bool {
-		for _, oID := range overloadIDs {
-			if overload.id == oID {
-				return false
-			}
-		}
-		return true
+		return !slices.Contains(overloadIDs, overload.id)
 	}
 }
 

@@ -87,14 +87,14 @@ func TestBytesConvertToNative_Any(t *testing.T) {
 }
 
 func TestBytesConvertToNative_ByteSlice(t *testing.T) {
-	val, err := Bytes("123").ConvertToNative(reflect.TypeOf([]byte{}))
+	val, err := Bytes("123").ConvertToNative(reflect.TypeFor[[]byte]())
 	if err != nil || !bytes.Equal(val.([]byte), []byte{49, 50, 51}) {
 		t.Error("Got unexpected value, wanted []byte{49, 50, 51}", err, val)
 	}
 }
 
 func TestBytesConvertToNative_ByteArray(t *testing.T) {
-	val, err := Bytes("123").ConvertToNative(reflect.TypeOf([3]byte{}))
+	val, err := Bytes("123").ConvertToNative(reflect.TypeFor[[3]byte]())
 	if err != nil {
 		t.Error("Got unexpected value, wanted []byte{49, 50, 51}", err, val)
 	}
@@ -104,14 +104,14 @@ func TestBytesConvertToNative_ByteArray(t *testing.T) {
 }
 
 func TestBytesConvertToNative_ByteArrayError(t *testing.T) {
-	_, err := Bytes("123").ConvertToNative(reflect.TypeOf([1]byte{}))
+	_, err := Bytes("123").ConvertToNative(reflect.TypeFor[[1]byte]())
 	if !strings.Contains(err.Error(), "[3]byte not assignable to [1]byte") {
 		t.Errorf("Got unexpected error %v, wanted not assignable error", err)
 	}
 }
 
 func TestBytesConvertToNative_Error(t *testing.T) {
-	val, err := Bytes("123").ConvertToNative(reflect.TypeOf(""))
+	val, err := Bytes("123").ConvertToNative(reflect.TypeFor[string]())
 	if err == nil {
 		t.Errorf("Got '%v', expected error", val)
 	}

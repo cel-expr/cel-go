@@ -15,7 +15,6 @@
 package cel
 
 import (
-	"context"
 	"math"
 	"strings"
 	"testing"
@@ -123,8 +122,7 @@ func TestMemoryTrackingConcurrentEval(t *testing.T) {
 	if err != nil {
 		t.Fatalf("env.Program() failed: %v", err)
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	res := <-program.ConcurrentEval(ctx, map[string]any{"a": []int64{1, 2}})
 	if res.Err != nil {
 		t.Fatalf("program.ConcurrentEval() failed: %v", res.Err)

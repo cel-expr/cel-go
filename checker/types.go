@@ -15,6 +15,8 @@
 package checker
 
 import (
+	"slices"
+
 	"cel.dev/cel-go/common/types"
 )
 
@@ -111,12 +113,7 @@ func hasTypeParam(t *types.Type) bool {
 	if t.Kind() == types.TypeParamKind {
 		return true
 	}
-	for _, param := range t.Parameters() {
-		if hasTypeParam(param) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(t.Parameters(), hasTypeParam)
 }
 
 // / internalIsAssignable returns true if t1 is assignable to t2.

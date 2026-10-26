@@ -264,12 +264,10 @@ func TestRegistryUnshared_ChainedCopies(t *testing.T) {
 func TestRegistryConcurrentCopy(t *testing.T) {
 	reg := NewEmptyRegistry()
 	var wg sync.WaitGroup
-	for i := 0; i < 10; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 10 {
+		wg.Go(func() {
 			_ = reg.Copy()
-		}()
+		})
 	}
 	wg.Wait()
 }
@@ -1261,7 +1259,7 @@ func BenchmarkNativeToValue(b *testing.B) {
 
 	dummyDesc := &testDummyStructDescriptor{
 		Type:        NewObjectType("dummy.Struct"),
-		reflectType: reflect.TypeOf(dummyNativeStruct{}),
+		reflectType: reflect.TypeFor[dummyNativeStruct](),
 		fieldType:   &FieldType{Type: StringType},
 	}
 	if err := reg.RegisterType(dummyDesc); err != nil {
@@ -1293,7 +1291,7 @@ func BenchmarkNativeToValue(b *testing.B) {
 		b.Run(tc.name, func(b *testing.B) {
 			b.ResetTimer()
 			b.ReportAllocs()
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				reg.NativeToValue(input)
 			}
 		})
@@ -1471,7 +1469,7 @@ func BenchmarkTypeProviderNewValue(b *testing.B) {
 	if err != nil {
 		b.Fatalf("NewRegistry() failed: %v", err)
 	}
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		reg.NewValue(
 			"google.api.expr.v1.SourceInfo",
 			map[string]ref.Val{
@@ -1487,7 +1485,7 @@ func BenchmarkTypeProviderCopy(b *testing.B) {
 	if err != nil {
 		b.Fatalf("NewRegistry() failed: %v", err)
 	}
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		reg.Copy()
 	}
 }
@@ -1624,7 +1622,7 @@ func (o *testStructVal) ConvertToNative(typeDesc reflect.Type) (any, error) {
 	if reflect.TypeOf(o.value).AssignableTo(typeDesc) {
 		return o.value, nil
 	}
-	if reflect.TypeOf(o).AssignableTo(typeDesc) {
+	if reflect.TypeFor[*testStructVal]().AssignableTo(typeDesc) {
 		return o, nil
 	}
 	return nil, fmt.Errorf("type conversion error for type to '%v'", typeDesc)
@@ -1696,7 +1694,7 @@ func newTestStructTypeRegistry(t *testing.T) *Registry {
 	t.Helper()
 	desc := &testStructType{
 		typeName:    "custom.MyStruct",
-		reflectType: reflect.TypeOf(dummyNativeStruct{}),
+		reflectType: reflect.TypeFor[dummyNativeStruct](),
 		fields: map[string]*FieldType{
 			"Foo": {
 				Type: StringType,
@@ -2512,7 +2510,7 @@ func TestRegistry_FindStructDescriptorByReflectType(t *testing.T) {
 
 	st := &testDummyStructDescriptor{
 		Type:        NewObjectType("dummy.Struct"),
-		reflectType: reflect.TypeOf(dummyNativeStruct{}),
+		reflectType: reflect.TypeFor[dummyNativeStruct](),
 		fieldType:   &FieldType{Type: StringType},
 	}
 
@@ -2542,21 +2540,21 @@ func TestRegistry_FindStructDescriptorByReflectType(t *testing.T) {
 		}
 
 		// Manually set pointer-only key in reflectTypes
-		reg.reflectTypes[reflect.TypeOf(&dummyNativeStruct{})] = st
-		delete(reg.reflectTypes, reflect.TypeOf(dummyNativeStruct{}))
+		reg.reflectTypes[reflect.TypeFor[*dummyNativeStruct]()] = st
+		delete(reg.reflectTypes, reflect.TypeFor[dummyNativeStruct]())
 
 		// Pass value type (kind != Ptr) -> hits else branch looking up PointerTo
-		stFound, foundVal := reg.findStructDescriptorByReflectType(reflect.TypeOf(dummyNativeStruct{}))
+		stFound, foundVal := reg.findStructDescriptorByReflectType(reflect.TypeFor[dummyNativeStruct]())
 		if !foundVal || stFound != st {
 			t.Errorf("findStructDescriptorByReflectType(value) expected st, got %v", stFound)
 		}
 
 		// Manually set value-only key in reflectTypes
-		reg.reflectTypes[reflect.TypeOf(dummyNativeStruct{})] = st
-		delete(reg.reflectTypes, reflect.TypeOf(&dummyNativeStruct{}))
+		reg.reflectTypes[reflect.TypeFor[dummyNativeStruct]()] = st
+		delete(reg.reflectTypes, reflect.TypeFor[*dummyNativeStruct]())
 
 		// Pass pointer type (kind == Ptr) -> hits Ptr branch looking up Elem
-		stFound, foundPtr := reg.findStructDescriptorByReflectType(reflect.TypeOf(&dummyNativeStruct{}))
+		stFound, foundPtr := reg.findStructDescriptorByReflectType(reflect.TypeFor[*dummyNativeStruct]())
 		if !foundPtr || stFound != st {
 			t.Errorf("findStructDescriptorByReflectType(pointer) expected st, got %v", stFound)
 		}
@@ -2572,7 +2570,7 @@ func TestRegistry_FindStructDescriptorByReflectType(t *testing.T) {
 	t.Run("Invalid field type conversion error", func(t *testing.T) {
 		stInvalid := &testDummyStructDescriptor{
 			Type:        NewObjectType("invalid.Struct"),
-			reflectType: reflect.TypeOf(customNativeType{}),
+			reflectType: reflect.TypeFor[customNativeType](),
 			fieldType:   &FieldType{Type: &Type{}},
 		}
 		err := reg.RegisterType(stInvalid)
@@ -2910,5 +2908,3 @@ func TestIsDirectIface(t *testing.T) {
 		t.Errorf("getDynamicSliceMeta(nonDirectIntStruct) failed: %+v", metaNonDirect)
 	}
 }
-
-

@@ -129,19 +129,19 @@ func TestDurationCompare(t *testing.T) {
 
 func TestDurationConvertToNative(t *testing.T) {
 	dur := Duration{Duration: duration(7506, 1000)}
-	val, err := dur.ConvertToNative(reflect.TypeOf(&dpb.Duration{}))
+	val, err := dur.ConvertToNative(reflect.TypeFor[*dpb.Duration]())
 	if err != nil ||
 		!proto.Equal(val.(proto.Message), &dpb.Duration{Seconds: 7506, Nanos: 1000}) {
 		t.Errorf("Got '%v', expected backing proto message value", err)
 	}
-	val, err = dur.ConvertToNative(reflect.TypeOf(Duration{}))
+	val, err = dur.ConvertToNative(reflect.TypeFor[Duration]())
 	if err != nil {
 		t.Fatalf("ConvertToNative() failed: %v", err)
 	}
 	if !reflect.DeepEqual(val, dur) {
 		t.Errorf("got value %v, wanted %v", val, dur)
 	}
-	val, err = dur.ConvertToNative(reflect.TypeOf(time.Duration(0)))
+	val, err = dur.ConvertToNative(reflect.TypeFor[time.Duration]())
 	if err != nil {
 		t.Fatalf("ConvertToNative() failed: %v", err)
 	}

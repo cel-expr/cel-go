@@ -551,7 +551,6 @@ func TestEncodersYAMLWithoutOptionalTypes(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			ast, iss := env.Compile(tc.expr)
 			if tc.wantErr != "" {
@@ -1586,7 +1585,7 @@ func BenchmarkJSONEncode(b *testing.B) {
 		b.Run(c.name, func(b *testing.B) {
 			b.ResetTimer()
 			b.ReportAllocs()
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				_, _, err := prg.Eval(cel.NoVars())
 				if err != nil {
 					b.Fatalf("prg.Eval() failed: %v", err)
@@ -1639,7 +1638,7 @@ func BenchmarkJSONParse(b *testing.B) {
 		b.Run(c.name, func(b *testing.B) {
 			b.ResetTimer()
 			b.ReportAllocs()
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				_, _, err := prg.Eval(cel.NoVars())
 				if err != nil {
 					b.Fatalf("prg.Eval() failed: %v", err)
@@ -1680,7 +1679,7 @@ func BenchmarkBase64(b *testing.B) {
 		b.Run(c.name, func(b *testing.B) {
 			b.ResetTimer()
 			b.ReportAllocs()
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				_, _, err := prg.Eval(cel.NoVars())
 				if err != nil {
 					b.Fatalf("prg.Eval() failed: %v", err)
@@ -1847,10 +1846,10 @@ func TestPublicAPI(t *testing.T) {
 	}
 
 	// Unmarshal native struct errors
-	if _, ok := jsonUnmarshalNative("{}", reflect.TypeOf(123)); ok {
+	if _, ok := jsonUnmarshalNative("{}", reflect.TypeFor[int]()); ok {
 		t.Errorf("expected jsonUnmarshalNative to fail on non-struct int type")
 	}
-	if _, ok := jsonUnmarshalNative("invalid", reflect.TypeOf(testNativeUser{})); ok {
+	if _, ok := jsonUnmarshalNative("invalid", reflect.TypeFor[testNativeUser]()); ok {
 		t.Errorf("expected jsonUnmarshalNative to fail on invalid JSON")
 	}
 }
@@ -2009,17 +2008,16 @@ func TestEncodersEstimatorsAndEdgeCases(t *testing.T) {
 	}
 
 	// Test jsonParseStructNative with cached pointer reflect type
-	ptrTypeVal := &testNativeUser{Username: "Alice", Age: 30}
-	structPrototypeCache.Store("ptr.NativeUser", structPrototype{refType: reflect.TypeOf(ptrTypeVal)})
+	structPrototypeCache.Store("ptr.NativeUser", structPrototype{refType: reflect.TypeFor[*testNativeUser]()})
 	if val, ok := jsonParseStructNative(nil, `{"user_name":"Bob","age":25}`, "ptr.NativeUser"); !ok || val == nil {
 		t.Errorf("expected jsonParseStructNative to parse cached ptr reflect type")
 	}
 
 	// Test direct jsonUnmarshalNative with pointer to struct
-	if val, ok := jsonUnmarshalNative(`{"user_name":"Carol","age":35}`, reflect.TypeOf(&testNativeUser{})); !ok || val == nil {
+	if val, ok := jsonUnmarshalNative(`{"user_name":"Carol","age":35}`, reflect.TypeFor[*testNativeUser]()); !ok || val == nil {
 		t.Errorf("expected jsonUnmarshalNative with pointer to succeed")
 	}
-	if _, ok := jsonUnmarshalNative(`invalid`, reflect.TypeOf(&testNativeUser{})); ok {
+	if _, ok := jsonUnmarshalNative(`invalid`, reflect.TypeFor[*testNativeUser]()); ok {
 		t.Errorf("expected jsonUnmarshalNative with pointer to fail on invalid JSON")
 	}
 
@@ -2140,7 +2138,7 @@ func TestEncodersEstimatorsAndEdgeCases(t *testing.T) {
 	}
 
 	// Test jsonParseValue with custom StructTypeDescriptor and NonType
-	if val, ok := jsonParseValue(nil, nil, `{"user_name":"Eve","age":20}`, mockStructTypeDesc{reflectType: reflect.TypeOf(testNativeUser{})}); !ok || val == nil {
+	if val, ok := jsonParseValue(nil, nil, `{"user_name":"Eve","age":20}`, mockStructTypeDesc{reflectType: reflect.TypeFor[testNativeUser]()}); !ok || val == nil {
 		t.Errorf("expected jsonParseValue to succeed for StructTypeDescriptor")
 	}
 	if val, ok := jsonParseValue(nil, nil, `{"user_name":"Eve","age":20}`, mockCustomTypeDesc{typeName: "ptr.NativeUser"}); !ok || val == nil {

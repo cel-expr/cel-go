@@ -244,7 +244,7 @@ func TestComprehensionAccumulatorImmutability(t *testing.T) {
 					t.Fatalf("NewInterpretable() failed: %v", err)
 				}
 				// Evaluate repeatedly to ensure that pooled state does not leak across evaluations.
-				for i := 0; i < 3; i++ {
+				for range 3 {
 					out := prg.Eval(EmptyActivation())
 					if out != types.True {
 						t.Errorf("Eval(%s) got %v, wanted true", expr, out)

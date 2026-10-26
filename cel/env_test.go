@@ -149,7 +149,6 @@ func TestFormatCELTypeEquivalence(t *testing.T) {
 		NullableType(DoubleType),
 	}
 	for _, v := range values {
-		v := v
 		t.Run(v.String(), func(t *testing.T) {
 			celStr := FormatCELType(v)
 			et, err := TypeToExprType(v)
@@ -196,7 +195,7 @@ func TestEnvExtendDisableDeclaration(t *testing.T) {
 
 func TestEnvCheckExtendRace(t *testing.T) {
 	t.Parallel()
-	for i := 0; i < 500; i++ {
+	for i := range 500 {
 		wg := &sync.WaitGroup{}
 		wg.Add(2)
 		env, err := NewCustomEnv(StdLib())
@@ -226,7 +225,7 @@ func TestEnvConcurrentExtend(t *testing.T) {
 		t.Fatalf("NewCustomEnv() failed: %v", err)
 	}
 	var wg sync.WaitGroup
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
@@ -246,7 +245,7 @@ func TestEnvConcurrentExtendAndCompile(t *testing.T) {
 		t.Fatalf("NewCustomEnv() failed: %v", err)
 	}
 	var wg sync.WaitGroup
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
@@ -286,7 +285,7 @@ func TestEnvConcurrentExtendWithMutation(t *testing.T) {
 		t.Fatalf("NewCustomEnv() failed: %v", err)
 	}
 	var wg sync.WaitGroup
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
@@ -1261,8 +1260,7 @@ func TestEnvVariableValidation(t *testing.T) {
 }
 
 func BenchmarkNewCustomEnvLazy(b *testing.B) {
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, err := NewCustomEnv(StdLib(), EagerlyValidateDeclarations(false))
 		if err != nil {
 			b.Fatalf("NewCustomEnv() failed: %v", err)
@@ -1271,7 +1269,7 @@ func BenchmarkNewCustomEnvLazy(b *testing.B) {
 }
 
 func BenchmarkNewCustomEnvEager(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, err := NewCustomEnv(StdLib(), EagerlyValidateDeclarations(true))
 		if err != nil {
 			b.Fatalf("NewCustomEnv() failed: %v", err)
@@ -1280,7 +1278,7 @@ func BenchmarkNewCustomEnvEager(b *testing.B) {
 }
 
 func BenchmarkNewEnvLazy(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, err := NewEnv()
 		if err != nil {
 			b.Fatalf("NewEnv() failed: %v", err)
@@ -1289,7 +1287,7 @@ func BenchmarkNewEnvLazy(b *testing.B) {
 }
 
 func BenchmarkNewEnvEager(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		env, err := NewEnv()
 		if err != nil {
 			b.Fatalf("NewEnv() failed: %v", err)
@@ -1306,7 +1304,7 @@ func BenchmarkEnvExtendEager(b *testing.B) {
 	if err != nil {
 		b.Fatalf("NewEnv() failed: %v", err)
 	}
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		ext, err := env.Extend()
 		if err != nil {
 			b.Fatalf("env.Extend() failed: %v", err)
@@ -1323,7 +1321,7 @@ func BenchmarkEnvExtendEagerTypes(b *testing.B) {
 	if err != nil {
 		b.Fatalf("NewEnv() failed: %v", err)
 	}
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		ext, err := env.Extend(CustomTypeProvider(types.NewEmptyRegistry()))
 		if err != nil {
 			b.Fatalf("env.Extend() failed: %v", err)
@@ -1340,7 +1338,7 @@ func BenchmarkEnvExtendEagerDecls(b *testing.B) {
 	if err != nil {
 		b.Fatalf("NewEnv() failed: %v", err)
 	}
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		ext, err := env.Extend(
 			Variable("test_var", StringType),
 			Function(

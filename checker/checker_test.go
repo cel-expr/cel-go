@@ -2695,8 +2695,7 @@ func BenchmarkCheck(b *testing.B) {
 					env.AddFunctions(fn)
 				}
 			}
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				cAst, errors := Check(ast.Copy(pAst), src, env)
 				if len(errors.GetErrors()) > 0 {
 					errorString := errors.ToDisplayString()
@@ -2754,8 +2753,7 @@ func BenchmarkCheckLongConjunction(b *testing.B) {
 			}
 			env.AddFunctions(stdlib.Functions()...)
 			b.ReportAllocs()
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				if _, errs := Check(pAst, src, env); len(errs.GetErrors()) > 0 {
 					b.Fatalf("Check() failed: %v", errs.ToDisplayString())
 				}
@@ -3200,4 +3198,3 @@ func TestCatalogSuggestionsInChecker(t *testing.T) {
 		t.Errorf("got error %q, did not want enable suggestion for unrelated symbol", iss.ToDisplayString())
 	}
 }
-

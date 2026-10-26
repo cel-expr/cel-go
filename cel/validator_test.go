@@ -477,7 +477,7 @@ func TestValidatorConfig(t *testing.T) {
 		t.Errorf("config.GetOrDefault() got %v, wanted default of 2", result)
 	}
 	result = config.GetOrDefault(HomogeneousAggregateLiteralExemptFunctions, []string{})
-	if reflect.TypeOf(result) != reflect.TypeOf([]string{}) {
+	if reflect.TypeOf(result) != reflect.TypeFor[[]string]() {
 		t.Errorf("config.GetOrDefault() got %T, wanted type %T", result, []string{})
 	}
 	err := config.Set(HomogeneousAggregateLiteralExemptFunctions, []string{"_==_"})

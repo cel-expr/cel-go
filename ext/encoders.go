@@ -554,7 +554,7 @@ func jsonEncodeList(lister traits.Lister) (string, error) {
 	}
 	var sb strings.Builder
 	sb.WriteByte('[')
-	for i := 0; i < sz; i++ {
+	for i := range sz {
 		if i > 0 {
 			sb.WriteByte(',')
 		}

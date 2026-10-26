@@ -553,7 +553,7 @@ func BenchmarkProjectionTracking(b *testing.B) {
 		}
 		for _, bm := range benchmarks {
 			b.Run(fmt.Sprintf("%s/%d", bm.name, size), func(b *testing.B) {
-				for i := 0; i < b.N; i++ {
+				for b.Loop() {
 					bm.expr.track(bm.ctx)
 				}
 			})

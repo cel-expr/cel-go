@@ -338,7 +338,7 @@ func (celBlockLib) CompileOptions() []cel.EnvOption {
 	// with the values as part of a static optimization pass
 	maxIndices := 30
 	indexOpts := make([]cel.EnvOption, maxIndices)
-	for i := 0; i < maxIndices; i++ {
+	for i := range maxIndices {
 		indexOpts[i] = cel.Variable(fmt.Sprintf("@index%d", i), cel.DynType)
 	}
 	return append([]cel.EnvOption{

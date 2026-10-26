@@ -166,14 +166,14 @@ func TestIntConvertToNative_Error(t *testing.T) {
 }
 
 func TestIntConvertToNative_Int8(t *testing.T) {
-	val, err := Int(127).ConvertToNative(reflect.TypeOf(int8(0)))
+	val, err := Int(127).ConvertToNative(reflect.TypeFor[int8]())
 	if err != nil {
 		t.Fatalf("Int.ConvertToNative(int8) failed: %v", err)
 	}
 	if val.(int8) != 127 {
 		t.Errorf("Got '%v', expected 20050", val)
 	}
-	val, err = Int(math.MaxInt8 + 1).ConvertToNative(reflect.TypeOf(int8(0)))
+	val, err = Int(math.MaxInt8 + 1).ConvertToNative(reflect.TypeFor[int8]())
 	if err == nil {
 		t.Errorf("(MaxInt+1).ConvertToNative(int8) did not error, got: %v", val)
 	} else if !strings.Contains(err.Error(), "integer overflow") {
@@ -181,14 +181,14 @@ func TestIntConvertToNative_Int8(t *testing.T) {
 	}
 }
 func TestIntConvertToNative_Int16(t *testing.T) {
-	val, err := Int(20050).ConvertToNative(reflect.TypeOf(int16(0)))
+	val, err := Int(20050).ConvertToNative(reflect.TypeFor[int16]())
 	if err != nil {
 		t.Fatalf("Int.ConvertToNative(int16) failed: %v", err)
 	}
 	if val.(int16) != 20050 {
 		t.Errorf("Got '%v', expected 20050", val)
 	}
-	val, err = Int(math.MaxInt16 + 1).ConvertToNative(reflect.TypeOf(int16(0)))
+	val, err = Int(math.MaxInt16 + 1).ConvertToNative(reflect.TypeFor[int16]())
 	if err == nil {
 		t.Errorf("(MaxInt+1).ConvertToNative(int16) did not error, got: %v", val)
 	} else if !strings.Contains(err.Error(), "integer overflow") {
@@ -196,14 +196,14 @@ func TestIntConvertToNative_Int16(t *testing.T) {
 	}
 }
 func TestIntConvertToNative_Int32(t *testing.T) {
-	val, err := Int(20050).ConvertToNative(reflect.TypeOf(int32(0)))
+	val, err := Int(20050).ConvertToNative(reflect.TypeFor[int32]())
 	if err != nil {
 		t.Fatalf("Int.ConvertToNative(int32) failed: %v", err)
 	}
 	if val.(int32) != 20050 {
 		t.Errorf("Got '%v', expected 20050", val)
 	}
-	val, err = Int(math.MaxInt32 + 1).ConvertToNative(reflect.TypeOf(int32(0)))
+	val, err = Int(math.MaxInt32 + 1).ConvertToNative(reflect.TypeFor[int32]())
 	if err == nil {
 		t.Errorf("(MaxInt+1).ConvertToNative(int32) did not error, got: %v", val)
 	} else if !strings.Contains(err.Error(), "integer overflow") {
@@ -213,7 +213,7 @@ func TestIntConvertToNative_Int32(t *testing.T) {
 
 func TestIntConvertToNative_Int64(t *testing.T) {
 	// Value greater than max int32.
-	val, err := Int(4147483648).ConvertToNative(reflect.TypeOf(int64(0)))
+	val, err := Int(4147483648).ConvertToNative(reflect.TypeFor[int64]())
 	if err != nil {
 		t.Error(err)
 	} else if val.(int64) != 4147483648 {
@@ -241,8 +241,7 @@ func TestIntConvertToNative_Json(t *testing.T) {
 }
 
 func TestIntConvertToNative_Ptr_Int32(t *testing.T) {
-	ptrType := int32(0)
-	val, err := Int(20050).ConvertToNative(reflect.TypeOf(&ptrType))
+	val, err := Int(20050).ConvertToNative(reflect.TypeFor[*int32]())
 	if err != nil {
 		t.Error(err)
 	} else if *val.(*int32) != 20050 {
@@ -252,8 +251,7 @@ func TestIntConvertToNative_Ptr_Int32(t *testing.T) {
 
 func TestIntConvertToNative_Ptr_Int64(t *testing.T) {
 	// Value greater than max int32.
-	ptrType := int64(0)
-	val, err := Int(math.MaxInt32 + 1).ConvertToNative(reflect.TypeOf(&ptrType))
+	val, err := Int(math.MaxInt32 + 1).ConvertToNative(reflect.TypeFor[*int64]())
 	if err != nil {
 		t.Error(err)
 	} else if *val.(*int64) != math.MaxInt32+1 {

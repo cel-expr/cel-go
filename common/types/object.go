@@ -63,7 +63,7 @@ func (o *protoObj) ConvertToNative(typeDesc reflect.Type) (any, error) {
 	if reflect.TypeOf(srcPB).AssignableTo(typeDesc) {
 		return srcPB, nil
 	}
-	if reflect.TypeOf(o).AssignableTo(typeDesc) {
+	if reflect.TypeFor[*protoObj]().AssignableTo(typeDesc) {
 		return o, nil
 	}
 	switch typeDesc {
@@ -90,7 +90,7 @@ func (o *protoObj) ConvertToNative(typeDesc reflect.Type) (any, error) {
 		if typeDesc == o.typeDesc.ReflectType() {
 			return o.value, nil
 		}
-		if typeDesc.Kind() == reflect.Ptr {
+		if typeDesc.Kind() == reflect.Pointer {
 			val := reflect.New(typeDesc.Elem()).Interface()
 			dstPB, ok := val.(proto.Message)
 			if ok {

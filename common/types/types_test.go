@@ -543,7 +543,6 @@ func TestTypeToExprType(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		tc := tc
 		t.Run(tc.in.String(), func(t *testing.T) {
 			got, err := TypeToExprType(tc.in)
 			if err != nil {
@@ -632,7 +631,6 @@ func TestTypeToExprTypeInvalid(t *testing.T) {
 		},
 	}
 	for _, tc := range tests {
-		tc := tc
 		t.Run(tc.in.String(), func(t *testing.T) {
 			_, err := TypeToExprType(tc.in)
 			if err == nil || !strings.Contains(err.Error(), tc.out) {
@@ -714,7 +712,6 @@ func TestExprTypeToType(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		tc := tc
 		t.Run(tc.in.String(), func(t *testing.T) {
 			got, err := ExprTypeToType(tc.in)
 			if err != nil {
@@ -771,7 +768,6 @@ func TestExprTypeToTypeInvalid(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		tc := tc
 		t.Run(tc.in.String(), func(t *testing.T) {
 			_, err := ExprTypeToType(tc.in)
 			if err == nil || !strings.Contains(err.Error(), tc.out) {
@@ -811,7 +807,7 @@ func TestTypeConvertToType(t *testing.T) {
 }
 
 func TestTypeConvertToNative(t *testing.T) {
-	_, err := BoolType.ConvertToNative(reflect.TypeOf(true))
+	_, err := BoolType.ConvertToNative(reflect.TypeFor[bool]())
 	if err == nil {
 		t.Error("ConvertToNative() did not error")
 	}

@@ -345,7 +345,7 @@ func TestSizeCalculatorOptions(t *testing.T) {
 	t.Run("maxTraversal default limit 10000", func(t *testing.T) {
 		calc := NewSizeCalculator()
 		smallElems := make([]ref.Val, 100)
-		for i := 0; i < 100; i++ {
+		for i := range 100 {
 			smallElems[i] = Int(i)
 		}
 		smallList := NewRefValList(adapter, smallElems)
@@ -354,7 +354,7 @@ func TestSizeCalculatorOptions(t *testing.T) {
 		}
 
 		largeElems := make([]ref.Val, 10001)
-		for i := 0; i < 10001; i++ {
+		for i := range 10001 {
 			largeElems[i] = Int(i)
 		}
 		largeList := NewRefValList(adapter, largeElems)
@@ -551,7 +551,7 @@ func BenchmarkCalculateSizeAmortized(b *testing.B) {
 		b.Run(bm.name, func(b *testing.B) {
 			b.ReportAllocs()
 			calculator := NewSizeCalculator()
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				_ = calculator.ApproximateAggregateSize(bm.val)
 			}
 		})
@@ -650,7 +650,7 @@ func BenchmarkCalculateSizeDynamic(b *testing.B) {
 		b.Run(bm.name, func(b *testing.B) {
 			b.ReportAllocs()
 			calculator := NewSizeCalculator()
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				val := bm.valFn()
 				_ = calculator.ApproximateAggregateSize(val)
 			}
@@ -665,7 +665,7 @@ func BenchmarkCalculateSizeScaled(b *testing.B) {
 	for _, size := range sizes {
 		// Prepare list elements
 		listElems := make([]ref.Val, size)
-		for i := 0; i < size; i++ {
+		for i := range size {
 			listElems[i] = Int(i)
 		}
 		builtinList := NewRefValList(adapter, listElems)
@@ -673,7 +673,7 @@ func BenchmarkCalculateSizeScaled(b *testing.B) {
 
 		// Prepare map entries
 		mapEntries := make(map[ref.Val]ref.Val, size)
-		for i := 0; i < size; i++ {
+		for i := range size {
 			mapEntries[String(fmt.Sprintf("k%d", i))] = Int(i)
 		}
 		builtinMap := NewRefValMap(adapter, mapEntries)
@@ -683,28 +683,28 @@ func BenchmarkCalculateSizeScaled(b *testing.B) {
 		b.Run(fmt.Sprintf("Amortized/builtin_list/N=%d", size), func(b *testing.B) {
 			b.ReportAllocs()
 			calc := NewSizeCalculator()
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				_ = calc.ApproximateAggregateSize(builtinList)
 			}
 		})
 		b.Run(fmt.Sprintf("Amortized/custom_list/N=%d", size), func(b *testing.B) {
 			b.ReportAllocs()
 			calc := NewSizeCalculator()
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				_ = calc.ApproximateAggregateSize(customList)
 			}
 		})
 		b.Run(fmt.Sprintf("Amortized/builtin_map/N=%d", size), func(b *testing.B) {
 			b.ReportAllocs()
 			calc := NewSizeCalculator()
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				_ = calc.ApproximateAggregateSize(builtinMap)
 			}
 		})
 		b.Run(fmt.Sprintf("Amortized/custom_map/N=%d", size), func(b *testing.B) {
 			b.ReportAllocs()
 			calc := NewSizeCalculator()
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				_ = calc.ApproximateAggregateSize(customMap)
 			}
 		})
@@ -712,7 +712,7 @@ func BenchmarkCalculateSizeScaled(b *testing.B) {
 			b.ReportAllocs()
 			calc := NewSizeCalculator()
 			pureMap := customPureMapper{Mapper: builtinMap}
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				_ = calc.ApproximateAggregateSize(pureMap)
 			}
 		})
@@ -721,7 +721,7 @@ func BenchmarkCalculateSizeScaled(b *testing.B) {
 		b.Run(fmt.Sprintf("FirstTime/builtin_list/N=%d", size), func(b *testing.B) {
 			b.ReportAllocs()
 			calc := NewSizeCalculator()
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				l := NewRefValList(adapter, listElems)
 				_ = calc.ApproximateAggregateSize(l)
 			}
@@ -729,7 +729,7 @@ func BenchmarkCalculateSizeScaled(b *testing.B) {
 		b.Run(fmt.Sprintf("FirstTime/custom_list/N=%d", size), func(b *testing.B) {
 			b.ReportAllocs()
 			calc := NewSizeCalculator()
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				l := proxyLegacyList{proxy: NewRefValList(adapter, listElems)}
 				_ = calc.ApproximateAggregateSize(l)
 			}
@@ -737,7 +737,7 @@ func BenchmarkCalculateSizeScaled(b *testing.B) {
 		b.Run(fmt.Sprintf("FirstTime/builtin_map/N=%d", size), func(b *testing.B) {
 			b.ReportAllocs()
 			calc := NewSizeCalculator()
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				m := NewRefValMap(adapter, mapEntries)
 				_ = calc.ApproximateAggregateSize(m)
 			}
@@ -745,7 +745,7 @@ func BenchmarkCalculateSizeScaled(b *testing.B) {
 		b.Run(fmt.Sprintf("FirstTime/custom_map/N=%d", size), func(b *testing.B) {
 			b.ReportAllocs()
 			calc := NewSizeCalculator()
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				m := interopFoldableMap{Mapper: NewRefValMap(adapter, mapEntries)}
 				_ = calc.ApproximateAggregateSize(m)
 			}
@@ -753,7 +753,7 @@ func BenchmarkCalculateSizeScaled(b *testing.B) {
 		b.Run(fmt.Sprintf("FirstTime/custom_pure_map/N=%d", size), func(b *testing.B) {
 			b.ReportAllocs()
 			calc := NewSizeCalculator()
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				m := customPureMapper{Mapper: NewRefValMap(adapter, mapEntries)}
 				_ = calc.ApproximateAggregateSize(m)
 			}
@@ -770,14 +770,14 @@ func BenchmarkCalculateSizeScaled(b *testing.B) {
 		b.Run(fmt.Sprintf("Complexity/builtin_nested_list/Depth=%d_Width=%d", depth, width), func(b *testing.B) {
 			b.ReportAllocs()
 			calc := NewSizeCalculator()
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				_ = calc.ApproximateAggregateSize(builtinNested)
 			}
 		})
 		b.Run(fmt.Sprintf("Complexity/custom_nested_list/Depth=%d_Width=%d", depth, width), func(b *testing.B) {
 			b.ReportAllocs()
 			calc := NewSizeCalculator()
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				_ = calc.ApproximateAggregateSize(customNested)
 			}
 		})
@@ -787,13 +787,13 @@ func BenchmarkCalculateSizeScaled(b *testing.B) {
 func createNestedList(adapter Adapter, depth, width int) ref.Val {
 	if depth <= 1 {
 		elems := make([]ref.Val, width)
-		for i := 0; i < width; i++ {
+		for i := range width {
 			elems[i] = Int(i)
 		}
 		return NewRefValList(adapter, elems)
 	}
 	elems := make([]ref.Val, width)
-	for i := 0; i < width; i++ {
+	for i := range width {
 		elems[i] = createNestedList(adapter, depth-1, width)
 	}
 	return NewRefValList(adapter, elems)
@@ -802,13 +802,13 @@ func createNestedList(adapter Adapter, depth, width int) ref.Val {
 func createNestedCustomList(adapter Adapter, depth, width int) ref.Val {
 	if depth <= 1 {
 		elems := make([]ref.Val, width)
-		for i := 0; i < width; i++ {
+		for i := range width {
 			elems[i] = Int(i)
 		}
 		return proxyLegacyList{proxy: NewRefValList(adapter, elems)}
 	}
 	elems := make([]ref.Val, width)
-	for i := 0; i < width; i++ {
+	for i := range width {
 		elems[i] = createNestedCustomList(adapter, depth-1, width)
 	}
 	return proxyLegacyList{proxy: NewRefValList(adapter, elems)}
@@ -916,10 +916,8 @@ func TestAggregateSizeConcurrentAccess(t *testing.T) {
 	sharedList := NewRefValList(adapter, []ref.Val{Int(1), Int(2), Int(3)})
 	sharedMap := NewRefValMap(adapter, map[ref.Val]ref.Val{String("k"): String("v")})
 	var wg sync.WaitGroup
-	for i := 0; i < 8; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 8 {
+		wg.Go(func() {
 			calc := NewSizeCalculator()
 			if got := calc.ApproximateAggregateSize(sharedList).Size; got != 4 {
 				t.Errorf("ApproximateAggregateSize(list) got %d, want 4", got)
@@ -927,7 +925,7 @@ func TestAggregateSizeConcurrentAccess(t *testing.T) {
 			if got := calc.ApproximateAggregateSize(sharedMap).Size; got != 3 {
 				t.Errorf("ApproximateAggregateSize(map) got %d, want 3", got)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 }

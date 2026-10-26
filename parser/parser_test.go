@@ -3609,8 +3609,7 @@ func BenchmarkParse(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	b.ResetTimer()
-	for n := 0; n < b.N; n++ {
+	for b.Loop() {
 		for _, testCase := range testCases {
 			p.Parse(common.NewTextSource(testCase.I))
 		}
@@ -3808,8 +3807,7 @@ func BenchmarkByCategory(b *testing.B) {
 			for _, cat := range benchCategories {
 				b.Run(cat.name, func(b *testing.B) {
 					b.ReportAllocs()
-					b.ResetTimer()
-					for i := 0; i < b.N; i++ {
+					for b.Loop() {
 						for _, tc := range cat.cases {
 							src := common.NewTextSource(tc.I)
 							_, errs := p.Parse(src)

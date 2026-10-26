@@ -54,7 +54,7 @@ func TestSafeUint32Helpers(t *testing.T) {
 func BenchmarkIsUnknownOrError(b *testing.B) {
 	err := NewErr("test")
 	unk := &Unknown{}
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		if !(IsUnknownOrError(unk) && IsUnknownOrError(err) && !IsUnknownOrError(IntOne)) {
 			b.Fatal("IsUnknownOrError() provided an incorrect result.")
 		}

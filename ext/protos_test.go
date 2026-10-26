@@ -248,11 +248,11 @@ func TestProtosVersion(t *testing.T) {
 // msgWithExtensions generates a new example message with all possible extensions set.
 func msgWithExtensions() *proto2pb.ExampleType {
 	msg := &proto2pb.ExampleType{
-		Name: proto.String("example0"),
+		Name: new("example0"),
 	}
 	proto.SetExtension(msg, proto2pb.E_Int32Ext, int32(42))
 	proto.SetExtension(msg, proto2pb.E_Int32WrapperExt, wrapperspb.Int32(21))
-	proto.SetExtension(msg, proto2pb.E_NestedExample, &proto2pb.ExampleType{Name: proto.String("nested")})
+	proto.SetExtension(msg, proto2pb.E_NestedExample, &proto2pb.ExampleType{Name: new("nested")})
 	proto.SetExtension(msg, proto2pb.E_ExtendedExampleType_EnumExt, proto2pb.GlobalEnum_GAZ)
 	proto.SetExtension(msg, proto2pb.E_ExtendedExampleType_ExtendedExamples, []string{"example1", "example2"})
 	return msg

@@ -17,6 +17,7 @@ package decls
 import (
 	"context"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -359,13 +360,7 @@ func TestFunctionDocumentation(t *testing.T) {
 				t.Fatalf("doc.Children count was %d, wanted %d", len(doc.Children), len(tc.fn.OverloadDecls()))
 			}
 			for _, child := range doc.Children {
-				found := false
-				for _, sig := range tc.signatures {
-					if child.Signature == sig {
-						found = true
-						break
-					}
-				}
+				found := slices.Contains(tc.signatures, child.Signature)
 				if !found {
 					t.Errorf("unable to find signature: %s", child.Signature)
 				}

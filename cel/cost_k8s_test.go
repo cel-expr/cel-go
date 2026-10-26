@@ -379,7 +379,7 @@ func TestK8sStringQuoteCost(t *testing.T) {
 			expr:                "strings.quote('ABCDEFGHIJ abcdefghij') == strings.quote('ABCDEFGHIJ abcdefghij')",
 			expectEstimatedCost: cost.RangedCostEstimate(9, 11),
 			// Version 0 keeps the v0.32.0 comparison lower bound of 1 for non-empty operands.
-			expectEstimatedCostV0: estimatePtr(cost.RangedCostEstimate(7, 11)),
+			expectEstimatedCostV0: new(cost.RangedCostEstimate(7, 11)),
 			expectRuntimeCost:     9,
 		},
 	}
@@ -962,6 +962,7 @@ func (k8sTestRuntimeCostEstimator) CallCost(function, overloadID string, args []
 	return nil
 }
 
+//go:fix inline
 func estimatePtr(est cost.CostEstimate) *cost.CostEstimate {
-	return &est
+	return new(est)
 }

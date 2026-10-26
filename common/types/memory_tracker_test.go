@@ -139,7 +139,7 @@ func TestMemoryTrackerSample(t *testing.T) {
 
 	t.Run("default_interval_samples_every_value", func(t *testing.T) {
 		tracker := NewMemoryTracker()
-		for i := 0; i < 3; i++ {
+		for i := range 3 {
 			if got := tracker.Sample(1, Int(i)); got != 1 {
 				t.Errorf("Sample() got %d, want 1", got)
 			}

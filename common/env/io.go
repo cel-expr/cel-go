@@ -313,27 +313,27 @@ func (p *typeDescParser) parseTypeElem() (*TypeDesc, error) {
 
 func (p *typeDescParser) parseNamespaceIdentifier() (string, error) {
 	p.skipWhitespace()
-	var id string
+	var id strings.Builder
 	for p.pos < p.length && p.text[p.pos] != '<' {
 		c := p.text[p.pos]
 		if c == '.' {
-			id += "."
+			id.WriteString(".")
 			p.pos++ // consume '.'
 		}
 		ident, err := p.parseIdentifier()
 		if err != nil {
 			return "", err
 		}
-		id += ident
+		id.WriteString(ident)
 		p.skipWhitespace()
 		if p.pos < p.length && p.text[p.pos] != '.' {
 			break
 		}
 	}
-	if id == "" {
+	if id.String() == "" {
 		return "", fmt.Errorf("missing identifier at position %d", p.pos)
 	}
-	return id, nil
+	return id.String(), nil
 }
 
 func (p *typeDescParser) parseIdentifier() (string, error) {
@@ -443,8 +443,8 @@ func validateStrictJSON(v any, t reflect.Type) error {
 }
 
 func jsonFieldType(t reflect.Type, name string) (reflect.Type, bool) {
-	for i := range t.NumField() {
-		f := t.Field(i)
+	for f := range t.Fields() {
+		f := f
 		tag, _, _ := strings.Cut(f.Tag.Get("json"), ",")
 		if tag == name {
 			return f.Type, true

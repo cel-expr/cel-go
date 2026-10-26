@@ -595,7 +595,7 @@ func TestNewExecutionFrameGlobalsPreservesMapInput(t *testing.T) {
 		t.Fatalf("SetDefaultVars() failed: %v", err)
 	}
 
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		got, found := f.ResolveName("x")
 		if !found || got != types.Int(42) {
 			t.Fatalf("ResolveName('x') got (%v, %t), want (42, true)", got, found)

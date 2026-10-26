@@ -16,6 +16,7 @@ package cost_test
 
 import (
 	"fmt"
+	"maps"
 	"math"
 	"sort"
 	"strings"
@@ -178,9 +179,7 @@ type costBoundsAllowlist map[string]string
 func verifyCostBounds(t *testing.T, env *cel.Env, cases []costBoundsCase, allowed costBoundsAllowlist) {
 	t.Helper()
 	unseen := make(map[string]string, len(allowed))
-	for name, defect := range allowed {
-		unseen[name] = defect
-	}
+	maps.Copy(unseen, allowed)
 	for _, c := range cases {
 		res, err := runCostBoundsCase(env, c)
 		if err != nil {

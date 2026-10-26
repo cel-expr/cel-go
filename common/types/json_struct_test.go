@@ -84,7 +84,7 @@ func TestJsonStructConvertToNative_Map(t *testing.T) {
 		"second": structpb.NewStringValue("world"),
 	}}
 	mapVal := NewJSONStruct(newTestRegistry(t), structVal)
-	val, err := mapVal.ConvertToNative(reflect.TypeOf(map[string]string{}))
+	val, err := mapVal.ConvertToNative(reflect.TypeFor[map[string]string]())
 	if err != nil {
 		t.Error(err)
 	}

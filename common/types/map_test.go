@@ -141,7 +141,7 @@ func TestDynamicMapConvertToNative_Error(t *testing.T) {
 	reg := newTestRegistry(t)
 	mapVal := NewDynamicMap(reg, map[string]map[string]float32{
 		"nested": {"1": -1.0}})
-	val, err := mapVal.ConvertToNative(reflect.TypeOf(""))
+	val, err := mapVal.ConvertToNative(reflect.TypeFor[string]())
 	if err == nil {
 		t.Errorf("mapVal.ConvertToNative(string) got '%v', expected error", val)
 	}
@@ -221,7 +221,7 @@ func TestDynamicMapConvertToNative_StructPtr(t *testing.T) {
 		"m":       "hello",
 		"details": []string{"world", "universe"},
 	})
-	ts, err := mapVal.ConvertToNative(reflect.TypeOf(&testStruct{}))
+	ts, err := mapVal.ConvertToNative(reflect.TypeFor[*testStruct]())
 	if err != nil {
 		t.Error(err)
 	}
@@ -237,8 +237,7 @@ func TestDynamicMapConvertToNative_StructPtrPtr(t *testing.T) {
 		"m":       "hello",
 		"details": []string{"world", "universe"},
 	})
-	ptr := &testStruct{}
-	ts, err := mapVal.ConvertToNative(reflect.TypeOf(&ptr))
+	ts, err := mapVal.ConvertToNative(reflect.TypeFor[**testStruct]())
 	if err == nil {
 		t.Errorf("Got %v, wanted error", ts)
 	}
@@ -251,7 +250,7 @@ func TestDynamicMapConvertToNative_Struct_InvalidFieldError(t *testing.T) {
 		"details": []string{"world", "universe"},
 		"invalid": "invalid field",
 	})
-	ts, err := mapVal.ConvertToNative(reflect.TypeOf(&testStruct{}))
+	ts, err := mapVal.ConvertToNative(reflect.TypeFor[*testStruct]())
 	if err == nil {
 		t.Errorf("mapVal.ConvertToNative(struct) got %v, wanted error", ts)
 	}
@@ -264,7 +263,7 @@ func TestDynamicMapConvertToNative_Struct_EmptyFieldError(t *testing.T) {
 		"details": []string{"world", "universe"},
 		"":        "empty field",
 	})
-	ts, err := mapVal.ConvertToNative(reflect.TypeOf(&testStruct{}))
+	ts, err := mapVal.ConvertToNative(reflect.TypeFor[*testStruct]())
 	if err == nil {
 		t.Errorf("mapVal.ConvertToNative(struct) got %v, wanted error", ts)
 	}
@@ -277,7 +276,7 @@ func TestDynamicMapConvertToNative_Struct_PrivateFieldError(t *testing.T) {
 		"details": []string{"world", "universe"},
 		"private": "private field",
 	})
-	ts, err := mapVal.ConvertToNative(reflect.TypeOf(&testStruct{}))
+	ts, err := mapVal.ConvertToNative(reflect.TypeFor[*testStruct]())
 	if err == nil {
 		t.Errorf("mapVal.ConvertToNative(struct) got %v, wanted error", ts)
 	}
@@ -290,7 +289,7 @@ func TestStringMapConvertToNative(t *testing.T) {
 		"second": "world",
 	}
 	mapVal := NewStringStringMap(reg, strMap)
-	val, err := mapVal.ConvertToNative(reflect.TypeOf(strMap))
+	val, err := mapVal.ConvertToNative(reflect.TypeFor[map[string]string]())
 	if err != nil {
 		t.Fatalf("mapVal.ConvertToNative(map[string]string) failed: %v", err)
 	}
@@ -802,7 +801,7 @@ func TestProtoMap(t *testing.T) {
 	if mapVal.Equal(NullValue) != False {
 		t.Errorf("mapVal.Equal(NullValue) got %v, wanted false", mapVal.Equal(NullValue))
 	}
-	convMap, err := mapVal.ConvertToNative(reflect.TypeOf(strMap))
+	convMap, err := mapVal.ConvertToNative(reflect.TypeFor[map[string]string]())
 	if err != nil {
 		t.Fatalf("mapVal.ConvertToNative() failed: %v", err)
 	}
@@ -898,7 +897,7 @@ func TestProtoMapConvertToNative(t *testing.T) {
 	if !ok {
 		t.Fatalf("obj.Get('map_string_string') did not return map: (%T)%v", field, field)
 	}
-	convMap, err := mapVal.ConvertToNative(reflect.TypeOf(map[string]any{}))
+	convMap, err := mapVal.ConvertToNative(reflect.TypeFor[map[string]any]())
 	if err != nil {
 		t.Fatalf("mapVal.ConvertToNative() failed: %v", err)
 	}
@@ -927,7 +926,7 @@ func TestProtoMapConvertToNative(t *testing.T) {
 	if mapVal4.Equal(mapVal) != True || mapVal.Equal(mapVal4) != True {
 		t.Errorf("mapVal4.Equal(mapVal) returned false, wanted true")
 	}
-	convMap, err = mapVal.ConvertToNative(reflect.TypeOf(&pb.Map{}))
+	convMap, err = mapVal.ConvertToNative(reflect.TypeFor[*pb.Map]())
 	if err != nil {
 		t.Fatalf("mapVal.ConvertToNative() failed: %v", err)
 	}
@@ -948,11 +947,11 @@ func TestProtoMapConvertToNative(t *testing.T) {
 	if err == nil {
 		t.Fatalf("mapVal.ConvertToNative() succeeded for invalid type")
 	}
-	_, err = mapVal.ConvertToNative(reflect.TypeOf(map[int32]string{}))
+	_, err = mapVal.ConvertToNative(reflect.TypeFor[map[int32]string]())
 	if err == nil {
 		t.Fatalf("mapVal.ConvertToNative() succeeded for invalid type")
 	}
-	_, err = mapVal.ConvertToNative(reflect.TypeOf(map[string]int64{}))
+	_, err = mapVal.ConvertToNative(reflect.TypeFor[map[string]int64]())
 	if err == nil {
 		t.Fatalf("mapVal.ConvertToNative() succeeded for invalid type")
 	}
@@ -982,7 +981,7 @@ func TestProtoMapConvertToNative_NestedProto(t *testing.T) {
 	if !ok {
 		t.Fatalf("obj.Get('map_int64_nested_type') did not return map: (%T)%v", field, field)
 	}
-	convMap, err := mapVal.ConvertToNative(reflect.TypeOf(map[int32]any{}))
+	convMap, err := mapVal.ConvertToNative(reflect.TypeFor[map[int32]any]())
 	if err != nil {
 		t.Fatalf("mapVal.ConvertToNative() failed: %v", err)
 	}
@@ -991,7 +990,7 @@ func TestProtoMapConvertToNative_NestedProto(t *testing.T) {
 			t.Errorf("got differing values for key %q: got %v, wanted: %v", k, nestedTypeMap[int64(k)], v)
 		}
 	}
-	convMap, err = mapVal.ConvertToNative(reflect.TypeOf(map[int32]proto.Message{}))
+	convMap, err = mapVal.ConvertToNative(reflect.TypeFor[map[int32]proto.Message]())
 	if err != nil {
 		t.Fatalf("mapVal.ConvertToNative() failed: %v", err)
 	}
@@ -1843,7 +1842,7 @@ func TestProtoMapFullCoverage(t *testing.T) {
 		{
 			name: "convert to native error",
 			test: func(t *testing.T) {
-				if _, err := pm.ConvertToNative(reflect.TypeOf(123)); err == nil {
+				if _, err := pm.ConvertToNative(reflect.TypeFor[int]()); err == nil {
 					t.Errorf("ConvertToNative(int) expected error, got nil")
 				}
 			},
@@ -1906,10 +1905,10 @@ func TestMapConvertToNativeErrorCases(t *testing.T) {
 		target    reflect.Type
 		wantError bool
 	}{
-		{name: "target not a map", mapper: m, target: reflect.TypeOf("string"), wantError: true},
-		{name: "value conversion error", mapper: m, target: reflect.TypeOf(map[string]int{}), wantError: true},
-		{name: "key conversion error", mapper: m, target: reflect.TypeOf(map[int]string{}), wantError: true},
-		{name: "convert to map[any]any", mapper: m, target: reflect.TypeOf(map[any]any{}), wantError: false},
+		{name: "target not a map", mapper: m, target: reflect.TypeFor[string](), wantError: true},
+		{name: "value conversion error", mapper: m, target: reflect.TypeFor[map[string]int](), wantError: true},
+		{name: "key conversion error", mapper: m, target: reflect.TypeFor[map[int]string](), wantError: true},
+		{name: "convert to map[any]any", mapper: m, target: reflect.TypeFor[map[any]any](), wantError: false},
 		{name: "convert to any", mapper: m, target: reflect.TypeFor[any](), wantError: false},
 		{name: "non-string key to anyValueType", mapper: intKeyMap, target: anyValueType, wantError: true},
 		{name: "non-string key to JSONStructType", mapper: intKeyMap, target: JSONStructType, wantError: true},

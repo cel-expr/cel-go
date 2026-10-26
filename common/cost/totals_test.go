@@ -107,7 +107,6 @@ func TestElemTotalEstimate(t *testing.T) {
 		},
 	}
 	for _, tc := range tests {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			if got := estimateModelCost(t, ElemTotal(Arg(0)), tc.strategy, tc.arg); got != tc.want {
 				t.Errorf("ElemTotal(Arg(0)) estimate = %v, want %v", got, tc.want)
@@ -139,7 +138,6 @@ func TestTotalsOfTypedOperands(t *testing.T) {
 			argType: mapType, arg: FixedSizeEstimate(9), want: RangedCostEstimate(0, 8)},
 	}
 	for _, tc := range tests {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			m := Overload("test", argumentsOnly(), EvalCost(tc.total))
 			est := m.FunctionEstimatorWithOptions(WithSizingStrategy(tc.strategy))(

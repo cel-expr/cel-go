@@ -293,7 +293,6 @@ func TestParse(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		tc := tc
 		t.Run(tc.commandLine, func(t *testing.T) {
 			cmd, err := Parse(tc.commandLine)
 			if err != nil {

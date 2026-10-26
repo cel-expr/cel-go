@@ -139,17 +139,17 @@ func TestStandardOptionalModels(t *testing.T) {
 		// wantSize is nil where the model reports no result size.
 		wantSize *SizeEstimate
 	}{
-		{overload: overloads.OptionalNone, version: 1, wantCost: FixedCostEstimate(1), wantSize: ptr(FixedSizeEstimate(1))},
+		{overload: overloads.OptionalNone, version: 1, wantCost: FixedCostEstimate(1), wantSize: new(FixedSizeEstimate(1))},
 		{overload: overloads.OptionalNone, version: 0, wantCost: FixedCostEstimate(1)},
-		{overload: overloads.OptionalOf, args: []AstNode{value}, version: 1, wantCost: FixedCostEstimate(1), wantSize: ptr(RangedSizeEstimate(4, 6))},
+		{overload: overloads.OptionalOf, args: []AstNode{value}, version: 1, wantCost: FixedCostEstimate(1), wantSize: new(RangedSizeEstimate(4, 6))},
 		{overload: overloads.OptionalOf, args: []AstNode{value}, version: 0, wantCost: FixedCostEstimate(1)},
 		// ofNonZeroValue may be empty, so its value may be 0.
-		{overload: overloads.OptionalOfNonZeroValue, args: []AstNode{value}, version: 1, wantCost: FixedCostEstimate(1), wantSize: ptr(RangedSizeEstimate(1, 6))},
+		{overload: overloads.OptionalOfNonZeroValue, args: []AstNode{value}, version: 1, wantCost: FixedCostEstimate(1), wantSize: new(RangedSizeEstimate(1, 6))},
 		{overload: overloads.OptionalValue, target: optTarget, version: 1, wantCost: FixedCostEstimate(1), wantSize: &held},
 		{overload: overloads.OptionalValue, target: optTarget, version: 0, wantCost: FixedCostEstimate(1)},
 		// orValue returns the receiver's value or the alternative; or returns either optional.
-		{overload: overloads.OptionalOrValueValue, target: optTarget, args: []AstNode{alt}, version: 1, wantCost: FixedCostEstimate(0), wantSize: ptr(RangedSizeEstimate(3, 7))},
-		{overload: overloads.OptionalOrOptional, target: optTarget, args: []AstNode{optAlt}, version: 1, wantCost: FixedCostEstimate(0), wantSize: ptr(RangedSizeEstimate(4, 8))},
+		{overload: overloads.OptionalOrValueValue, target: optTarget, args: []AstNode{alt}, version: 1, wantCost: FixedCostEstimate(0), wantSize: new(RangedSizeEstimate(3, 7))},
+		{overload: overloads.OptionalOrOptional, target: optTarget, args: []AstNode{optAlt}, version: 1, wantCost: FixedCostEstimate(0), wantSize: new(RangedSizeEstimate(4, 8))},
 		// Before version 1 these were unmodeled calls, which v0.32.0 estimated at 1.
 		{overload: overloads.OptionalOrValueValue, target: optTarget, args: []AstNode{alt}, version: 0, wantCost: FixedCostEstimate(1)},
 		{overload: overloads.OptionalOrOptional, target: optTarget, args: []AstNode{optAlt}, version: 0, wantCost: FixedCostEstimate(1)},
@@ -176,8 +176,9 @@ func TestStandardOptionalModels(t *testing.T) {
 	}
 }
 
+//go:fix inline
 func ptr[T any](v T) *T {
-	return &v
+	return new(v)
 }
 
 // TestComparisonEstimate checks the estimate of a comparison at each cost model version.

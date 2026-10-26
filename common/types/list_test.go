@@ -99,7 +99,7 @@ func TestBaseListContains(t *testing.T) {
 
 func TestBaseListConvertToNative(t *testing.T) {
 	list := NewDynamicList(newTestRegistry(t), []float64{1.0, 2.0})
-	if protoList, err := list.ConvertToNative(reflect.TypeOf([]float32{})); err != nil {
+	if protoList, err := list.ConvertToNative(reflect.TypeFor[[]float32]()); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(protoList, []float32{1.0, 2.0}) {
 		t.Errorf("Could not convert to []float32: %v", protoList)
@@ -335,7 +335,7 @@ func TestConcatListAdd(t *testing.T) {
 	if len(list) != len(expected) {
 		t.Errorf("Got '%v', expected '%v'", list, expected)
 	} else {
-		for i := 0; i < len(list); i++ {
+		for i := range list {
 			if expected[i] != list[i] {
 				t.Errorf("elem[%d] Got '%v', expected '%v'",
 					i, list[i], expected[i])
@@ -404,7 +404,7 @@ func TestConcatListConvertToNativeListInterface(t *testing.T) {
 	listA := NewDynamicList(reg, []float32{1.0, 2.0})
 	listB := NewStringList(reg, []string{"3.0"})
 	list := listA.Add(listB)
-	iface, err := list.ConvertToNative(reflect.TypeOf([]any{}))
+	iface, err := list.ConvertToNative(reflect.TypeFor[[]any]())
 	if err != nil {
 		t.Errorf("Got '%v', expected '%v'", err, list)
 	}
@@ -916,7 +916,7 @@ func TestConcatListSizeCached(t *testing.T) {
 	reg := newTestRegistry(t)
 	// Build a deep chain of concat lists
 	var list traits.Lister = NewDynamicList(reg, []int64{0})
-	for i := 0; i < 200; i++ {
+	for range 200 {
 		list = list.Add(NewDynamicList(reg, []int64{0})).(traits.Lister)
 	}
 	// Size() should return instantly since it's precomputed
@@ -925,7 +925,7 @@ func TestConcatListSizeCached(t *testing.T) {
 		t.Errorf("Expected size 201, got %v", size)
 	}
 	// Call Size() many times to confirm no quadratic behavior
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		if list.Size() != Int(201) {
 			t.Errorf("Size() returned inconsistent value on call %d", i)
 		}
@@ -1222,7 +1222,7 @@ func TestList_ComprehensiveCoverage(t *testing.T) {
 			t.Errorf("vStruct string was empty")
 		}
 		// ConvertToNative on dynamic slice
-		if nativeVal, err := vStruct.ConvertToNative(reflect.TypeOf([]customMultiWordStruct{})); err != nil || !reflect.DeepEqual(nativeVal, sVal) {
+		if nativeVal, err := vStruct.ConvertToNative(reflect.TypeFor[[]customMultiWordStruct]()); err != nil || !reflect.DeepEqual(nativeVal, sVal) {
 			t.Errorf("vStruct ConvertToNative got %v, %v", nativeVal, err)
 		}
 
@@ -1407,7 +1407,7 @@ func TestList_ComprehensiveCoverage(t *testing.T) {
 		if blNative, err := bl.ConvertToNative(reflect.TypeOf(bl)); err != nil || blNative != bl {
 			t.Errorf("ConvertToNative baseList got %v, %v", blNative, err)
 		}
-		if _, err := bl.ConvertToNative(reflect.TypeOf(123)); err == nil {
+		if _, err := bl.ConvertToNative(reflect.TypeFor[int]()); err == nil {
 			t.Errorf("ConvertToNative non-slice non-array expected error")
 		}
 		// Convert to array
@@ -1416,7 +1416,7 @@ func TestList_ComprehensiveCoverage(t *testing.T) {
 			t.Errorf("ConvertToNative array got %v, %v", arrVal, err)
 		}
 		// Convert with element error
-		if _, err := bl.ConvertToNative(reflect.TypeOf([]int{})); err == nil {
+		if _, err := bl.ConvertToNative(reflect.TypeFor[[]int]()); err == nil {
 			t.Errorf("ConvertToNative with incompatible element expected error")
 		}
 
@@ -1778,7 +1778,7 @@ func testSliceListType[T any](t *testing.T, adapter Adapter, slice []T, matchVal
 	}
 
 	// ConvertToNative
-	if native, err := l.ConvertToNative(reflect.TypeOf(slice)); err != nil || !reflect.DeepEqual(native, slice) {
+	if native, err := l.ConvertToNative(reflect.TypeFor[[]T]()); err != nil || !reflect.DeepEqual(native, slice) {
 		t.Errorf("ConvertToNative got %v, %v", native, err)
 	}
 

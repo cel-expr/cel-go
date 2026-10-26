@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -656,11 +657,11 @@ func (l *concatList) Value() any {
 	l.valueOnce.Do(func() {
 		merged := make([]ref.Val, l.Size().(Int))
 		prevLen := l.prevList.Size().(Int)
-		for i := Int(0); i < prevLen; i++ {
+		for i := range prevLen {
 			merged[i] = l.prevList.Get(i)
 		}
 		nextLen := l.nextList.Size().(Int)
-		for j := Int(0); j < nextLen; j++ {
+		for j := range nextLen {
 			merged[prevLen+j] = l.nextList.Get(j)
 		}
 		l.value = merged
@@ -737,7 +738,7 @@ type interopFoldableList struct {
 // range of elements of the list.
 func (l interopFoldableList) Fold(f traits.Folder) {
 	sz := l.Size().(Int)
-	for i := Int(0); i < sz; i++ {
+	for i := range sz {
 		if !f.FoldEntry(i, l.Get(i)) {
 			break
 		}
@@ -872,30 +873,24 @@ func (l *sliceList[T]) Contains(elem ref.Val) ref.Val {
 	case *sliceList[string]:
 		if strVal, ok := elem.(String); ok {
 			str := string(strVal)
-			for _, e := range s.elems {
-				if e == str {
-					return True
-				}
+			if slices.Contains(s.elems, str) {
+				return True
 			}
 			return False
 		}
 	case *sliceList[int64]:
 		if intVal, ok := elem.(Int); ok {
 			iv := int64(intVal)
-			for _, e := range s.elems {
-				if e == iv {
-					return True
-				}
+			if slices.Contains(s.elems, iv) {
+				return True
 			}
 			return False
 		}
 	case *sliceList[int]:
 		if intVal, ok := elem.(Int); ok {
 			iv := int(intVal)
-			for _, e := range s.elems {
-				if e == iv {
-					return True
-				}
+			if slices.Contains(s.elems, iv) {
+				return True
 			}
 			return False
 		}
@@ -903,10 +898,8 @@ func (l *sliceList[T]) Contains(elem ref.Val) ref.Val {
 		if intVal, ok := elem.(Int); ok {
 			iv := int32(intVal)
 			if int64(iv) == int64(intVal) {
-				for _, e := range s.elems {
-					if e == iv {
-						return True
-					}
+				if slices.Contains(s.elems, iv) {
+					return True
 				}
 			}
 			return False
@@ -914,20 +907,16 @@ func (l *sliceList[T]) Contains(elem ref.Val) ref.Val {
 	case *sliceList[uint64]:
 		if uintVal, ok := elem.(Uint); ok {
 			uv := uint64(uintVal)
-			for _, e := range s.elems {
-				if e == uv {
-					return True
-				}
+			if slices.Contains(s.elems, uv) {
+				return True
 			}
 			return False
 		}
 	case *sliceList[uint]:
 		if uintVal, ok := elem.(Uint); ok {
 			uv := uint(uintVal)
-			for _, e := range s.elems {
-				if e == uv {
-					return True
-				}
+			if slices.Contains(s.elems, uv) {
+				return True
 			}
 			return False
 		}
@@ -935,10 +924,8 @@ func (l *sliceList[T]) Contains(elem ref.Val) ref.Val {
 		if uintVal, ok := elem.(Uint); ok {
 			uv := uint32(uintVal)
 			if uint64(uv) == uint64(uintVal) {
-				for _, e := range s.elems {
-					if e == uv {
-						return True
-					}
+				if slices.Contains(s.elems, uv) {
+					return True
 				}
 			}
 			return False
@@ -946,26 +933,22 @@ func (l *sliceList[T]) Contains(elem ref.Val) ref.Val {
 	case *sliceList[float64]:
 		if dblVal, ok := elem.(Double); ok {
 			dv := float64(dblVal)
-			for _, e := range s.elems {
-				if e == dv {
-					return True
-				}
+			if slices.Contains(s.elems, dv) {
+				return True
 			}
 			return False
 		}
 	case *sliceList[bool]:
 		if boolVal, ok := elem.(Bool); ok {
 			bv := bool(boolVal)
-			for _, e := range s.elems {
-				if e == bv {
-					return True
-				}
+			if slices.Contains(s.elems, bv) {
+				return True
 			}
 			return False
 		}
 	}
 	n := l.len()
-	for i := 0; i < n; i++ {
+	for i := range n {
 		cmp := elem.Equal(l.getElem(i))
 		if b, ok := cmp.(Bool); ok && b == True {
 			return True
@@ -1182,7 +1165,7 @@ func (l *sliceList[T]) Fold(f traits.Folder) {
 		if s.meta != nil && s.meta.elemStride > 0 && s.elemTypePtr != nil {
 			stride := s.meta.elemStride
 			n := len(s.elems) / int(stride)
-			for i := 0; i < n; i++ {
+			for i := range n {
 				if !f.FoldEntry(i, packAny(s.elemTypePtr, unsafe.Pointer(&s.elems[uintptr(i)*stride]))) {
 					break
 				}
@@ -1278,7 +1261,7 @@ func (l *sliceList[T]) AggregateSize(sizer AggregateSizer) uint32 {
 	if total == 0 {
 		total = uint32(1)
 		n := l.len()
-		for i := 0; i < n; i++ {
+		for i := range n {
 			total = safeAddUint32(total, sizer.AggregateSize(l.getElem(i)))
 		}
 	}
@@ -1300,7 +1283,7 @@ func (l *sliceList[T]) String() string {
 	var sb strings.Builder
 	sb.WriteString("[")
 	n := l.len()
-	for i := 0; i < n; i++ {
+	for i := range n {
 		if l.meta != nil {
 			sb.WriteString(fmt.Sprintf("%v", l.getElem(i).Value()))
 		} else {

@@ -352,7 +352,6 @@ func TestCostSizingStrategyComparison(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			estimator := testCostEstimator{hints: tc.hints}
 
@@ -753,7 +752,6 @@ func TestCostModelVersionPinsTracking(t *testing.T) {
 		{name: "latest", wantEst: cost.FixedCostEstimate(2), want: 2},
 	}
 	for _, tc := range tests {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			env, err := NewEnv(tc.opts...)
 			if err != nil {
@@ -817,7 +815,6 @@ func TestSinceModelVersionHandoff(t *testing.T) {
 		},
 	}
 	for _, tc := range tests {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			env, err := NewEnv(append([]EnvOption{lib()}, tc.opts...)...)
 			if err != nil {

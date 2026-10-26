@@ -194,7 +194,7 @@ func unescapeChar(s string, isBytes bool) (value rune, encode bool, tail string,
 			return
 		}
 		v := rune(c - '0')
-		for j := 0; j < 2; j++ {
+		for j := range 2 {
 			x := s[j]
 			if x < '0' || x > '7' {
 				err = errors.New("unable to unescape octal sequence in string")

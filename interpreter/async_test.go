@@ -102,8 +102,7 @@ func TestComputeResultWithoutContext(t *testing.T) {
 }
 
 func TestComputeResultResolves(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	frame, closeFrame := newTestFrame(t, ctx)
 	defer closeFrame()
 
@@ -272,7 +271,6 @@ func TestHashCall(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			got := hashCall(tc.input.id, tc.input.overload, tc.input.args)
 			if got != tc.wantHash {
@@ -428,8 +426,7 @@ func TestTrackerRegistrationLookup(t *testing.T) {
 }
 
 func TestAsyncObserverLifecycle(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	frame, closeFrame := newTestFrame(t, ctx)
 	defer closeFrame()
 
@@ -550,8 +547,7 @@ func asyncControllable(release <-chan struct{}, live, maxLive *atomic.Int32) fun
 }
 
 func TestLaunchAdmissionAndBounding(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	frame, closeFrame := newTestFrame(t, ctx)
 	defer closeFrame()
 
@@ -609,8 +605,7 @@ func TestLaunchAdmissionAndBounding(t *testing.T) {
 }
 
 func TestLaunchUnlimitedWhenNoSemaphore(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	frame, closeFrame := newTestFrame(t, ctx)
 	defer closeFrame()
 	// No SetAsyncMaxConcurrency -> nil semaphore -> all calls admitted in one pass.
@@ -625,7 +620,7 @@ func TestLaunchUnlimitedWhenNoSemaphore(t *testing.T) {
 	impl := asyncControllable(release, &live, &maxLive)
 
 	const total = 5
-	for i := 0; i < total; i++ {
+	for i := range total {
 		res := frame.ComputeResult(int64(i+1), "fn", "fn_int", impl, []ref.Val{types.Int(int64(i))})
 		if unk, ok := res.(*types.Unknown); ok {
 			frame.DispatchPendingAsyncCalls(unk.IDs())
@@ -764,8 +759,7 @@ func TestAsyncCallStateMatches(t *testing.T) {
 }
 
 func TestExecutionFrameChildSharesAsyncContext(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	frame, closeFrame := newTestFrame(t, ctx)
 	defer closeFrame()
 
@@ -849,8 +843,7 @@ func TestEvalAsyncFuncGetters(t *testing.T) {
 }
 
 func TestEvalAsyncFuncLifecycle(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	frame, closeFrame := newTestFrame(t, ctx)
 	defer closeFrame()
 
@@ -899,8 +892,7 @@ func TestEvalAsyncFuncLifecycle(t *testing.T) {
 }
 
 func TestEvalAsyncFuncEarlyReturn(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	frame, closeFrame := newTestFrame(t, ctx)
 	defer closeFrame()
 
@@ -1036,8 +1028,7 @@ func TestAsyncWithTraceAndExhaustiveEval(t *testing.T) {
 		t.Fatalf("NewInterpretable failed: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	frame, err := NewExecutionFrame(EmptyActivation())
 	if err != nil {
 		t.Fatalf("NewExecutionFrame failed: %v", err)

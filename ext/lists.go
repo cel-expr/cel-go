@@ -611,7 +611,7 @@ func sortListByAssociatedKeys(adapt types.Adapter, list, keys traits.Lister) (re
 	}
 
 	sortedIndices := make([]ref.Val, 0, listLength)
-	for i := types.IntZero; i < listLength; i++ {
+	for i := range listLength {
 		sortedIndices = append(sortedIndices, i)
 	}
 
@@ -688,7 +688,7 @@ func distinctList(adapt types.Adapter, list traits.Lister) (ref.Val, error) {
 		return list, nil
 	}
 	uniqueList := make([]ref.Val, 0, listLength)
-	for i := types.IntZero; i < listLength; i++ {
+	for i := range listLength {
 		val := list.Get(i)
 		seen := false
 		for j := types.IntZero; j < types.Int(len(uniqueList)); j++ {
@@ -1087,7 +1087,7 @@ func literalFlattenLengthAnyDepth(expr ast.Expr) (cost.SizeEstimate, bool) {
 		return cost.SizeEstimate{}, false
 	}
 	var res *cost.SizeEstimate
-	for d := uint64(0); d < levels; d++ {
+	for d := range levels {
 		sz, ok := literalFlattenLength(expr, d)
 		if !ok {
 			return cost.SizeEstimate{}, false

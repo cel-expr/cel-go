@@ -65,11 +65,11 @@ func TestOptionalGetValue(t *testing.T) {
 }
 
 func TestOptionalConvertToNative(t *testing.T) {
-	out, err := OptionalNone.ConvertToNative(reflect.TypeOf(1))
+	out, err := OptionalNone.ConvertToNative(reflect.TypeFor[int]())
 	if err == nil {
 		t.Errorf("OptionalNone.GetValue() got %v, wanted error", out)
 	}
-	out, err = OptionalOf(String("hello")).ConvertToNative(reflect.TypeOf(""))
+	out, err = OptionalOf(String("hello")).ConvertToNative(reflect.TypeFor[string]())
 	if err != nil {
 		t.Fatalf("OptionalOf('hello').ConvertToNative(string) failed: %v", err)
 	}

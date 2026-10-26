@@ -378,7 +378,7 @@ func benchmarkMemoryTracker(b *testing.B, expr string, vars []*decls.VariableDec
 
 	b.ResetTimer()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		prg.Eval(frame)
 	}
 }
@@ -504,7 +504,7 @@ func runOptionsBenchmark(b *testing.B, expr string, vars []*decls.VariableDecl, 
 
 	b.ResetTimer()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		prg.Eval(frame)
 	}
 }

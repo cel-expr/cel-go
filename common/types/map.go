@@ -97,9 +97,7 @@ func NewProtoMap(adapter Adapter, value *pb.Map) traits.Mapper {
 // NewMutableMap constructs a mutable map from an adapter and a set of map values.
 func NewMutableMap(adapter Adapter, mutableValues map[ref.Val]ref.Val) traits.MutableMapper {
 	mutableCopy := make(map[ref.Val]ref.Val, len(mutableValues))
-	for k, v := range mutableValues {
-		mutableCopy[k] = v
-	}
+	maps.Copy(mutableCopy, mutableValues)
 	return &mutableMap{
 		nativeMap: &nativeMap[ref.Val, ref.Val]{
 			Adapter: adapter,
@@ -178,7 +176,7 @@ func convertMapToNative(m traits.Mapper, val any, typeDesc reflect.Type) (any, e
 		return anypb.New(json.(proto.Message))
 	case JSONValueType, JSONStructType:
 		jsonEntries, err :=
-			m.ConvertToNative(reflect.TypeOf(map[string]*structpb.Value{}))
+			m.ConvertToNative(reflect.TypeFor[map[string]*structpb.Value]())
 		if err != nil {
 			return nil, err
 		}
@@ -191,10 +189,10 @@ func convertMapToNative(m traits.Mapper, val any, typeDesc reflect.Type) (any, e
 
 	// Unwrap pointers, but track their use.
 	isPtr := false
-	if typeDesc.Kind() == reflect.Ptr {
+	if typeDesc.Kind() == reflect.Pointer {
 		tk := typeDesc
 		typeDesc = typeDesc.Elem()
-		if typeDesc.Kind() == reflect.Ptr {
+		if typeDesc.Kind() == reflect.Pointer {
 			return nil, fmt.Errorf("unsupported type conversion to '%v'", tk)
 		}
 		isPtr = true
@@ -1135,7 +1133,7 @@ func (m *protoMap) ConvertToNative(typeDesc reflect.Type) (any, error) {
 		return anypb.New(json.(proto.Message))
 	case JSONValueType, JSONStructType:
 		jsonEntries, err :=
-			m.ConvertToNative(reflect.TypeOf(map[string]*structpb.Value{}))
+			m.ConvertToNative(reflect.TypeFor[map[string]*structpb.Value]())
 		if err != nil {
 			return nil, err
 		}
@@ -1147,11 +1145,11 @@ func (m *protoMap) ConvertToNative(typeDesc reflect.Type) (any, error) {
 		return structpb.NewStructValue(jsonMap), nil
 	}
 	switch typeDesc.Kind() {
-	case reflect.Struct, reflect.Ptr:
-		if reflect.TypeOf(m.value).AssignableTo(typeDesc) {
+	case reflect.Struct, reflect.Pointer:
+		if reflect.TypeFor[*pb.Map]().AssignableTo(typeDesc) {
 			return m.value, nil
 		}
-		if reflect.TypeOf(m).AssignableTo(typeDesc) {
+		if reflect.TypeFor[*protoMap]().AssignableTo(typeDesc) {
 			return m, nil
 		}
 	}

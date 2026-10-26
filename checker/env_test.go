@@ -70,7 +70,7 @@ func TestCopyDeclarations(t *testing.T) {
 }
 
 func BenchmarkNewStdEnv(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		env, err := NewEnv(containers.DefaultContainer, newTestRegistry(b))
 		if err != nil {
 			b.Fatalf("NewEnv() failed: %v", err)
@@ -205,5 +205,3 @@ func TestTypeErrorsCheckUndeclared(t *testing.T) {
 		t.Errorf("checkUndeclaredIdent with single qualifier = true, want false")
 	}
 }
-
-

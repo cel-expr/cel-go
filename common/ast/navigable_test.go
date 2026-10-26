@@ -274,7 +274,7 @@ func TestExceedsDepthBoundedTraversal(t *testing.T) {
 	const depth = 300
 	fac := ast.NewExprFactory()
 	expr := fac.NewLiteral(1, types.Bool(true))
-	for i := 0; i < depth; i++ {
+	for i := range depth {
 		expr = fac.NewCall(int64(i+2), operators.LogicalNot, expr)
 	}
 	deep := ast.NewAST(expr, ast.NewSourceInfo(nil))

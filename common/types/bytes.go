@@ -35,7 +35,7 @@ type Bytes []byte
 
 var (
 	// byteWrapperType golang reflected type for protobuf bytes wrapper type.
-	byteWrapperType = reflect.TypeOf(&wrapperspb.BytesValue{})
+	byteWrapperType = reflect.TypeFor[*wrapperspb.BytesValue]()
 )
 
 // Add implements traits.Adder interface method by concatenating byte sequences.
@@ -74,7 +74,7 @@ func (b Bytes) ConvertToNative(typeDesc reflect.Type) (any, error) {
 		return refArr.Interface(), nil
 	case reflect.Slice:
 		return reflect.ValueOf(b).Convert(typeDesc).Interface(), nil
-	case reflect.Ptr:
+	case reflect.Pointer:
 		switch typeDesc {
 		case anyValueType:
 			// Primitives must be wrapped before being set on an Any field.
@@ -94,7 +94,7 @@ func (b Bytes) ConvertToNative(typeDesc reflect.Type) (any, error) {
 		if reflect.TypeOf(bv).Implements(typeDesc) {
 			return bv, nil
 		}
-		if reflect.TypeOf(b).Implements(typeDesc) {
+		if reflect.TypeFor[Bytes]().Implements(typeDesc) {
 			return b, nil
 		}
 	}

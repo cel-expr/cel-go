@@ -41,7 +41,7 @@ func durationOf(d time.Duration) Duration {
 }
 
 var (
-	durationValueType = reflect.TypeOf(&dpb.Duration{})
+	durationValueType = reflect.TypeFor[*dpb.Duration]()
 
 	durationZeroArgOverloads = map[string]func(ref.Val) ref.Val{
 		overloads.TimeGetHours:        DurationGetHours,
@@ -93,10 +93,10 @@ func (d Duration) Compare(other ref.Val) ref.Val {
 // ConvertToNative implements ref.Val.ConvertToNative.
 func (d Duration) ConvertToNative(typeDesc reflect.Type) (any, error) {
 	// If the duration is already assignable to the desired type return it.
-	if reflect.TypeOf(d.Duration).AssignableTo(typeDesc) {
+	if reflect.TypeFor[time.Duration]().AssignableTo(typeDesc) {
 		return d.Duration, nil
 	}
-	if reflect.TypeOf(d).AssignableTo(typeDesc) {
+	if reflect.TypeFor[Duration]().AssignableTo(typeDesc) {
 		return d, nil
 	}
 	switch typeDesc {

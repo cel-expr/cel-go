@@ -146,14 +146,14 @@ func TestDoubleConvertToNative_Any(t *testing.T) {
 }
 
 func TestDoubleConvertToNative_Error(t *testing.T) {
-	val, err := Double(-10000).ConvertToNative(reflect.TypeOf(""))
+	val, err := Double(-10000).ConvertToNative(reflect.TypeFor[string]())
 	if err == nil {
 		t.Errorf("Got '%v', expected error", val)
 	}
 }
 
 func TestDoubleConvertToNative_Float32(t *testing.T) {
-	val, err := Double(3.1415).ConvertToNative(reflect.TypeOf(float32(0)))
+	val, err := Double(3.1415).ConvertToNative(reflect.TypeFor[float32]())
 	if err != nil {
 		t.Error(err)
 	} else if val.(float32) != 3.1415 {
@@ -162,7 +162,7 @@ func TestDoubleConvertToNative_Float32(t *testing.T) {
 }
 
 func TestDoubleConvertToNative_Float64(t *testing.T) {
-	val, err := Double(30000000.1).ConvertToNative(reflect.TypeOf(float64(0)))
+	val, err := Double(30000000.1).ConvertToNative(reflect.TypeFor[float64]())
 	if err != nil {
 		t.Error(err)
 	} else if val.(float64) != 30000000.1 {
@@ -206,8 +206,7 @@ func TestDoubleConvertToNative_Json(t *testing.T) {
 }
 
 func TestDoubleConvertToNative_Ptr_Float32(t *testing.T) {
-	ptrType := float32(0)
-	val, err := Double(3.1415).ConvertToNative(reflect.TypeOf(&ptrType))
+	val, err := Double(3.1415).ConvertToNative(reflect.TypeFor[*float32]())
 	if err != nil {
 		t.Error(err)
 	} else if *val.(*float32) != 3.1415 {
@@ -216,8 +215,7 @@ func TestDoubleConvertToNative_Ptr_Float32(t *testing.T) {
 }
 
 func TestDoubleConvertToNative_Ptr_Float64(t *testing.T) {
-	ptrType := float64(0)
-	val, err := Double(30000000.1).ConvertToNative(reflect.TypeOf(&ptrType))
+	val, err := Double(30000000.1).ConvertToNative(reflect.TypeFor[*float64]())
 	if err != nil {
 		t.Error(err)
 	} else if *val.(*float64) != 30000000.1 {

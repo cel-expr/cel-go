@@ -17,6 +17,7 @@ package cel
 import (
 	"context"
 	"errors"
+	"maps"
 	"math"
 	"reflect"
 	"sort"
@@ -1044,14 +1045,10 @@ func TestConstantFoldingOptimizer(t *testing.T) {
 				"o": &proto3pb.TestAllTypes{SingleInt64: 42, NestedType: &proto3pb.TestAllTypes_SingleNestedMessage{SingleNestedMessage: &proto3pb.TestAllTypes_NestedMessage{Bb: 42}}, RepeatedInt32: []int32{1, 2, 3}},
 			}
 			if tc.knownValues != nil {
-				for k, v := range tc.knownValues {
-					evalVars[k] = v
-				}
+				maps.Copy(evalVars, tc.knownValues)
 			}
 			if tc.vars != nil {
-				for k, v := range tc.vars {
-					evalVars[k] = v
-				}
+				maps.Copy(evalVars, tc.vars)
 			}
 			prg, err := e.Program(checked)
 			if err != nil {

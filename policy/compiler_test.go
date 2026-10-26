@@ -362,7 +362,7 @@ func (r *runner) run(t *testing.T) {
 				if tc.InputContext != nil && tc.InputContext.ContextExpr != "" {
 					ctxExpr := tc.InputContext.ContextExpr
 					ctx, err := r.eval(t, ctxExpr).ConvertToNative(
-						reflect.TypeOf(((*proto.Message)(nil))).Elem())
+						reflect.TypeFor[proto.Message]())
 					if err != nil {
 						t.Fatalf("context variable is not a valid proto: %v", err)
 					}
@@ -427,7 +427,7 @@ func (r *runner) bench(b *testing.B) {
 				if tc.InputContext != nil && tc.InputContext.ContextExpr != "" {
 					ctxExpr := tc.InputContext.ContextExpr
 					ctx, err := r.eval(b, ctxExpr).ConvertToNative(
-						reflect.TypeOf(((*proto.Message)(nil))).Elem())
+						reflect.TypeFor[proto.Message]())
 					if err != nil {
 						b.Fatalf("context variable is not a valid proto: %v", err)
 					}
@@ -450,7 +450,7 @@ func (r *runner) bench(b *testing.B) {
 						b.Fatalf("interpreter.NewActivation(input) failed: %v", err)
 					}
 				}
-				for i := 0; i < b.N; i++ {
+				for b.Loop() {
 					_, _, err := r.prg.Eval(activation)
 					if err != nil {
 						b.Fatalf("policy eval failed: %v", err)

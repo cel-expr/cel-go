@@ -370,7 +370,7 @@ func deepBoolExpr(depth int) *exprpb.Expr {
 			},
 		},
 	}
-	for i := 0; i < depth; i++ {
+	for i := range depth {
 		expr = &exprpb.Expr{
 			Id: int64(i + 2),
 			ExprKind: &exprpb.Expr_CallExpr{

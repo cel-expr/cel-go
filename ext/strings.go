@@ -656,7 +656,7 @@ func indexOfOffset(str, substr string, offset int64) (int64, error) {
 	}
 	for i := off; i < len(runes)-(len(subrunes)-1); i++ {
 		found := true
-		for j := 0; j < len(subrunes); j++ {
+		for j := range subrunes {
 			if runes[i+j] != subrunes[j] {
 				found = false
 				break
@@ -704,7 +704,7 @@ func lastIndexOfOffset(str, substr string, offset int64) (int64, error) {
 	}
 	for i := off; i >= 0; i-- {
 		found := true
-		for j := 0; j < len(subrunes); j++ {
+		for j := range subrunes {
 			if runes[i+j] != subrunes[j] {
 				found = false
 				break
@@ -801,7 +801,7 @@ func join(strs []string) (string, error) {
 func joinValSeparator(strs traits.Lister, separator string) (string, error) {
 	sz := strs.Size().(types.Int)
 	var sb strings.Builder
-	for i := types.Int(0); i < sz; i++ {
+	for i := range sz {
 		if i != 0 {
 			sb.WriteString(separator)
 		}
@@ -1025,4 +1025,3 @@ func stringSplitCostModel(id string) cost.OverloadModel {
 		cost.BeforeVersion(1, cost.ResultSize(cost.List(cost.AtMost(cost.Target()), cost.AtMost(cost.Target())))),
 	)
 }
-

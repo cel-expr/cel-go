@@ -77,7 +77,7 @@ func ParseDescription(doc string) string {
 	var lines []string
 	if len(doc) != 0 {
 		// Split the input string by newline characters.
-		for _, line := range strings.Split(doc, "\n") {
+		for line := range strings.SplitSeq(doc, "\n") {
 			l := strings.TrimRightFunc(line, unicode.IsSpace)
 			if len(l) == 0 {
 				continue

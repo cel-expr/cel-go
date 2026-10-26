@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -225,7 +226,7 @@ func (t *NativeType) Adapt(adapter Adapter, value any) ref.Val {
 	}
 	refVal := reflect.ValueOf(value)
 	var structPtr unsafe.Pointer
-	if refVal.Kind() == reflect.Ptr {
+	if refVal.Kind() == reflect.Pointer {
 		if refVal.IsNil() {
 			return NullValue
 		}
@@ -731,12 +732,7 @@ func isSkippedField(refType reflect.Type, field reflect.StructField, skipped fun
 	if skipped(field) {
 		return true
 	}
-	for _, parent := range embeddedAncestors(refType, field) {
-		if skipped(parent) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(embeddedAncestors(refType, field), skipped)
 }
 
 // embeddedAncestors returns the chain of embedded struct fields through which a promoted
@@ -771,12 +767,7 @@ func hasJSONName(field reflect.StructField) bool {
 // embedded struct with a json name, in which case the field is serialized within that
 // struct's nested object rather than inline.
 func isPromotedThroughNamedJSONField(refType reflect.Type, field reflect.StructField) bool {
-	for _, parent := range embeddedAncestors(refType, field) {
-		if hasJSONName(parent) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(embeddedAncestors(refType, field), hasJSONName)
 }
 
 func adaptFieldValue(adapter Adapter, refField reflect.Value) ref.Val {
@@ -1090,7 +1081,7 @@ func (t *NativeType) makeFieldGetter(refField reflect.StructField) func(obj any)
 				return String(refFieldVal.String()), nil
 			}
 		case reflect.Slice:
-			if refField.Type.Elem() == reflect.TypeOf(byte(0)) {
+			if refField.Type.Elem() == reflect.TypeFor[byte]() {
 				return func(obj any) (any, error) {
 					if ptr, ok := t.structPtrFrom(obj, expectedPtrTyp, expectedStructTyp); ok {
 						return Bytes(*(*[]byte)(unsafe.Add(ptr, offset))), nil
@@ -1512,7 +1503,7 @@ func getFieldValue(adapter Adapter, refField reflect.Value) any {
 	case reflect.String:
 		return String(refField.String())
 	case reflect.Slice:
-		if refField.Type().Elem() == reflect.TypeOf(byte(0)) {
+		if refField.Type().Elem() == reflect.TypeFor[byte]() {
 			return Bytes(refField.Bytes())
 		}
 		if refField.Type() == reflect.TypeFor[[]string]() {

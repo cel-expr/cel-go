@@ -287,7 +287,7 @@ func exercise6() {
 	)
 	// Unwrap the CEL value to a proto. Make sure to use the `ConvertToNative` to convert
 	// the dynamic proto message to the concrete type expected.
-	req, err := out.ConvertToNative(reflect.TypeOf(requestType))
+	req, err := out.ConvertToNative(reflect.TypeFor[*rpcpb.AttributeContext_Request]())
 	if err != nil {
 		glog.Exit(err)
 	}
@@ -513,7 +513,7 @@ func request(auth *rpcpb.AttributeContext_Auth, t time.Time) map[string]any {
 // valueToJSON converts the CEL type to a protobuf JSON representation and
 // marshals the result to a string.
 func valueToJSON(val ref.Val) string {
-	v, err := val.ConvertToNative(reflect.TypeOf(&structpb.Value{}))
+	v, err := val.ConvertToNative(reflect.TypeFor[*structpb.Value]())
 	if err != nil {
 		glog.Exit(err)
 	}

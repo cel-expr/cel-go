@@ -15,6 +15,7 @@
 package pb
 
 import (
+	"slices"
 	"testing"
 
 	"google.golang.org/protobuf/proto"
@@ -107,11 +108,8 @@ func TestFileDescriptionGetTypes(t *testing.T) {
 	}
 	for _, tn := range fd.GetTypeNames() {
 		var found = false
-		for _, elem := range expected {
-			if elem == tn {
-				found = true
-				break
-			}
+		if slices.Contains(expected, tn) {
+			found = true
 		}
 		if !found {
 			t.Error("Unexpected type name", tn)

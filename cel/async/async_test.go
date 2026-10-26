@@ -20,6 +20,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"cel.dev/cel-go/cel/async"
@@ -60,73 +61,80 @@ func buildZeroArgAsync(t *testing.T, opt decls.OverloadOpt) functions.AsyncOp {
 }
 
 func TestRetryMultipleAttemptsTimerReset(t *testing.T) {
-	var attempts atomic.Int32
-	op := buildZeroArgAsync(t, async.RetryBinding(func(ctx context.Context, args ...ref.Val) ref.Val {
-		a := attempts.Add(1)
-		if a < 3 {
-			return types.WrapErr(retryableTestErr{})
-		}
-		return types.Int(100)
-	}, async.RetryAttempts(4), async.RetryBackoff(5*time.Millisecond)))
+	synctest.Test(t, func(t *testing.T) {
+		var attempts atomic.Int32
+		op := buildZeroArgAsync(t, async.RetryBinding(func(ctx context.Context, args ...ref.Val) ref.Val {
+			a := attempts.Add(1)
+			if a < 3 {
+				return types.WrapErr(retryableTestErr{})
+			}
+			return types.Int(100)
+		}, async.RetryAttempts(4), async.RetryBackoff(5*time.Millisecond)))
 
-	res := <-op(context.Background())
-	if res.Equal(types.Int(100)) != types.True {
-		t.Fatalf("result = %v, want 100", res)
-	}
-	if got := attempts.Load(); got != 3 {
-		t.Errorf("attempts = %d, want 3", got)
-	}
+		start := time.Now()
+		res := <-op(t.Context())
+		if res.Equal(types.Int(100)) != types.True {
+			t.Fatalf("result = %v, want 100", res)
+		}
+		if got := attempts.Load(); got != 3 {
+			t.Errorf("attempts = %d, want 3", got)
+		}
+		// Two retries, each preceded by one backoff from the reused timer.
+		if elapsed := time.Since(start); elapsed != 10*time.Millisecond {
+			t.Errorf("elapsed = %v, want exactly two 5ms backoffs", elapsed)
+		}
+	})
 }
 
 func TestRetryMaxAttemptsExhausted(t *testing.T) {
-	var attempts atomic.Int32
-	op := buildZeroArgAsync(t, async.RetryBinding(func(ctx context.Context, args ...ref.Val) ref.Val {
-		a := attempts.Add(1)
-		return types.WrapErr(fmt.Errorf("retry attempt %d failed: %w", a, retryableTestErr{}))
-	}, async.RetryAttempts(3), async.RetryBackoff(5*time.Millisecond)))
+	synctest.Test(t, func(t *testing.T) {
+		var attempts atomic.Int32
+		op := buildZeroArgAsync(t, async.RetryBinding(func(ctx context.Context, args ...ref.Val) ref.Val {
+			a := attempts.Add(1)
+			return types.WrapErr(fmt.Errorf("retry attempt %d failed: %w", a, retryableTestErr{}))
+		}, async.RetryAttempts(3), async.RetryBackoff(5*time.Millisecond)))
 
-	res := <-op(context.Background())
-	if !types.IsError(res) {
-		t.Fatalf("result = %v, want error", res)
-	}
-	msg := res.(*types.Err).Error()
-	if !strings.Contains(msg, "retry attempt 3 failed") {
-		t.Errorf("result error = %q, want last error 'retry attempt 3 failed'", msg)
-	}
-	if got := attempts.Load(); got != 3 {
-		t.Errorf("attempts = %d, want 3", got)
-	}
+		res := <-op(t.Context())
+		if !types.IsError(res) {
+			t.Fatalf("result = %v, want error", res)
+		}
+		msg := res.(*types.Err).Error()
+		if !strings.Contains(msg, "retry attempt 3 failed") {
+			t.Errorf("result error = %q, want last error 'retry attempt 3 failed'", msg)
+		}
+		if got := attempts.Load(); got != 3 {
+			t.Errorf("attempts = %d, want 3", got)
+		}
+	})
 }
 
 func TestRetryBindingCancellation(t *testing.T) {
-	var attempts atomic.Int32
-	op := buildZeroArgAsync(t, async.RetryBinding(func(ctx context.Context, args ...ref.Val) ref.Val {
-		attempts.Add(1)
-		return types.WrapErr(retryableTestErr{})
-	}, async.RetryAttempts(5), async.RetryBackoff(500*time.Millisecond)))
+	synctest.Test(t, func(t *testing.T) {
+		var attempts atomic.Int32
+		op := buildZeroArgAsync(t, async.RetryBinding(func(ctx context.Context, args ...ref.Val) ref.Val {
+			attempts.Add(1)
+			return types.WrapErr(retryableTestErr{})
+		}, async.RetryAttempts(5), async.RetryBackoff(500*time.Millisecond)))
 
-	ctx, cancel := context.WithCancel(context.Background())
-	go func() {
-		time.Sleep(40 * time.Millisecond)
-		cancel()
-	}()
+		ctx, cancel := context.WithCancel(t.Context())
+		go func() {
+			time.Sleep(40 * time.Millisecond)
+			cancel()
+		}()
 
-	start := time.Now()
-	var res ref.Val
-	select {
-	case res = <-op(ctx):
-	case <-time.After(2 * time.Second):
-		t.Fatal("retry op did not return after cancellation")
-	}
-	elapsed := time.Since(start)
+		start := time.Now()
+		res := <-op(ctx)
+		elapsed := time.Since(start)
 
-	if !types.IsError(res) || !strings.Contains(res.(*types.Err).Error(), "cancelled") {
-		t.Errorf("result = %v, want a cancellation error", res)
-	}
-	// Cancellation must interrupt the backoff wait rather than running it to completion.
-	if elapsed >= 500*time.Millisecond {
-		t.Errorf("retry waited the full backoff (%v); cancellation did not interrupt it", elapsed)
-	}
+		if !types.IsError(res) || !strings.Contains(res.(*types.Err).Error(), "cancelled") {
+			t.Errorf("result = %v, want a cancellation error", res)
+		}
+		// Cancellation must interrupt the 500ms backoff wait at the moment of cancellation rather
+		// than running it to completion.
+		if elapsed != 40*time.Millisecond {
+			t.Errorf("retry returned after %v, want exactly 40ms when cancellation interrupts the backoff", elapsed)
+		}
+	})
 }
 
 func TestRetryNonRetryableError(t *testing.T) {
@@ -236,26 +244,28 @@ func TestDrainReady(t *testing.T) {
 }
 
 func TestTimeoutBindingEnforcesAgainstContextIgnoringOp(t *testing.T) {
-	// The wrapped op sleeps well past the timeout without consulting its context. TimeoutBinding
-	// must still return at the deadline rather than waiting for the op to finish.
-	op := buildZeroArgAsync(t, async.TimeoutBinding(func(ctx context.Context, args ...ref.Val) ref.Val {
-		time.Sleep(2 * time.Second) // ignores ctx entirely
-		return types.Int(1)
-	}, 50*time.Millisecond))
+	synctest.Test(t, func(t *testing.T) {
+		// The wrapped op sleeps well past the timeout without consulting its context. TimeoutBinding
+		// must still return at the deadline rather than waiting for the op to finish.
+		op := buildZeroArgAsync(t, async.TimeoutBinding(func(ctx context.Context, args ...ref.Val) ref.Val {
+			time.Sleep(2 * time.Second) // ignores ctx entirely
+			return types.Int(1)
+		}, 50*time.Millisecond))
 
-	start := time.Now()
-	var res ref.Val
-	select {
-	case res = <-op(context.Background()):
-	case <-time.After(2 * time.Second):
-		t.Fatal("TimeoutBinding did not return; the op was not abandoned")
-	}
-	elapsed := time.Since(start)
+		start := time.Now()
+		res := <-op(t.Context())
+		elapsed := time.Since(start)
 
-	if !types.IsError(res) || !strings.Contains(res.(*types.Err).Error(), "timed out") {
-		t.Errorf("result = %v, want a timeout error", res)
-	}
-	if elapsed >= 500*time.Millisecond {
-		t.Errorf("TimeoutBinding waited %v; the timeout must abandon a ctx-ignoring op", elapsed)
-	}
+		if !types.IsError(res) || !strings.Contains(res.(*types.Err).Error(), "timed out") {
+			t.Errorf("result = %v, want a timeout error", res)
+		}
+		if elapsed != 50*time.Millisecond {
+			t.Errorf("TimeoutBinding returned after %v, want exactly the 50ms timeout", elapsed)
+		}
+
+		// The abandoned op keeps running until its own sleep ends. Advance the fake clock past it
+		// so the goroutine finishes; its result lands in Timeout's buffered channel and is
+		// discarded, so it does not leak. synctest.Test fails if any goroutine is left blocked.
+		time.Sleep(2 * time.Second)
+	})
 }

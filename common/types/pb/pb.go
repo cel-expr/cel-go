@@ -18,6 +18,7 @@ package pb
 
 import (
 	"fmt"
+	"maps"
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -110,9 +111,7 @@ func NewDb(opts ...DbOption) *Db {
 	// copy; however, the type graph for a field is idempotently computed, and is guaranteed to
 	// only be initialized once thanks to atomic values within the TypeDescription objects, so it
 	// is safe to share these values across instances.
-	for k, v := range DefaultDb.revFileDescriptorMap {
-		pbdb.revFileDescriptorMap[k] = v
-	}
+	maps.Copy(pbdb.revFileDescriptorMap, DefaultDb.revFileDescriptorMap)
 	pbdb.files = append(pbdb.files, DefaultDb.files...)
 	return pbdb
 }
@@ -150,9 +149,7 @@ func (pbdb *Db) Copy() *Db {
 		if !found {
 			copyExtFieldMap = make(map[string]*FieldDescription, len(extFieldMap))
 		}
-		for extFieldName, fd := range extFieldMap {
-			copyExtFieldMap[extFieldName] = fd
-		}
+		maps.Copy(copyExtFieldMap, extFieldMap)
 		copy.extensions[typeName] = copyExtFieldMap
 	}
 	return copy
@@ -202,9 +199,7 @@ func (pbdb *Db) RegisterDescriptor(fileDesc protoreflect.FileDescriptor) (*FileD
 			pbdb.extensions[typeName] = extMap
 			continue
 		}
-		for extName, field := range extMap {
-			typeExtMap[extName] = field
-		}
+		maps.Copy(typeExtMap, extMap)
 	}
 	return fd, nil
 }

@@ -675,7 +675,7 @@ func (tr *TestRunner) createTestInputFromPB(t *testing.T, testCase *conformancep
 				return nil, fmt.Errorf("eval(%q) failed: %w", testInput.ContextExpr, err)
 			}
 			ctx, err := refVal.ConvertToNative(
-				reflect.TypeOf((*proto.Message)(nil)).Elem())
+				reflect.TypeFor[proto.Message]())
 			if err != nil {
 				return nil, fmt.Errorf("context variable is not a valid proto: %w", err)
 			}
@@ -685,7 +685,7 @@ func (tr *TestRunner) createTestInputFromPB(t *testing.T, testCase *conformancep
 			}
 		case *conformancepb.InputContext_ContextMessage:
 			refVal := e.CELTypeAdapter().NativeToValue(testInput.ContextMessage)
-			ctx, err := refVal.ConvertToNative(reflect.TypeOf((*proto.Message)(nil)).Elem())
+			ctx, err := refVal.ConvertToNative(reflect.TypeFor[proto.Message]())
 			if err != nil {
 				return nil, fmt.Errorf("context variable is not a valid proto: %w", err)
 			}
@@ -913,7 +913,7 @@ func (tr *TestRunner) createTestInput(t *testing.T, testCase *test.Case) (cel.Pa
 		if err != nil {
 			return nil, fmt.Errorf("eval(%q) failed: %w", contextExpr, err)
 		}
-		ctx, err := out.ConvertToNative(reflect.TypeOf((*proto.Message)(nil)).Elem())
+		ctx, err := out.ConvertToNative(reflect.TypeFor[proto.Message]())
 		if err != nil {
 			return nil, fmt.Errorf("context variable is not a valid proto: %w", err)
 		}

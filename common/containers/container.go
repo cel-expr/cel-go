@@ -18,6 +18,7 @@ package containers
 
 import (
 	"fmt"
+	"maps"
 	"strings"
 	"unicode"
 
@@ -65,9 +66,7 @@ func (c *Container) Extend(opts ...ContainerOption) (*Container, error) {
 	ext := &Container{name: c.Name()}
 	if len(c.AliasSet()) > 0 {
 		aliasSet := make(map[string]string, len(c.AliasSet()))
-		for k, v := range c.AliasSet() {
-			aliasSet[k] = v
-		}
+		maps.Copy(aliasSet, c.AliasSet())
 		ext.aliases = aliasSet
 	}
 	// Apply the new options to the container.

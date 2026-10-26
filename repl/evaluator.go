@@ -945,8 +945,8 @@ func (e *Evaluator) parseYAMLConfig(conf []byte) (string, error) {
 			continue
 		}
 		norm := strings.TrimPrefix(line, "# ")
-		if strings.HasSuffix(norm, "\\") {
-			norm = strings.TrimSuffix(norm, "\\")
+		if before, ok := strings.CutSuffix(norm, "\\"); ok {
+			norm = before
 			sb.WriteString(norm)
 			sb.WriteString("\n")
 			continue

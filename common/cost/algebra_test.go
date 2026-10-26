@@ -140,7 +140,6 @@ func TestQuantityAlgebraLaws(t *testing.T) {
 		{name: "integer Scale distributes", lhs: Scale(Sum(a, b), 2), rhs: Sum(Scale(a, 2), Scale(b, 2))},
 	}
 	for _, law := range laws {
-		law := law
 		t.Run(law.name, func(t *testing.T) {
 			forEachTriple(func(ranges []SizeEstimate, vals []uint64) {
 				le, re := estimateWith(law.lhs, ranges...), estimateWith(law.rhs, ranges...)
@@ -176,7 +175,6 @@ func TestQuantityAlgebraSoundness(t *testing.T) {
 		"nested":     Sub(Mul(Sum(a, Const(2)), Max(b, c)), Min(a, c)),
 	}
 	for name, expr := range exprs {
-		expr := expr
 		t.Run(name, func(t *testing.T) {
 			forEachTriple(func(ranges []SizeEstimate, vals []uint64) {
 				est := estimateWith(expr, ranges...)
@@ -381,7 +379,6 @@ func TestVersion1Revisions(t *testing.T) {
 		},
 	}
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			if got := tc.got(); got != tc.want {
 				t.Errorf("got %s, want %s", got, tc.want)
@@ -406,7 +403,6 @@ func TestValidateRejections(t *testing.T) {
 		{name: "global receiver", model: Overload("g", EvalCost(Sum(Target(), Arg(0)))), err: "use MemberOverload"},
 	}
 	for _, tc := range tests {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			err := tc.model.Validate()
 			if err == nil || !strings.Contains(err.Error(), tc.err) {

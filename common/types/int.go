@@ -42,10 +42,10 @@ const (
 
 var (
 	// int32WrapperType reflected type for protobuf int32 wrapper type.
-	int32WrapperType = reflect.TypeOf(&wrapperspb.Int32Value{})
+	int32WrapperType = reflect.TypeFor[*wrapperspb.Int32Value]()
 
 	// int64WrapperType reflected type for protobuf int64 wrapper type.
-	int64WrapperType = reflect.TypeOf(&wrapperspb.Int64Value{})
+	int64WrapperType = reflect.TypeFor[*wrapperspb.Int64Value]()
 )
 
 // Add implements traits.Adder.Add.
@@ -105,7 +105,7 @@ func (i Int) ConvertToNative(typeDesc reflect.Type) (any, error) {
 		return reflect.ValueOf(v).Convert(typeDesc).Interface(), nil
 	case reflect.Int64:
 		return reflect.ValueOf(i).Convert(typeDesc).Interface(), nil
-	case reflect.Ptr:
+	case reflect.Pointer:
 		switch typeDesc {
 		case anyValueType:
 			// Primitives must be wrapped before being set on an Any field.
@@ -163,7 +163,7 @@ func (i Int) ConvertToNative(typeDesc reflect.Type) (any, error) {
 		if reflect.TypeOf(iv).Implements(typeDesc) {
 			return iv, nil
 		}
-		if reflect.TypeOf(i).Implements(typeDesc) {
+		if reflect.TypeFor[Int]().Implements(typeDesc) {
 			return i, nil
 		}
 	}

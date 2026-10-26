@@ -293,8 +293,7 @@ func RunCase(b *testing.B, env *cel.Env, bc *Case) {
 			if err != nil {
 				b.Fatalf("env.Program(%v) failed: %v", bc.Expr, err)
 			}
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				var input any = cel.NoVars()
 				if bc.In != nil {
 					input = bc.In
@@ -316,8 +315,7 @@ func RunDynamicEnvCase(b *testing.B, bc *DynamicEnvCase) {
 	b.Helper()
 	b.Run(bc.Expr, func(b *testing.B) {
 		env := bc.Options(b)
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			_, err := env.Compile(bc.Expr)
 			if err != nil {
 				b.Fatalf("env.Compile(%v) failed: %v", bc.Expr, err)

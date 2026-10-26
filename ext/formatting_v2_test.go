@@ -985,7 +985,7 @@ func TestStringFormatV2(t *testing.T) {
 			cel.Abbrevs("google.expr.proto3.test"),
 			cel.Types(&proto3pb.TestAllTypes{}),
 			NativeTypes(
-				reflect.TypeOf(&TestNestedType{}),
+				reflect.TypeFor[*TestNestedType](),
 				reflect.ValueOf(&TestAllTypes{}),
 			),
 		}

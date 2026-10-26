@@ -125,7 +125,7 @@ func TestJsonListValueConvertToNative_Slice(t *testing.T) {
 	list := NewJSONList(reg, &structpb.ListValue{Values: []*structpb.Value{
 		structpb.NewStringValue("hello"),
 		structpb.NewNumberValue(1)}})
-	listVal, err := list.ConvertToNative(reflect.TypeOf([]*structpb.Value{}))
+	listVal, err := list.ConvertToNative(reflect.TypeFor[[]*structpb.Value]())
 	if err != nil {
 		t.Error(err)
 	}

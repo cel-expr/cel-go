@@ -1050,8 +1050,8 @@ func timestampGetMilliseconds(ts, tz ref.Val) ref.Val {
 func inTimeZone(ts, tz ref.Val) (time.Time, error) {
 	t := ts.(types.Timestamp)
 	val := string(tz.(types.String))
-	ind := strings.Index(val, ":")
-	if ind == -1 {
+	before, after, ok := strings.Cut(val, ":")
+	if !ok {
 		loc, err := time.LoadLocation(val)
 		if err != nil {
 			return time.Time{}, err
@@ -1061,11 +1061,11 @@ func inTimeZone(ts, tz ref.Val) (time.Time, error) {
 
 	// If the input is not the name of a timezone (for example, 'US/Central'), it should be a numerical offset from UTC
 	// in the format ^(+|-)([01]\d|2[0-3]):[0-5][0-9]$. The numerical input is parsed in terms of hours and minutes.
-	hr, err := strconv.Atoi(string(val[0:ind]))
+	hr, err := strconv.Atoi(string(before))
 	if err != nil {
 		return time.Time{}, err
 	}
-	min, err := strconv.Atoi(string(val[ind+1:]))
+	min, err := strconv.Atoi(string(after))
 	if err != nil {
 		return time.Time{}, err
 	}

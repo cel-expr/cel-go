@@ -1910,7 +1910,7 @@ func BenchmarkInterpreter(b *testing.B) {
 		b.Run(tst.name, func(b *testing.B) {
 			b.ResetTimer()
 			b.ReportAllocs()
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				prg.Exec(frame)
 			}
 		})
@@ -2115,7 +2115,7 @@ func TestInterpreter_InterruptableEval(t *testing.T) {
 	// comprehension is still iterating.
 	const interruptCheckFrequency = 100
 	items := make([]int64, interruptCheckFrequency*50)
-	for i := 0; i < len(items); i++ {
+	for i := range items {
 		items[i] = int64(i)
 	}
 	tc := testCase{
@@ -2453,7 +2453,7 @@ func TestInterpreter_PlanListComprehensionTwoVar(t *testing.T) {
 		t.Fatalf("expr.Eval() yielded error: %v", result)
 	}
 	want := []int64{0, 2, 1, 3}
-	out, err := result.ConvertToNative(reflect.TypeOf(want))
+	out, err := result.ConvertToNative(reflect.TypeFor[[]int64]())
 	if err != nil {
 		t.Fatalf("result.ConvertToNative() failed: %v", err)
 	}
@@ -2508,7 +2508,7 @@ func TestInterpreter_PlanMapComprehensionTwoVar(t *testing.T) {
 		t.Fatalf("expr.Eval() yielded error: %v", result)
 	}
 	want := map[int64]string{1: "first", 2: "second"}
-	out, err := result.ConvertToNative(reflect.TypeOf(want))
+	out, err := result.ConvertToNative(reflect.TypeFor[map[int64]string]())
 	if err != nil {
 		t.Fatalf("result.ConvertToNative() failed: %v", err)
 	}
@@ -2592,7 +2592,7 @@ func TestInterpreter_PlanCustomFoldableComprehensionTwoVar(t *testing.T) {
 		t.Fatalf("expr.Eval() yielded error: %v", result)
 	}
 	want := []any{"first", int64(1), "second", int64(2)}
-	out, err := result.ConvertToNative(reflect.TypeOf(want))
+	out, err := result.ConvertToNative(reflect.TypeFor[[]any]())
 	if err != nil {
 		t.Fatalf("result.ConvertToNative() failed: %v", err)
 	}
@@ -2639,7 +2639,7 @@ func TestInterpreter_PlanCustomFoldableComprehensionTwoVar_EarlyTermination(t *t
 		t.Fatalf("expr.Eval() yielded error: %v", result)
 	}
 	want := []any{"first", int64(1)}
-	out, err := result.ConvertToNative(reflect.TypeOf(want))
+	out, err := result.ConvertToNative(reflect.TypeFor[[]any]())
 	if err != nil {
 		t.Fatalf("result.ConvertToNative() failed: %v", err)
 	}

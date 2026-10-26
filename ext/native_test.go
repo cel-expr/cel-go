@@ -516,7 +516,7 @@ func TestNativeTypesJsonSerialization(t *testing.T) {
 			if err != nil {
 				t.Fatalf("prg.Eval() failed: %v", err)
 			}
-			conv, err := out.ConvertToNative(reflect.TypeOf(&structpb.Value{}))
+			conv, err := out.ConvertToNative(reflect.TypeFor[*structpb.Value]())
 			if err != nil {
 				t.Fatalf("out.ConvertToNative(Value) failed: %v", err)
 			}
@@ -619,7 +619,7 @@ func TestNativeTypesErrors(t *testing.T) {
 		err        string
 	}{
 		{
-			nativeType: reflect.TypeOf(1),
+			nativeType: reflect.TypeFor[int](),
 			err:        "unsupported reflect.Type",
 		},
 		{
@@ -643,7 +643,7 @@ func TestNativeTypesErrors(t *testing.T) {
 }
 
 func TestNativeTypesConvertToNative(t *testing.T) {
-	env := testNativeEnv(t, NativeTypes(reflect.TypeOf(TestNestedType{})))
+	env := testNativeEnv(t, NativeTypes(reflect.TypeFor[TestNestedType]()))
 	adapter := env.CELTypeAdapter()
 	conversions := []struct {
 		in     any
@@ -718,7 +718,7 @@ func TestNativeTypesConvertToNative(t *testing.T) {
 }
 
 func TestConvertToTypeErrors(t *testing.T) {
-	env := testNativeEnv(t, NativeTypes(reflect.TypeOf(TestNestedType{})))
+	env := testNativeEnv(t, NativeTypes(reflect.TypeFor[TestNestedType]()))
 	adapter := env.CELTypeAdapter()
 	conversions := []struct {
 		in  any
@@ -902,7 +902,7 @@ func TestNativeTypeConvertToNative(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewNativeType() failed: %v", err)
 	}
-	out, err := nt.ConvertToNative(reflect.TypeOf(1))
+	out, err := nt.ConvertToNative(reflect.TypeFor[int]())
 	if err == nil {
 		t.Errorf("nt.ConvertToNative(1) produced %v, wanted error", out)
 	}
@@ -1643,7 +1643,7 @@ func TestNativeToValueDelegatesUnregisteredStructs(t *testing.T) {
 	custom := &recordingAdapter{base: types.DefaultTypeAdapter}
 	env, err := cel.NewEnv(
 		cel.CustomTypeAdapter(custom),
-		NativeTypes(reflect.TypeOf(registeredNativeStruct{})),
+		NativeTypes(reflect.TypeFor[registeredNativeStruct]()),
 	)
 	if err != nil {
 		t.Fatalf("cel.NewEnv() failed: %v", err)
@@ -1752,7 +1752,7 @@ func BenchmarkNativeTypesEval(b *testing.B) {
 			}
 			b.ResetTimer()
 			b.ReportAllocs()
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				prg.Eval(input)
 			}
 		})
@@ -1791,7 +1791,7 @@ func BenchmarkNativeToValue(b *testing.B) {
 		b.Run(bm.name, func(b *testing.B) {
 			b.ResetTimer()
 			b.ReportAllocs()
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				adapter.NativeToValue(bm.val)
 			}
 		})
@@ -1809,16 +1809,16 @@ func BenchmarkConvertToNative(b *testing.B) {
 		StringVal: "hello world",
 	}
 	celVal := adapter.NativeToValue(allTypes)
-	targetType := reflect.TypeOf(&TestAllTypes{})
+	targetType := reflect.TypeFor[*TestAllTypes]()
 
 	allTypesSlice := []*TestAllTypes{allTypes, allTypes}
 	celSliceVal := adapter.NativeToValue(allTypesSlice)
-	sliceTargetType := reflect.TypeOf([]*TestAllTypes{})
+	sliceTargetType := reflect.TypeFor[[]*TestAllTypes]()
 
 	b.Run("TestAllTypes", func(b *testing.B) {
 		b.ResetTimer()
 		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			_, err := celVal.ConvertToNative(targetType)
 			if err != nil {
 				b.Fatalf("ConvertToNative failed: %v", err)
@@ -1829,7 +1829,7 @@ func BenchmarkConvertToNative(b *testing.B) {
 	b.Run("SliceTestAllTypes", func(b *testing.B) {
 		b.ResetTimer()
 		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			_, err := celSliceVal.ConvertToNative(sliceTargetType)
 			if err != nil {
 				b.Fatalf("ConvertToNative failed: %v", err)

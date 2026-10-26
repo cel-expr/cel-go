@@ -58,7 +58,7 @@ func TestBoolConvertToNative_Any(t *testing.T) {
 }
 
 func TestBoolConvertToNative_Bool(t *testing.T) {
-	refType := reflect.TypeOf(true)
+	refType := reflect.TypeFor[bool]()
 	val, err := True.ConvertToNative(refType)
 	if err != nil {
 		t.Error(err)
@@ -68,7 +68,7 @@ func TestBoolConvertToNative_Bool(t *testing.T) {
 }
 
 func TestBoolConvertToNative_Error(t *testing.T) {
-	refType := reflect.TypeOf("")
+	refType := reflect.TypeFor[string]()
 	val, err := True.ConvertToNative(refType)
 	if err == nil {
 		t.Errorf("Got '%v', expected error", val)
@@ -86,8 +86,7 @@ func TestBoolConvertToNative_Json(t *testing.T) {
 }
 
 func TestBoolConvertToNative_Ptr(t *testing.T) {
-	ptrType := true
-	refType := reflect.TypeOf(&ptrType)
+	refType := reflect.TypeFor[*bool]()
 	val, err := True.ConvertToNative(refType)
 	if err != nil {
 		t.Error(err)
@@ -161,7 +160,7 @@ func TestIsBool(t *testing.T) {
 }
 
 func BenchmarkIsBool(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		if !(IsBool(True) && !IsBool(IntNegOne)) {
 			b.Fatal("IsBool() failed to return proper result")
 		}

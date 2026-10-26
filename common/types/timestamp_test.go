@@ -297,7 +297,7 @@ func TestTimestampConvertToNative(t *testing.T) {
 	if !proto.Equal(val.(proto.Message), want.(proto.Message)) {
 		t.Errorf("Got '%v', expected '%v'", val, want)
 	}
-	val, err = ts.ConvertToNative(reflect.TypeOf(Timestamp{}))
+	val, err = ts.ConvertToNative(reflect.TypeFor[Timestamp]())
 	if err != nil {
 		t.Error(err)
 	}

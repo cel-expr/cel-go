@@ -940,7 +940,6 @@ func TestStringCostTracking(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			env, err := cel.NewEnv(Strings(StringsVersion(5)))
 			if err != nil {

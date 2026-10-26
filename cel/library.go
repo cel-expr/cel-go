@@ -744,10 +744,7 @@ func estimateOptionalHasValue(estimator cost.Estimator, target *cost.AstNode, ar
 	}
 	optSize := sizeOrUnknown(*target)
 	argSize := sizeOrUnknown(args[0])
-	smallestMax := optSize.Max
-	if argSize.Max < smallestMax {
-		smallestMax = argSize.Max
-	}
+	smallestMax := min(argSize.Max, optSize.Max)
 	minCost := uint64(0)
 	if smallestMax > 0 {
 		// equality of 2 scalar values results in a cost of 1

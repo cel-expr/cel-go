@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"reflect"
 	"regexp"
+	"slices"
 	"sync"
 
 	"cel.dev/cel-go/common/ast"
@@ -410,10 +411,8 @@ func inExemptFunction(e ast.NavigableExpr, exemptFunctions []string) bool {
 	for found {
 		if parent.Kind() == ast.CallKind {
 			fnName := parent.AsCall().FunctionName()
-			for _, exempt := range exemptFunctions {
-				if exempt == fnName {
-					return true
-				}
+			if slices.Contains(exemptFunctions, fnName) {
+				return true
 			}
 		}
 		parent, found = parent.Parent()

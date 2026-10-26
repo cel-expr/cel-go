@@ -35,9 +35,9 @@ var (
 	NullValue = Null(structpb.NullValue_NULL_VALUE)
 
 	// golang reflect type for Null values.
-	nullReflectType = reflect.TypeOf(NullValue)
+	nullReflectType = reflect.TypeFor[Null]()
 
-	protoIfaceType = reflect.TypeOf((*proto.Message)(nil)).Elem()
+	protoIfaceType = reflect.TypeFor[proto.Message]()
 )
 
 // ConvertToNative implements ref.Val.ConvertToNative.
@@ -50,7 +50,7 @@ func (n Null) ConvertToNative(typeDesc reflect.Type) (any, error) {
 		case nullReflectType:
 			return n, nil
 		}
-	case reflect.Ptr:
+	case reflect.Pointer:
 		switch typeDesc {
 		case anyValueType:
 			// Convert to a JSON-null before packing to an Any field since the enum value for JSON
@@ -78,7 +78,7 @@ func (n Null) ConvertToNative(typeDesc reflect.Type) (any, error) {
 		if reflect.TypeOf(nv).Implements(typeDesc) {
 			return nv, nil
 		}
-		if reflect.TypeOf(n).Implements(typeDesc) {
+		if reflect.TypeFor[Null]().Implements(typeDesc) {
 			return n, nil
 		}
 	}

@@ -363,7 +363,7 @@ func BenchmarkCostTracking(b *testing.B) {
 			ctx := constructActivation(b, bm.in)
 			b.ResetTimer()
 			b.ReportAllocs()
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				prg.Eval(ctx)
 			}
 		})
@@ -387,10 +387,8 @@ func TestTracker_ConcurrentCloneRace(t *testing.T) {
 	}
 
 	var wg sync.WaitGroup
-	for i := 0; i < 50; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 50 {
+		wg.Go(func() {
 			clone, err := tracker.Clone()
 			if err != nil {
 				t.Errorf("tracker.Clone() failed: %v", err)
@@ -402,7 +400,7 @@ func TestTracker_ConcurrentCloneRace(t *testing.T) {
 			if clone.ActualCost() == 0 {
 				t.Errorf("clone.ActualCost() should be non-zero")
 			}
-		}()
+		})
 	}
 	wg.Wait()
 }

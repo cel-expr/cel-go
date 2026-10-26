@@ -16,6 +16,7 @@
 package ast
 
 import (
+	"maps"
 	"slices"
 
 	"cel.dev/cel-go/common"
@@ -139,13 +140,9 @@ func Copy(a *AST) *AST {
 		return NewAST(e, CopySourceInfo(a.SourceInfo()))
 	}
 	typesCopy := make(map[int64]*types.Type, len(a.typeMap))
-	for id, t := range a.typeMap {
-		typesCopy[id] = t
-	}
+	maps.Copy(typesCopy, a.typeMap)
 	refsCopy := make(map[int64]*ReferenceInfo, len(a.refMap))
-	for id, r := range a.refMap {
-		refsCopy[id] = r
-	}
+	maps.Copy(refsCopy, a.refMap)
 	return NewCheckedAST(NewAST(e, CopySourceInfo(a.SourceInfo())), typesCopy, refsCopy)
 }
 
@@ -232,9 +229,7 @@ func CopySourceInfo(info *SourceInfo) *SourceInfo {
 		return nil
 	}
 	rangesCopy := make(map[int64]OffsetRange, len(info.offsetRanges))
-	for id, off := range info.offsetRanges {
-		rangesCopy[id] = off
-	}
+	maps.Copy(rangesCopy, info.offsetRanges)
 	callsCopy := make(map[int64]Expr, len(info.macroCalls))
 	for id, call := range info.macroCalls {
 		callsCopy[id] = defaultFactory.CopyExpr(call)
@@ -502,10 +497,8 @@ func NewFunctionReference(overloads ...string) *ReferenceInfo {
 
 // AddOverload appends a function overload ID to the ReferenceInfo.
 func (r *ReferenceInfo) AddOverload(overloadID string) {
-	for _, id := range r.OverloadIDs {
-		if id == overloadID {
-			return
-		}
+	if slices.Contains(r.OverloadIDs, overloadID) {
+		return
 	}
 	r.OverloadIDs = append(r.OverloadIDs, overloadID)
 }

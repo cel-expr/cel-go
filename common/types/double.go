@@ -34,10 +34,10 @@ type Double float64
 
 var (
 	// doubleWrapperType reflected type for protobuf double wrapper type.
-	doubleWrapperType = reflect.TypeOf(&wrapperspb.DoubleValue{})
+	doubleWrapperType = reflect.TypeFor[*wrapperspb.DoubleValue]()
 
 	// floatWrapperType reflected type for protobuf float wrapper type.
-	floatWrapperType = reflect.TypeOf(&wrapperspb.FloatValue{})
+	floatWrapperType = reflect.TypeFor[*wrapperspb.FloatValue]()
 )
 
 // Add implements traits.Adder.Add.
@@ -78,7 +78,7 @@ func (d Double) ConvertToNative(typeDesc reflect.Type) (any, error) {
 	case reflect.Float64:
 		v := float64(d)
 		return reflect.ValueOf(v).Convert(typeDesc).Interface(), nil
-	case reflect.Ptr:
+	case reflect.Pointer:
 		switch typeDesc {
 		case anyValueType:
 			// Primitives must be wrapped before being set on an Any field.
@@ -113,7 +113,7 @@ func (d Double) ConvertToNative(typeDesc reflect.Type) (any, error) {
 		if reflect.TypeOf(dv).Implements(typeDesc) {
 			return dv, nil
 		}
-		if reflect.TypeOf(d).Implements(typeDesc) {
+		if reflect.TypeFor[Double]().Implements(typeDesc) {
 			return d, nil
 		}
 	}

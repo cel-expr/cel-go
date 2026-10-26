@@ -16,6 +16,7 @@ package pb
 
 import (
 	"reflect"
+	"slices"
 	"testing"
 
 	"google.golang.org/protobuf/reflect/protodesc"
@@ -52,13 +53,7 @@ func TestDbJSONFieldNames(t *testing.T) {
 	// Note that 'group' type names don't have camelCase representations.
 	wantFields := []string{"singleInt32", "repeatedInt64", "nestedgroup"}
 	for _, want := range wantFields {
-		found := false
-		for _, field := range fieldNames {
-			if field == want {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(fieldNames, want)
 		if !found {
 			t.Errorf("%v field name not found", want)
 		}
@@ -79,13 +74,7 @@ func TestDbJSONFieldNames(t *testing.T) {
 		}
 	}
 	for _, want := range wantFields {
-		found := false
-		for _, field := range fieldNames {
-			if field == want {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(fieldNames, want)
 		if !found {
 			t.Errorf("%v field name not found", want)
 		}
@@ -134,7 +123,7 @@ func TestDbCopy(t *testing.T) {
 }
 
 func BenchmarkDbCopy(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		NewDb().Copy()
 	}
 }

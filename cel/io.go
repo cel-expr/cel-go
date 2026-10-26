@@ -243,7 +243,7 @@ func ValueAsProto(res ref.Val) (*celpb.Value, error) {
 		l := res.(traits.Lister)
 		sz := l.Size().(types.Int)
 		elts := make([]*celpb.Value, 0, int64(sz))
-		for i := types.Int(0); i < sz; i++ {
+		for i := range sz {
 			v, err := ValueAsProto(l.Get(i))
 			if err != nil {
 				return nil, err
@@ -309,7 +309,7 @@ var (
 		"uint":      types.UintType,
 	}
 
-	anyPbType = reflect.TypeOf(&anypb.Any{})
+	anyPbType = reflect.TypeFor[*anypb.Any]()
 )
 
 // ValueToRefValue converts between google.api.expr.v1alpha1.Value and ref.Val.

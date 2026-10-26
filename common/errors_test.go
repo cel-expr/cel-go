@@ -58,11 +58,11 @@ func TestErrorsReportingLimit(t *testing.T) {
 
 func TestErrorsAppendReportingLimit(t *testing.T) {
 	errors := NewErrors(NewTextSource("hello world"))
-	for i := 0; i < 75; i++ {
+	for i := range 75 {
 		errors.ReportError(NoLocation, "error %d", i)
 	}
 	errors2 := NewErrors(NewTextSource("hello world"))
-	for i := 0; i < 75; i++ {
+	for i := range 75 {
 		errors2.ReportError(NoLocation, "error %d", i+75)
 	}
 	errors = errors.Append(errors2.GetErrors())

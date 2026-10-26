@@ -109,10 +109,10 @@ func TestTypeDescriptionGroupFields(t *testing.T) {
 		t.Fatalf("pbdb.DescribeType(%v) not found", field.Descriptor().Message().FullName())
 	}
 	groupFields := ng.FieldMap()
-	if groupFields["nested_name"].ReflectType() != reflect.TypeOf("") {
+	if groupFields["nested_name"].ReflectType() != reflect.TypeFor[string]() {
 		t.Errorf("groupFields['nested_name'] is type %v, not string", groupFields["nested_name"].ReflectType())
 	}
-	if groupFields["nested_id"].ReflectType() != reflect.TypeOf(int32(1)) {
+	if groupFields["nested_id"].ReflectType() != reflect.TypeFor[int32]() {
 		t.Errorf("groupFields['nested_id'] is type %v, not int32", groupFields["nested_id"].ReflectType())
 	}
 }
@@ -589,7 +589,7 @@ func BenchmarkTypeDescriptionMaybeUnwrap(b *testing.B) {
 		}
 		in := tc.in
 		b.Run(typeName, func(b *testing.B) {
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				td.MaybeUnwrap(in)
 			}
 		})

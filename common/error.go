@@ -53,22 +53,23 @@ func (e *Error) ToDisplayString(source Source) string {
 		snippet := strings.Replace(snippet, "\t", " ", -1)
 		srcLine := "\n | " + snippet
 		var bytes = []byte(snippet)
-		var indLine = "\n | "
+		var indLine strings.Builder
+		indLine.WriteString("\n | ")
 		for i := 0; i < e.Location.Column() && len(bytes) > 0; i++ {
 			_, sz := utf8.DecodeRune(bytes)
 			bytes = bytes[sz:]
 			if sz > 1 {
-				indLine += wideDot
+				indLine.WriteString(wideDot)
 			} else {
-				indLine += dot
+				indLine.WriteString(dot)
 			}
 		}
 		if _, sz := utf8.DecodeRune(bytes); sz > 1 {
-			indLine += wideInd
+			indLine.WriteString(wideInd)
 		} else {
-			indLine += ind
+			indLine.WriteString(ind)
 		}
-		result += srcLine + indLine
+		result += srcLine + indLine.String()
 	}
 	return result
 }

@@ -231,7 +231,7 @@ func TestBindingsImmutability(t *testing.T) {
 				if err != nil {
 					t.Fatalf("env.Program() failed: %v", err)
 				}
-				for i := 0; i < 3; i++ {
+				for range 3 {
 					out, _, err := prg.Eval(cel.NoVars())
 					if err != nil {
 						t.Fatalf("prg.Eval() failed: %v", err)
@@ -560,8 +560,7 @@ func BenchmarkBindingsMemoryAmplification(b *testing.B) {
 				b.Fatalf("env.Program() failed: %v", err)
 			}
 			b.ReportAllocs()
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				_, _, err := prg.Eval(cel.NoVars())
 				if bm.wantErr != (err != nil) {
 					b.Fatalf("prg.Eval() got err=%v, wantErr=%v", err, bm.wantErr)
@@ -624,7 +623,7 @@ func BenchmarkBindings(b *testing.B) {
 			if tc.in != nil {
 				input = tc.in
 			}
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				prg.Eval(input)
 			}
 		})
@@ -905,7 +904,7 @@ func TestDynamicBlockEval(t *testing.T) {
 	sa := pooled.slotActivationPool.Get().(*dynamicSlotActivation)
 	if allocs := testing.AllocsPerRun(100, func() {
 		sa.reset()
-		for i := 0; i < 2; i++ {
+		for range 2 {
 			if val, found := sa.ResolveName("@index0"); !found || val != types.IntOne {
 				t.Fatalf("ResolveName(@index0) = (%v, %v), wanted (1, true)", val, found)
 			}
@@ -956,7 +955,7 @@ func BenchmarkBlockEval(b *testing.B) {
 	input := map[string]any{"x": "hello"}
 	b.ResetTimer()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		prg.Eval(input)
 	}
 }

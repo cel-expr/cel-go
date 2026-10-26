@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -481,13 +482,7 @@ func matchConstantFormatStringWithListLiteralArgs(a *ast.AST) ast.ExprMatcher {
 		}
 		overloadIDs := a.GetOverloadIDs(e.ID())
 		if len(overloadIDs) != 0 {
-			found := false
-			for _, overload := range overloadIDs {
-				if overload == overloads.ExtFormatString {
-					found = true
-					break
-				}
-			}
+			found := slices.Contains(overloadIDs, overloads.ExtFormatString)
 			if !found {
 				return false
 			}

@@ -114,19 +114,19 @@ func checkWellKnown(name string) *env.TypeDesc {
 }
 
 func (t *typesVisitor) VisitTypeID(ctx *parser.TypeIdContext) any {
-	id := ""
+	var id strings.Builder
 	if ctx.GetLeadingDot() != nil {
-		id += "."
+		id.WriteString(".")
 	}
 	tl := ctx.GetId()
 	if tl == nil {
 		return nil
 	}
-	id += tl.GetText()
+	id.WriteString(tl.GetText())
 	for _, tok := range ctx.GetQualifiers() {
-		id += "." + tok.GetText()
+		id.WriteString("." + tok.GetText())
 	}
-	return id
+	return id.String()
 }
 
 func (t *typesVisitor) VisitTypeParamList(ctx *parser.TypeParamListContext) any {

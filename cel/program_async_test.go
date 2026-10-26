@@ -23,6 +23,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"cel.dev/cel-go/cel"
@@ -715,9 +716,7 @@ func TestConcurrentEvalDetailsAfterPublish(t *testing.T) {
 			)
 			var wg sync.WaitGroup
 			for range numGoroutines {
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
+				wg.Go(func() {
 					ctx, cancel := context.WithCancel(context.Background())
 					defer cancel()
 					if tc.cancelAfter > 0 {
@@ -747,7 +746,7 @@ func TestConcurrentEvalDetailsAfterPublish(t *testing.T) {
 					if res.EvalDetails == nil || res.EvalDetails.ActualCost() == nil {
 						t.Errorf("ConcurrentEval(%q) ActualCost() is nil, want non-nil with cost tracking enabled", tc.expr)
 					}
-				}()
+				})
 			}
 			wg.Wait()
 		})
@@ -897,47 +896,56 @@ func TestConcurrentEvalDrainReady(t *testing.T) {
 	}
 
 	for _, tc := range cases {
+		// The pass counts below depend on the order in which the delayed calls complete relative
+		// to the debounce window. A fake clock makes that ordering exact rather than dependent on
+		// scheduler latency.
 		t.Run(tc.name, func(t *testing.T) {
-			var evalPasses atomic.Int32
-			opts := []any{
-				cel.Function("delayed_rpc",
-					cel.Overload("delayed_rpc_string_int", []*cel.Type{cel.StringType, cel.IntType}, cel.StringType,
-						cel.AsyncBinding(func(ctx context.Context, args ...ref.Val) ref.Val {
-							msg := string(args[0].(types.String))
-							delayMs := time.Duration(int64(args[1].(types.Int))) * time.Millisecond
-							time.Sleep(delayMs)
-							return types.String(msg)
-						}),
+			synctest.Test(t, func(t *testing.T) {
+				var evalPasses atomic.Int32
+				opts := []any{
+					cel.Function("delayed_rpc",
+						cel.Overload("delayed_rpc_string_int", []*cel.Type{cel.StringType, cel.IntType}, cel.StringType,
+							cel.AsyncBinding(func(ctx context.Context, args ...ref.Val) ref.Val {
+								msg := string(args[0].(types.String))
+								delayMs := time.Duration(int64(args[1].(types.Int))) * time.Millisecond
+								time.Sleep(delayMs)
+								return types.String(msg)
+							}),
+						),
 					),
-				),
-				cel.ConcurrentDrainStrategy(async.DrainReady(tc.debounce)),
-				trackEvalPasses(&evalPasses),
-			}
-
-			start := time.Now()
-			prg := mustProgram(t, tc.expr, opts...)
-			res := awaitEval(context.Background(), t, prg, cel.NoVars())
-			elapsed := time.Since(start)
-
-			if res.Err != nil {
-				t.Fatalf("ConcurrentEval() error: %v", res.Err)
-			}
-			if res.Val.Equal(tc.want) != types.True {
-				t.Errorf("ConcurrentEval() = %v, want %v", res.Val, tc.want)
-			}
-			if tc.wantPasses > 0 {
-				if got := evalPasses.Load(); got != int32(tc.wantPasses) {
-					t.Errorf("evaluation loop pass count = %d, want %d", got, tc.wantPasses)
+					cel.ConcurrentDrainStrategy(async.DrainReady(tc.debounce)),
+					trackEvalPasses(&evalPasses),
 				}
-			}
-			if elapsed < tc.minElapsed {
-				t.Errorf("evaluation completed in %v, want >= %v", elapsed, tc.minElapsed)
-			}
+
+				start := time.Now()
+				prg := mustProgram(t, tc.expr, opts...)
+				res := awaitEval(context.Background(), t, prg, cel.NoVars())
+				elapsed := time.Since(start)
+
+				if res.Err != nil {
+					t.Fatalf("ConcurrentEval() error: %v", res.Err)
+				}
+				if res.Val.Equal(tc.want) != types.True {
+					t.Errorf("ConcurrentEval() = %v, want %v", res.Val, tc.want)
+				}
+				if tc.wantPasses > 0 {
+					if got := evalPasses.Load(); got != int32(tc.wantPasses) {
+						t.Errorf("evaluation loop pass count = %d, want %d", got, tc.wantPasses)
+					}
+				}
+				if elapsed < tc.minElapsed {
+					t.Errorf("evaluation completed in %v, want >= %v", elapsed, tc.minElapsed)
+				}
+			})
 		})
 	}
 }
 
 func TestConcurrentEvalCancelDuringDebounce(t *testing.T) {
+	synctest.Test(t, testConcurrentEvalCancelDuringDebounce)
+}
+
+func testConcurrentEvalCancelDuringDebounce(t *testing.T) {
 	// Tests context cancellation while awaiting a debounce timeout in the completion drain loop.
 	prg := mustProgram(t, `delayed_rpc("first", 10) + delayed_rpc("second", 1000)`,
 		cel.Function("delayed_rpc",
@@ -953,10 +961,11 @@ func TestConcurrentEvalCancelDuringDebounce(t *testing.T) {
 		cel.ConcurrentDrainStrategy(async.DrainReady(10*time.Second)),
 	)
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	resCh := prg.ConcurrentEval(ctx, cel.NoVars())
 
-	// Wait for the first call (10ms) to complete and enter the 10-second debounce wait.
+	// On the fake clock the first call (10ms) has deterministically completed and the drain loop
+	// is waiting in its 10-second debounce window by the time this sleep returns.
 	time.Sleep(30 * time.Millisecond)
 	cancel()
 
@@ -968,6 +977,10 @@ func TestConcurrentEvalCancelDuringDebounce(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("ConcurrentEval() timed out waiting for cancellation during debounce")
 	}
+
+	// The second call ignores its context and sleeps for one second; let it finish so no goroutine
+	// is left blocked when the bubble exits.
+	time.Sleep(time.Second)
 }
 
 func TestConcurrentEvalRecover(t *testing.T) {
@@ -1033,7 +1046,6 @@ func TestConcurrentEvalRecover(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			ast, iss := env.Compile(tc.expr)
 			if iss.Err() != nil {
