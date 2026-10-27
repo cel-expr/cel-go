@@ -31,6 +31,7 @@ import (
 
 	exprpb "google.golang.org/genproto/googleapis/api/expr/v1alpha1"
 	anypb "google.golang.org/protobuf/types/known/anypb"
+	structpb "google.golang.org/protobuf/types/known/structpb"
 
 	proto3pb "cel.dev/cel-go/test/proto3pb"
 )
@@ -81,6 +82,28 @@ func TestAttributesAbsoluteAttrType(t *testing.T) {
 	}
 	if out != types.IntType {
 		t.Errorf("Got %v, wanted success", out)
+	}
+}
+
+func TestAttributesNilAdapterDefault(t *testing.T) {
+	reg := newTestRegistry(t)
+	attrs := NewAttributeFactory(containers.DefaultContainer, nil, reg)
+	vars, err := NewActivation(map[string]any{
+		"names": map[string]string{"a": "A"},
+	})
+	if err != nil {
+		t.Fatalf("NewActivation() failed: %v", err)
+	}
+
+	// names[<raw *structpb.Value>] requires the adapter to convert the qualifier value.
+	attr := attrs.AbsoluteAttribute(1, "names")
+	attr.AddQualifier(makeQualifier(t, attrs, nil, 2, structpb.NewStringValue("a")))
+	out, err := attr.Resolve(vars)
+	if err != nil {
+		t.Fatalf("Resolve() failed: %v", err)
+	}
+	if out != "A" && out != types.String("A") {
+		t.Errorf("Resolve() got %v (%T), wanted A", out, out)
 	}
 }
 

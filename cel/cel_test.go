@@ -6945,4 +6945,124 @@ func TestProtoMessageComprehensions(t *testing.T) {
 	}
 }
 
+// TestJSONComprehensionVarQualifiers is a regression test for
+// https://github.com/cel-expr/cel-go/issues/1585 where comprehension variables bound to raw JSON
+// values (e.g. *structpb.Value elements of a *structpb.ListValue) could not be used as index or
+// map key qualifiers.
+func TestJSONComprehensionVarQualifiers(t *testing.T) {
+	allTwoVar := ReceiverMacro("all", 3,
+		func(mef MacroExprFactory, target celast.Expr, args []celast.Expr) (celast.Expr, *Error) {
+			return mef.NewComprehensionTwoVar(
+				target,
+				args[0].AsIdent(),
+				args[1].AsIdent(),
+				mef.AccuIdentName(),
+				mef.NewLiteral(types.True),
+				mef.NewCall(operators.NotStrictlyFalse, mef.NewAccuIdent()),
+				mef.NewCall(operators.LogicalAnd, mef.NewAccuIdent(), args[2]),
+				mef.NewAccuIdent(),
+			), nil
+		})
+	env, err := NewEnv(
+		OptionalTypes(),
+		Macros(allTwoVar),
+		Variable("keys", ListType(StringType)),
+		Variable("ids", ListType(IntType)),
+		Variable("obj", MapType(StringType, StringType)),
+		Variable("names", MapType(StringType, StringType)),
+		Variable("byID", MapType(IntType, StringType)),
+	)
+	if err != nil {
+		t.Fatalf("NewEnv() failed: %v", err)
+	}
+	keys, err := structpb.NewList([]any{"a", "b"})
+	if err != nil {
+		t.Fatalf("structpb.NewList() failed: %v", err)
+	}
+	ids, err := structpb.NewList([]any{1, 2})
+	if err != nil {
+		t.Fatalf("structpb.NewList() failed: %v", err)
+	}
+	obj, err := structpb.NewStruct(map[string]any{"x": "a", "y": "b"})
+	if err != nil {
+		t.Fatalf("structpb.NewStruct() failed: %v", err)
+	}
+	vars := map[string]any{
+		"keys":  keys,
+		"ids":   ids,
+		"obj":   obj,
+		"names": map[string]string{"a": "A", "b": "B"},
+		"byID":  map[int64]string{1: "A", 2: "B"},
+	}
 
+	tests := []struct {
+		name    string
+		expr    string
+		partial bool
+	}{
+		{
+			name: "1-var JSON list element as string map key",
+			expr: `keys.map(k, names[k]) == ['A', 'B']`,
+		},
+		{
+			name: "1-var JSON list element as optional string map key",
+			expr: `keys.map(k, names[?k].orValue('')) == ['A', 'B']`,
+		},
+		{
+			name: "1-var JSON list element as numeric map key",
+			expr: `ids.map(i, byID[i]) == ['A', 'B']`,
+		},
+		{
+			name: "2-var JSON struct value as string map key",
+			expr: `obj.all(k, v, names[v] != '')`,
+		},
+		{
+			name:    "1-var JSON list element as string map key with partial eval",
+			expr:    `keys.map(k, names[k]) == ['A', 'B']`,
+			partial: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ast, iss := env.Compile(tc.expr)
+			if iss.Err() != nil {
+				t.Fatalf("Compile(%q) failed: %v", tc.expr, iss.Err())
+			}
+			var opts []ProgramOption
+			var in any = vars
+			if tc.partial {
+				opts = append(opts, EvalOptions(OptPartialEval))
+				in, err = PartialVars(vars, AttributePattern("names").QualString("unknown"))
+				if err != nil {
+					t.Fatalf("PartialVars() failed: %v", err)
+				}
+			}
+			prg, err := env.Program(ast, opts...)
+			if err != nil {
+				t.Fatalf("Program() failed: %v", err)
+			}
+			out, _, err := prg.Eval(in)
+			if err != nil {
+				t.Fatalf("Eval(%q) failed: %v", tc.expr, err)
+			}
+			if out != types.True {
+				t.Errorf("Eval(%q) = %v, wanted true", tc.expr, out)
+			}
+		})
+	}
+}
+
+func TestCustomTypeAdapterNil(t *testing.T) {
+	_, err := NewEnv(CustomTypeAdapter(nil))
+	if err == nil || !strings.Contains(err.Error(), "custom type adapter must not be nil") {
+		t.Errorf("NewEnv(CustomTypeAdapter(nil)) got error %v, wanted 'custom type adapter must not be nil'", err)
+	}
+}
+
+func TestCustomTypeProviderNil(t *testing.T) {
+	_, err := NewEnv(CustomTypeProvider(nil))
+	if err == nil || !strings.Contains(err.Error(), "custom type provider must not be nil") {
+		t.Errorf("NewEnv(CustomTypeProvider(nil)) got error %v, wanted 'custom type provider must not be nil'", err)
+	}
+}
