@@ -160,6 +160,7 @@ type Env struct {
 	appliedFeaturesShared bool
 	limitsShared          bool
 	libsShared            bool
+	costShared            bool
 
 	parent *Env
 
@@ -653,13 +654,15 @@ func (e *Env) Extend(opts ...EnvOption) (*Env, error) {
 		chkOpts:         chkOptsCopy,
 		prsrOpts:        prsrOptsCopy,
 		costOptions:     costOptsCopy,
-		costConfig:      e.costConfig.copy(),
+		costConfig:      e.costConfig,
+		costModel:       e.costModel,
 		// Copy-on-write flags.
 		funcsShared:           true,
 		featuresShared:        true,
 		limitsShared:          true,
 		appliedFeaturesShared: true,
 		libsShared:            true,
+		costShared:            true,
 	}
 	return ext.configure(opts)
 }
@@ -696,6 +699,13 @@ func (e *Env) ensureMutableLimits() {
 	if e.limitsShared {
 		e.limits = maps.Clone(e.limits)
 		e.limitsShared = false
+	}
+}
+
+func (e *Env) ensureMutableCostConfig() {
+	if e.costShared {
+		e.costConfig = e.costConfig.copy()
+		e.costShared = false
 	}
 }
 
@@ -999,7 +1009,9 @@ func (e *Env) configure(opts []EnvOption) (*Env, error) {
 		}
 	}
 
-	e.costModel = e.costConfig.build()
+	if !e.costShared {
+		e.costModel = e.costConfig.build()
+	}
 
 	// Configure the parser.
 	prsrOpts := []parser.Option{}
