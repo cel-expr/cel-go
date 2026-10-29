@@ -1009,6 +1009,9 @@ func (e *Env) configure(opts []EnvOption) (*Env, error) {
 		}
 	}
 
+	// If the cost configuration and model are not shared with a parent environment by
+	// way of Extend(), then build the cost model; otherwise, the cost model has already
+	// been initialized, no change in the model were made, and no further work is needed.
 	if !e.costShared {
 		e.costModel = e.costConfig.build()
 	}
