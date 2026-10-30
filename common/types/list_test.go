@@ -1796,3 +1796,136 @@ func testSliceListType[T any](t *testing.T, adapter Adapter, slice []T, matchVal
 		t.Errorf("Iterator Next past end returned non-nil")
 	}
 }
+
+type customVerStruct struct {
+	Major int64
+}
+
+type customPtrVerStruct struct {
+	Major *int64
+}
+
+type customVerAdapter struct {
+	Adapter
+}
+
+func (a customVerAdapter) NativeToValue(v any) ref.Val {
+	switch ver := v.(type) {
+	case customVerStruct:
+		return Int(ver.Major)
+	case *customVerStruct:
+		if ver == nil {
+			return NullValue
+		}
+		return Int(ver.Major)
+	case customPtrVerStruct:
+		if ver.Major == nil {
+			return NullValue
+		}
+		return Int(*ver.Major)
+	}
+	return a.Adapter.NativeToValue(v)
+}
+
+func TestCustomAdapterList_Issue1594(t *testing.T) {
+	customAdapt := customVerAdapter{Adapter: DefaultTypeAdapter}
+	v1, v2 := int64(10), int64(20)
+
+	lists := []struct {
+		name string
+		list traits.Lister
+		want []ref.Val
+	}{
+		{
+			name: "NewDynamicList_StructSlice",
+			list: NewDynamicList(customAdapt, []customVerStruct{{10}, {20}}),
+			want: []ref.Val{Int(10), Int(20)},
+		},
+		{
+			name: "NewDynamicList_DirectIfaceStructSlice",
+			list: NewDynamicList(customAdapt, []customPtrVerStruct{{&v1}, {&v2}}),
+			want: []ref.Val{Int(10), Int(20)},
+		},
+		{
+			name: "NewDynamicList_PtrStructSlice",
+			list: NewDynamicList(customAdapt, []*customVerStruct{{10}, {20}}),
+			want: []ref.Val{Int(10), Int(20)},
+		},
+		{
+			name: "NewDynamicList_AnySlice",
+			list: NewDynamicList(customAdapt, []any{customVerStruct{10}, customVerStruct{20}}),
+			want: []ref.Val{Int(10), Int(20)},
+		},
+		{
+			name: "NewDynamicList_ArrayBaseList",
+			list: NewDynamicList(customAdapt, [2]customVerStruct{{10}, {20}}),
+			want: []ref.Val{Int(10), Int(20)},
+		},
+		{
+			name: "NewList_StructSlice",
+			list: NewList(customAdapt, []customVerStruct{{10}, {20}}),
+			want: []ref.Val{Int(10), Int(20)},
+		},
+		{
+			name: "NewList_DirectIfaceStructSlice",
+			list: NewList(customAdapt, []customPtrVerStruct{{&v1}, {&v2}}),
+			want: []ref.Val{Int(10), Int(20)},
+		},
+	}
+
+	for _, tc := range lists {
+		t.Run(tc.name, func(t *testing.T) {
+			// 1. Fold must pass adapted ref.Val elements to FoldEntry
+			var gotFold []ref.Val
+			tc.list.(traits.Foldable).Fold(&testFuncFolder{fn: func(k, v any) bool {
+				rv, ok := v.(ref.Val)
+				if !ok {
+					t.Fatalf("FoldEntry received unadapted value %T (%v), wanted ref.Val", v, v)
+				}
+				gotFold = append(gotFold, rv)
+				return true
+			}})
+			if !reflect.DeepEqual(gotFold, tc.want) {
+				t.Errorf("Fold got %v, want %v", gotFold, tc.want)
+			}
+			// Early termination in Fold
+			tc.list.(traits.Foldable).Fold(&testFuncFolder{fn: func(k, v any) bool {
+				return false
+			}})
+
+			// 2. GetInt64Index (when implemented) must return adapted ref.Val
+			if idx, ok := tc.list.(int64Indexer); ok {
+				for i, w := range tc.want {
+					got, found := idx.GetInt64Index(int64(i))
+					if !found || got != w {
+						t.Errorf("GetInt64Index(%d) = (%v, %v), want (%v, true)", i, got, found, w)
+					}
+				}
+			}
+
+			// 3. MaybeSliceList and MaybeReverseList must preserve the custom Adapter
+			if sub, ok := MaybeSliceList(DefaultTypeAdapter, tc.list, 0, 1); ok {
+				if got := sub.Get(IntZero); got != tc.want[0] {
+					t.Errorf("MaybeSliceList Get(0) = %v, want %v", got, tc.want[0])
+				}
+				if idx, ok := sub.(int64Indexer); ok {
+					if got, found := idx.GetInt64Index(0); !found || got != tc.want[0] {
+						t.Errorf("MaybeSliceList GetInt64Index(0) = (%v, %v), want (%v, true)", got, found, tc.want[0])
+					}
+				}
+			}
+			if rev, ok := MaybeReverseList(DefaultTypeAdapter, tc.list); ok {
+				wantFirst := tc.want[len(tc.want)-1]
+				if got := rev.Get(IntZero); got != wantFirst {
+					t.Errorf("MaybeReverseList Get(0) = %v, want %v", got, wantFirst)
+				}
+				if idx, ok := rev.(int64Indexer); ok {
+					if got, found := idx.GetInt64Index(0); !found || got != wantFirst {
+						t.Errorf("MaybeReverseList GetInt64Index(0) = (%v, %v), want (%v, true)", got, found, wantFirst)
+					}
+				}
+			}
+		})
+	}
+}
+

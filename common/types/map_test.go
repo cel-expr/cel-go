@@ -2090,3 +2090,54 @@ func (f *testKeyOnlyEarly) FoldEntry(key, val any) bool {
 	f.count++
 	return f.count < f.limit
 }
+
+func TestCustomAdapterMap_Issue1594(t *testing.T) {
+	customAdapt := customVerAdapter{Adapter: DefaultTypeAdapter}
+
+	mapsToTest := []struct {
+		name string
+		m    traits.Mapper
+	}{
+		{
+			name: "NewMap_StringStruct",
+			m:    NewMap(customAdapt, map[string]customVerStruct{"a": {10}, "b": {20}}),
+		},
+		{
+			name: "NewMap_CustomKeyStructVal",
+			m:    NewMap(customAdapt, map[customVerStruct]customVerStruct{{1}: {10}, {2}: {20}}),
+		},
+		{
+			name: "NewDynamicMap_StringStruct",
+			m:    NewDynamicMap(customAdapt, map[string]customVerStruct{"a": {10}, "b": {20}}),
+		},
+	}
+
+	for _, tc := range mapsToTest {
+		t.Run(tc.name, func(t *testing.T) {
+			var foldCount int
+			tc.m.(traits.Foldable).Fold(&testFuncFolder{fn: func(k, v any) bool {
+				if _, ok := k.(ref.Val); !ok {
+					t.Fatalf("FoldEntry received unadapted key %T (%v), wanted ref.Val", k, k)
+				}
+				if _, ok := v.(ref.Val); !ok {
+					t.Fatalf("FoldEntry received unadapted val %T (%v), wanted ref.Val", v, v)
+				}
+				foldCount++
+				return true
+			}})
+			if foldCount != 2 {
+				t.Errorf("Fold count = %d, want 2", foldCount)
+			}
+			// Early termination in Fold
+			tc.m.(traits.Foldable).Fold(&testFuncFolder{fn: func(k, v any) bool {
+				return false
+			}})
+			if sk, ok := tc.m.(interface{ FindStringKey(string) (any, bool) }); ok {
+				if got, found := sk.FindStringKey("a"); found && got != Int(10) {
+					t.Errorf("FindStringKey(\"a\") = %v, want Int(10)", got)
+				}
+			}
+		})
+	}
+}
+
