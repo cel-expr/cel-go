@@ -34,6 +34,8 @@ var (
 	// ErrAlreadyExists indicates a duplicate field or enum constant
 	// definition.
 	ErrAlreadyExists = errors.New("already exists")
+
+	defaultFieldType = &types.Type{}
 )
 
 // Kind indicates whether a TypeDef holds a struct or an enum definition.
@@ -290,11 +292,15 @@ type Field struct {
 }
 
 // NewField creates a new Field with the given non-empty name, CEL type, and
-// optional configuration. Returns ErrBadTypeDef if name is empty or an option
-// fails validation.
+// optional configuration. If fieldType is nil, it defaults to a zero-value
+// *types.Type (types.UnspecifiedKind). Returns ErrBadTypeDef if name is empty
+// or an option fails validation.
 func NewField(name string, fieldType *types.Type, opts ...FieldOpt) (*Field, error) {
 	if name == "" {
 		return nil, fmt.Errorf("%w: field name cannot be empty", ErrBadTypeDef)
+	}
+	if fieldType == nil {
+		fieldType = defaultFieldType
 	}
 	f := &Field{
 		name:      name,
@@ -319,10 +325,11 @@ func (f *Field) Name() string {
 	return f.name
 }
 
-// Type returns the field's CEL type.
+// Type returns the field's CEL type, or a zero-value *types.Type
+// (types.UnspecifiedKind) if f is nil or uninitialized.
 func (f *Field) Type() *types.Type {
-	if f == nil {
-		return nil
+	if f == nil || f.fieldType == nil {
+		return defaultFieldType
 	}
 	return f.fieldType
 }

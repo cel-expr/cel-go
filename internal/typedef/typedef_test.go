@@ -289,6 +289,13 @@ func TestStructTypeDefConstructionAndLookup(t *testing.T) {
 	)
 	tagsField := mustField(t, "tags", types.NewListType(types.StringType))
 	untypedField := mustField(t, "untyped", nil)
+	if untypedField.Type() == nil || untypedField.Type().Kind() != types.UnspecifiedKind {
+		t.Errorf("untypedField.Type() = %v, want non-nil UnspecifiedKind", untypedField.Type())
+	}
+	var zeroField typedef.Field
+	if zeroField.Type() == nil || zeroField.Type().Kind() != types.UnspecifiedKind {
+		t.Errorf("zeroField.Type() = %v, want non-nil UnspecifiedKind", zeroField.Type())
+	}
 
 	for _, f := range []*typedef.Field{idField, displayNameField, avatarField, tagsField, untypedField} {
 		if err := person.AddField(f); err != nil {
@@ -447,6 +454,8 @@ func TestFieldDefaultValues(t *testing.T) {
 		{name: "double", val: types.Double(3.25), wantHas: true},
 		{name: "double_nan", val: types.Double(math.NaN()), wantHas: true},
 		{name: "bytes", val: types.Bytes([]byte{0xff, 0x00, 0x01}), wantHas: true},
+		{name: "bytes_nil", val: types.Bytes(nil), wantHas: true},
+		{name: "bytes_empty", val: types.Bytes{}, wantHas: true},
 		{name: "string", val: types.String("hello"), wantHas: true},
 		{name: "duration", val: types.Duration{Duration: 90 * time.Second}, wantHas: true},
 		{name: "timestamp", val: types.Timestamp{Time: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)}, wantHas: true},
@@ -469,6 +478,7 @@ func TestFieldDefaultValues(t *testing.T) {
 
 	var typedNilErr *types.Err
 	var typedNilDuration *types.Duration
+	var typedNilTimestamp *types.Timestamp
 	invalidCases := []struct {
 		name string
 		val  ref.Val
@@ -481,6 +491,7 @@ func TestFieldDefaultValues(t *testing.T) {
 		{name: "optional_none", val: types.OptionalNone},
 		{name: "typed_nil_err", val: typedNilErr},
 		{name: "typed_nil_duration_ptr", val: typedNilDuration},
+		{name: "typed_nil_timestamp_ptr", val: typedNilTimestamp},
 	}
 
 	for _, tc := range invalidCases {
@@ -816,8 +827,8 @@ func TestNilField(t *testing.T) {
 	if got := f.Name(); got != "" {
 		t.Errorf("nil Field.Name() = %q, want \"\"", got)
 	}
-	if got := f.Type(); got != nil {
-		t.Errorf("nil Field.Type() = %v, want nil", got)
+	if got := f.Type(); got == nil || got.Kind() != types.UnspecifiedKind {
+		t.Errorf("nil Field.Type() = %v, want non-nil UnspecifiedKind", got)
 	}
 	if got := f.Doc(); got != "" {
 		t.Errorf("nil Field.Doc() = %q, want \"\"", got)
