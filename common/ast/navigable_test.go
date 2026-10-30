@@ -682,7 +682,7 @@ func newTestRegistry(t testing.TB, opts ...types.RegistryOption) *types.Registry
 
 func newTestEnv(t testing.TB, cont *containers.Container, reg *types.Registry, opts ...checker.Option) *checker.Env {
 	t.Helper()
-	chkOpts := []checker.Option{checker.CrossTypeNumericComparisons(true)}
+	chkOpts := []checker.Option{}
 	chkOpts = append(chkOpts, opts...)
 	env, err := checker.NewEnv(cont, reg, chkOpts...)
 	if err != nil {

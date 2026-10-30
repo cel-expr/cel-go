@@ -50,9 +50,6 @@ const (
 	// Enable the tracking of function call expressions replaced by macros.
 	featureEnableMacroCallTracking
 
-	// Enable the use of cross-type numeric comparisons at the type-checker.
-	featureCrossTypeNumericComparisons
-
 	// Enable eager validation of declarations to ensure that Env values created
 	// with `Extend` inherit a validated list of declarations from the parent Env.
 	featureEagerlyValidateDeclarations
@@ -84,10 +81,9 @@ const (
 )
 
 var featureIDsToNames = map[int]string{
-	featureEnableMacroCallTracking:     "cel.feature.macro_call_tracking",
-	featureCrossTypeNumericComparisons: "cel.feature.cross_type_numeric_comparisons",
-	featureIdentEscapeSyntax:           "cel.feature.backtick_escape_syntax",
-	featureJSONFieldNames:              "cel.feature.json_field_names",
+	featureEnableMacroCallTracking: "cel.feature.macro_call_tracking",
+	featureIdentEscapeSyntax:       "cel.feature.backtick_escape_syntax",
+	featureJSONFieldNames:          "cel.feature.json_field_names",
 }
 
 func featureNameByID(id int) (string, bool) {
@@ -1117,8 +1113,15 @@ func EnableIdentifierEscapeSyntax() EnvOption {
 }
 
 // CrossTypeNumericComparisons makes it possible to compare across numeric types, e.g. double < int
+// By default, this option is enabled. CrossTypeNumericComparisons(false) is not
+// supported, use library subsetting instead.
 func CrossTypeNumericComparisons(enabled bool) EnvOption {
-	return features(featureCrossTypeNumericComparisons, enabled)
+	return func(e *Env) (*Env, error) {
+		if !enabled {
+			return nil, errors.New("CrossTypeNumericComparisons(false) is not supported, use library subsetting instead")
+		}
+		return e, nil
+	}
 }
 
 // DefaultUTCTimeZone ensures that time-based operations use the UTC timezone rather than the

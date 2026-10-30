@@ -97,10 +97,6 @@ func NewEnv(container *containers.Container, provider types.Provider, opts ...Op
 	if envOptions.homogeneousAggregateLiterals {
 		aggLitElemType = homogenousElementType
 	}
-	filteredOverloadIDs := crossTypeNumericComparisonOverloads
-	if envOptions.crossTypeNumericComparisons {
-		filteredOverloadIDs = make(map[string]struct{})
-	}
 	if envOptions.validatedDeclarations != nil {
 		declarations = envOptions.validatedDeclarations.PushInherited()
 	}
@@ -109,7 +105,7 @@ func NewEnv(container *containers.Container, provider types.Provider, opts ...Op
 		provider:            provider,
 		declarations:        declarations,
 		aggLitElemType:      aggLitElemType,
-		filteredOverloadIDs: filteredOverloadIDs,
+		filteredOverloadIDs: map[string]struct{}{},
 		jsonFieldNames:      envOptions.jsonFieldNames,
 		catalogSupplier:     envOptions.catalogSupplier,
 	}, nil

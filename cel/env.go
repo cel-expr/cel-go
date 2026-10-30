@@ -1060,9 +1060,6 @@ func (e *Env) initChecker() (*checker.Env, error) {
 		chkOpts := []checker.Option{}
 		chkOpts = append(chkOpts, e.chkOpts...)
 		chkOpts = append(chkOpts,
-			checker.CrossTypeNumericComparisons(
-				e.HasFeature(featureCrossTypeNumericComparisons)))
-		chkOpts = append(chkOpts,
 			checker.JSONFieldNames(e.HasFeature(featureJSONFieldNames)))
 
 		chkOpts = append(chkOpts, checker.Catalog(func() *env.Catalog {

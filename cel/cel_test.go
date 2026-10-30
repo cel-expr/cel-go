@@ -42,7 +42,6 @@ import (
 	"cel.dev/cel-go/common/types/traits"
 	"cel.dev/cel-go/interpreter"
 	"cel.dev/cel-go/parser"
-	"cel.dev/cel-go/test"
 
 	exprpb "google.golang.org/genproto/googleapis/api/expr/v1alpha1"
 	descpb "google.golang.org/protobuf/types/descriptorpb"
@@ -415,76 +414,6 @@ func TestCustomEnv(t *testing.T) {
 			t.Errorf("got '%v', wanted 'true'", out.Value())
 		}
 	})
-}
-
-func TestCrossTypeNumericComparisons(t *testing.T) {
-	tests := []struct {
-		name string
-		expr string
-		iss  string
-		opt  EnvOption
-		out  ref.Val
-	}{
-		// Statically typed expressions need to opt in to cross-type numeric comparisons
-		{
-			name: "double_less_than_int_err",
-			expr: `1.0 < 2`,
-			opt:  CrossTypeNumericComparisons(false),
-			iss: `
-			ERROR: <input>:1:5: found no matching overload for '_<_' applied to '(double, int)'
-             | 1.0 < 2
-             | ....^`,
-		},
-		{
-			name: "double_less_than_int_success",
-			expr: `1.0 < 2`,
-			opt:  CrossTypeNumericComparisons(true),
-			out:  types.True,
-		},
-		// Dynamic data already benefits from cross-type numeric comparisons
-		{
-			name: "dyn_less_than_int_success",
-			expr: `dyn(1.0) < 2`,
-			opt:  CrossTypeNumericComparisons(false),
-			out:  types.True,
-		},
-		{
-			name: "dyn_less_than_int_success",
-			expr: `dyn(1.0) < 2`,
-			opt:  CrossTypeNumericComparisons(true),
-			out:  types.True,
-		},
-	}
-	for _, tst := range tests {
-		tc := tst
-		t.Run(tc.name, func(t *testing.T) {
-			e := testEnv(t, tc.opt)
-			ast, iss := e.Compile(tc.expr)
-			if tc.iss != "" {
-				if iss.Err() == nil {
-					t.Fatalf("e.Compile(%v) returned ast, expected error: %v", tc.expr, tc.iss)
-				}
-				if !test.Compare(iss.Err().Error(), tc.iss) {
-					t.Fatalf("e.Compile(%v) returned %v, expected error: %v", tc.expr, iss.Err(), tc.iss)
-				}
-				return
-			}
-			if iss.Err() != nil {
-				t.Fatalf("e.Compile(%v) failed: %v", tc.expr, iss.Err())
-			}
-			prg, err := e.Program(ast)
-			if err != nil {
-				t.Fatalf("e.Program() failed: %v", err)
-			}
-			out, _, err := prg.Eval(NoVars())
-			if err != nil {
-				t.Fatalf("prg.Eval() errored: %v", err)
-			}
-			if out != tc.out {
-				t.Errorf("program eval got %v, wanted %v", out, tc.out)
-			}
-		})
-	}
 }
 
 func TestExtendStdlibFunction(t *testing.T) {

@@ -1638,32 +1638,7 @@ _&&_(_==_(list~type(list(dyn))^list,
 		`,
 		},
 		{
-			in:   `1 <= 1.0 && 1u <= 1.0 && 1.0 <= 1 && 1.0 <= 1u && 1 <= 1u && 1u <= 1`,
-			opts: []Option{CrossTypeNumericComparisons(false)},
-			err: `
-		ERROR: <input>:1:3: found no matching overload for '_<=_' applied to '(int, double)'
-		 | 1 <= 1.0 && 1u <= 1.0 && 1.0 <= 1 && 1.0 <= 1u && 1 <= 1u && 1u <= 1
-		 | ..^
-		ERROR: <input>:1:16: found no matching overload for '_<=_' applied to '(uint, double)'
-		 | 1 <= 1.0 && 1u <= 1.0 && 1.0 <= 1 && 1.0 <= 1u && 1 <= 1u && 1u <= 1
-		 | ...............^
-		ERROR: <input>:1:30: found no matching overload for '_<=_' applied to '(double, int)'
-		 | 1 <= 1.0 && 1u <= 1.0 && 1.0 <= 1 && 1.0 <= 1u && 1 <= 1u && 1u <= 1
-		 | .............................^
-		ERROR: <input>:1:42: found no matching overload for '_<=_' applied to '(double, uint)'
-		 | 1 <= 1.0 && 1u <= 1.0 && 1.0 <= 1 && 1.0 <= 1u && 1 <= 1u && 1u <= 1
-		 | .........................................^
-		ERROR: <input>:1:53: found no matching overload for '_<=_' applied to '(int, uint)'
-		 | 1 <= 1.0 && 1u <= 1.0 && 1.0 <= 1 && 1.0 <= 1u && 1 <= 1u && 1u <= 1
-		 | ....................................................^
-		ERROR: <input>:1:65: found no matching overload for '_<=_' applied to '(uint, int)'
-		 | 1 <= 1.0 && 1u <= 1.0 && 1.0 <= 1 && 1.0 <= 1u && 1 <= 1u && 1u <= 1
-		 | ................................................................^
-		`,
-		},
-		{
 			in:      `1 <= 1.0 && 1u <= 1.0 && 1.0 <= 1 && 1.0 <= 1u && 1 <= 1u && 1u <= 1`,
-			opts:    []Option{CrossTypeNumericComparisons(true)},
 			outType: types.BoolType,
 			out: `
 		_&&_(
@@ -1703,7 +1678,6 @@ _&&_(_==_(list~type(list(dyn))^list,
 		},
 		{
 			in:      `1 < 1.0 && 1u < 1.0 && 1.0 < 1 && 1.0 < 1u && 1 < 1u && 1u < 1`,
-			opts:    []Option{CrossTypeNumericComparisons(true)},
 			outType: types.BoolType,
 			out: `
 		_&&_(
@@ -1743,7 +1717,6 @@ _&&_(_==_(list~type(list(dyn))^list,
 		},
 		{
 			in:      `1 > 1.0 && 1u > 1.0 && 1.0 > 1 && 1.0 > 1u && 1 > 1u && 1u > 1`,
-			opts:    []Option{CrossTypeNumericComparisons(true)},
 			outType: types.BoolType,
 			out: `
 		_&&_(
@@ -1783,7 +1756,6 @@ _&&_(_==_(list~type(list(dyn))^list,
 		},
 		{
 			in:      `1 >= 1.0 && 1u >= 1.0 && 1.0 >= 1 && 1.0 >= 1u && 1 >= 1u && 1u >= 1`,
-			opts:    []Option{CrossTypeNumericComparisons(true)},
 			outType: types.BoolType,
 			out: `
 		_&&_(
@@ -1823,7 +1795,6 @@ _&&_(_==_(list~type(list(dyn))^list,
 		},
 		{
 			in:      `1 >= 1.0 && 1u >= 1.0 && 1.0 >= 1 && 1.0 >= 1u && 1 >= 1u && 1u >= 1`,
-			opts:    []Option{CrossTypeNumericComparisons(true)},
 			env:     testEnv{variadicASTs: true},
 			outType: types.BoolType,
 			out: `
@@ -2559,7 +2530,7 @@ func TestCheck(t *testing.T) {
 			if err != nil {
 				t.Fatalf("containers.NewContainer() failed: %v", err)
 			}
-			opts := []Option{CrossTypeNumericComparisons(true)}
+			opts := []Option{}
 			if len(tc.opts) != 0 {
 				opts = tc.opts
 			}
@@ -2671,7 +2642,7 @@ func BenchmarkCheck(b *testing.B) {
 			if err != nil {
 				b.Fatalf("containers.NewContainer() failed: %v", err)
 			}
-			opts := []Option{CrossTypeNumericComparisons(true)}
+			opts := []Option{}
 			if len(tc.opts) != 0 {
 				opts = tc.opts
 			}
@@ -2747,7 +2718,7 @@ func BenchmarkCheckLongConjunction(b *testing.B) {
 			if len(errs.GetErrors()) > 0 {
 				b.Fatalf("Parse() failed: %v", errs.ToDisplayString())
 			}
-			env, err := NewEnv(containers.DefaultContainer, newTestRegistry(b), CrossTypeNumericComparisons(true))
+			env, err := NewEnv(containers.DefaultContainer, newTestRegistry(b))
 			if err != nil {
 				b.Fatalf("NewEnv() failed: %v", err)
 			}
@@ -2767,7 +2738,7 @@ func TestAddDuplicateDeclarations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("types.NewRegistry() failed: %v", err)
 	}
-	env, err := NewEnv(containers.DefaultContainer, reg, CrossTypeNumericComparisons(true))
+	env, err := NewEnv(containers.DefaultContainer, reg)
 	if err != nil {
 		t.Fatalf("NewEnv() failed: %v", err)
 	}
@@ -2786,7 +2757,7 @@ func TestAddEquivalentDeclarations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("types.NewRegistry() failed: %v", err)
 	}
-	env, err := NewEnv(containers.DefaultContainer, reg, CrossTypeNumericComparisons(true))
+	env, err := NewEnv(containers.DefaultContainer, reg)
 	if err != nil {
 		t.Fatalf("NewEnv() failed: %v", err)
 	}

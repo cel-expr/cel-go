@@ -2801,7 +2801,7 @@ func testMustParse(t testing.TB, data any) *ast.AST {
 
 func newTestEnv(t testing.TB, cont *containers.Container, reg *types.Registry) *checker.Env {
 	t.Helper()
-	env, err := checker.NewEnv(cont, reg, checker.CrossTypeNumericComparisons(true))
+	env, err := checker.NewEnv(cont, reg)
 	if err != nil {
 		t.Fatalf("checker.NewEnv(%v, %v) failed: %v", cont, reg, err)
 	}

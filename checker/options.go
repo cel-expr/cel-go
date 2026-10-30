@@ -22,7 +22,6 @@ import (
 type CatalogSupplier func() *env.Catalog
 
 type options struct {
-	crossTypeNumericComparisons  bool
 	homogeneousAggregateLiterals bool
 	validatedDeclarations        *Scopes
 	jsonFieldNames               bool
@@ -36,15 +35,6 @@ type Option func(*options) error
 func Catalog(cat CatalogSupplier) Option {
 	return func(opts *options) error {
 		opts.catalogSupplier = cat
-		return nil
-	}
-}
-
-// CrossTypeNumericComparisons toggles type-checker support for numeric comparisons across type
-// See https://github.com/google/cel-spec/wiki/proposal-210 for more details.
-func CrossTypeNumericComparisons(enabled bool) Option {
-	return func(opts *options) error {
-		opts.crossTypeNumericComparisons = enabled
 		return nil
 	}
 }

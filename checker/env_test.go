@@ -109,7 +109,6 @@ func TestEnterExitScope(t *testing.T) {
 	parent, err := NewEnv(
 		containers.DefaultContainer,
 		newTestRegistry(t),
-		CrossTypeNumericComparisons(true),
 		JSONFieldNames(true),
 		Catalog(func() *env.Catalog { return cat }),
 	)
