@@ -141,7 +141,7 @@ func TestBuildersOwnTheirInputs(t *testing.T) {
 	models := []OverloadModel{Overload("f", EvalCost(Const(1)))}
 	opt := Model(models...)
 	models[0] = Overload("f", EvalCost(Const(5)))
-	est := newModelOptions(opt).modelSets[0].estimators()["f"](nil, nil, nil)
+	est := newModelOptions(opt).modelSets[0].estimators(defaultModelRules())["f"](nil, nil, nil)
 	if est.CostEstimate != FixedCostEstimate(1) {
 		t.Errorf("Model() estimate = %v after the caller's slice changed, want %v", est.CostEstimate, FixedCostEstimate(1))
 	}
@@ -164,3 +164,92 @@ func TestNilOverloadFunctionsRejected(t *testing.T) {
 		t.Errorf("NewTracker(OverloadTracker(\"f\", nil)) errored: %v, wanted an error naming the overload", err)
 	}
 }
+
+func TestCompiledModelSetAndStdCachesPerModelRules(t *testing.T) {
+	opt1 := Model(Overload("f1",
+		EvalCost(Const(10)),
+		BeforeVersion(1, EvalCost(Const(5))),
+	))
+	opt2 := Model(Overload("f2", EvalCost(Const(20))))
+	cm1 := newModelOptions(opt1).modelSets[0]
+
+	for _, strategy := range []SizingStrategy{DefaultSizingStrategy(), AggregateSizingStrategy()} {
+		for _, v := range []uint32{0, 1, defaultModelVersion} {
+			rules := modelRules{sizingStrategy: strategy, modelVersion: v}
+			c := mustNewCoster(t, nil, nil, opt1, WithSizingStrategy(strategy), ModelVersion(v))
+			if !c.overloadEstimators.shared {
+				t.Errorf("rules %v: c.overloadEstimators.shared = false, want true", rules)
+			}
+			if cm1.estCache.rules != rules {
+				t.Errorf("rules %v: cm1.estCache.rules = %v, want %v", rules, cm1.estCache.rules, rules)
+			}
+			cachedEst := cm1.estimators(rules)
+			if len(cachedEst) != 1 {
+				t.Fatalf("rules %v: cm1.estimators() = %v, want 1 entry", rules, cachedEst)
+			}
+			if c.standardOverloadEstimators == nil || len(c.standardOverloadEstimators) != len(StandardOverloadModels) {
+				t.Errorf("rules %v: unexpected standardOverloadEstimators", rules)
+			}
+
+			tr, err := NewTracker(nil, opt1, WithSizingStrategy(strategy), ModelVersion(v))
+			if err != nil {
+				t.Fatalf("rules %v: NewTracker() failed: %v", rules, err)
+			}
+			if cm1.trkCache.rules != rules {
+				t.Errorf("rules %v: cm1.trkCache.rules = %v, want %v", rules, cm1.trkCache.rules, rules)
+			}
+			cachedTrk := cm1.trackers(rules)
+			if len(cachedTrk) != 1 {
+				t.Fatalf("rules %v: cm1.trackers() = %v, want 1 entry", rules, cachedTrk)
+			}
+			if len(tr.overloadTrackers) != 1 {
+				t.Errorf("rules %v: len(tr.overloadTrackers) = %d, want 1", rules, len(tr.overloadTrackers))
+			}
+			if tr.standardOverloadTrackers == nil || len(tr.standardOverloadTrackers) != len(StandardOverloadModels) {
+				t.Errorf("rules %v: unexpected standardOverloadTrackers", rules)
+			}
+
+			// Merging a second Model option under the same rules must not mutate cm1's cache.
+			cMerged := mustNewCoster(t, nil, nil, opt1, opt2, WithSizingStrategy(strategy), ModelVersion(v))
+			if cMerged.overloadEstimators.shared {
+				t.Errorf("rules %v: cMerged.overloadEstimators.shared = true, want false", rules)
+			}
+			if len(cMerged.overloadEstimators.fns) != 2 || len(cachedEst) != 1 {
+				t.Errorf("rules %v: merged estimators = %d, cachedEst = %d, want 2 and 1", rules, len(cMerged.overloadEstimators.fns), len(cachedEst))
+			}
+			trMerged, err := NewTracker(nil, opt1, opt2, WithSizingStrategy(strategy), ModelVersion(v))
+			if err != nil {
+				t.Fatalf("rules %v: NewTracker(merged) failed: %v", rules, err)
+			}
+			if len(trMerged.overloadTrackers) != 2 || len(cachedTrk) != 1 {
+				t.Errorf("rules %v: merged trackers = %d, cachedTrk = %d, want 2 and 1", rules, len(trMerged.overloadTrackers), len(cachedTrk))
+			}
+		}
+	}
+
+	// Non-comparable SizingStrategy implementations (e.g., structs containing a map) must not panic
+	// when compared against previous rules.
+	s1 := nonComparableSizingStrategy{sizes: map[string]uint64{"a": 1}}
+	s2 := nonComparableSizingStrategy{sizes: map[string]uint64{"a": 2}}
+	mustNewCoster(t, nil, nil, opt1, WithSizingStrategy(s1))
+	mustNewCoster(t, nil, nil, opt1, WithSizingStrategy(s2))
+	if _, err := NewTracker(nil, opt1, WithSizingStrategy(s1)); err != nil {
+		t.Fatalf("NewTracker(s1) failed: %v", err)
+	}
+	if _, err := NewTracker(nil, opt1, WithSizingStrategy(s2)); err != nil {
+		t.Fatalf("NewTracker(s2) failed: %v", err)
+	}
+}
+
+type nonComparableSizingStrategy struct {
+	sizes map[string]uint64
+}
+
+func (nonComparableSizingStrategy) EstimateSize(EstimateContext, AstNode) (SizeEstimate, bool) {
+	return FixedSizeEstimate(1), true
+}
+
+func (nonComparableSizingStrategy) TrackSize(TrackContext, ref.Val) (uint64, bool) {
+	return 1, true
+}
+

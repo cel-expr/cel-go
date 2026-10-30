@@ -17,6 +17,7 @@ package cost
 import (
 	"maps"
 	"math"
+	"reflect"
 	"slices"
 	"sync"
 )
@@ -43,10 +44,19 @@ func defaultModelRules() modelRules {
 	return modelRules{sizingStrategy: defaultSizing, modelVersion: defaultModelVersion}
 }
 
-// isDefault reports whether the rules are those the package-level and per-model-set caches are
-// compiled under, so that the cached functions may be shared rather than recompiled.
-func (r modelRules) isDefault() bool {
-	return r.sizingStrategy == defaultSizing && r.modelVersion == defaultModelVersion
+func (r modelRules) equal(other modelRules) bool {
+	return r.modelVersion == other.modelVersion && sameSizingStrategy(r.sizingStrategy, other.sizingStrategy)
+}
+
+func sameSizingStrategy(a, b SizingStrategy) bool {
+	if a == defaultSizing && b == defaultSizing {
+		return true
+	}
+	if a == nil || b == nil {
+		return a == b
+	}
+	ta, tb := reflect.TypeOf(a), reflect.TypeOf(b)
+	return ta == tb && ta.Comparable() && a == b
 }
 
 func (r modelRules) modelOptions() []ModelOption {
@@ -64,16 +74,33 @@ func (r *modelRules) override(opt ModelOption) {
 	}
 }
 
+// ruleCache caches the compiled functions for a model set under the most recently used modelRules.
+type ruleCache[F any] struct {
+	mu    sync.Mutex
+	rules modelRules
+	fns   map[string]F
+}
+
+func (c *ruleCache[F]) get(models []OverloadModel, rules modelRules, compile func(...ModelOption) func(OverloadModel) F) map[string]F {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.fns == nil || !c.rules.equal(rules) {
+		var t overloadTable[F]
+		t.compile(models, compile(rules.modelOptions()...))
+		c.fns = t.fns
+		c.rules = rules
+	}
+	return c.fns
+}
+
 // compiledModelSet is the immutable product of a Model option: the models, the result of
 // validating them, and, built on first use and shared by every estimator and tracker configured
-// with the option, the functions the models compile to under the default rules.
+// with the option under the same rules, the functions the models compile to.
 type compiledModelSet struct {
-	models            []OverloadModel
-	err               error
-	estOnce           sync.Once
-	defaultEstimators map[string]FunctionEstimator
-	trkOnce           sync.Once
-	defaultTrackers   map[string]FunctionTracker
+	models   []OverloadModel
+	err      error
+	estCache ruleCache[FunctionEstimator]
+	trkCache ruleCache[FunctionTracker]
 }
 
 func newCompiledModelSet(models []OverloadModel) *compiledModelSet {
@@ -83,29 +110,19 @@ func newCompiledModelSet(models []OverloadModel) *compiledModelSet {
 	}
 }
 
-func (cm *compiledModelSet) estimators() map[string]FunctionEstimator {
-	cm.estOnce.Do(func() {
-		var t overloadTable[FunctionEstimator]
-		t.compile(cm.models, estimatorCompiler())
-		cm.defaultEstimators = t.fns
-	})
-	return cm.defaultEstimators
+func (cm *compiledModelSet) estimators(rules modelRules) map[string]FunctionEstimator {
+	return cm.estCache.get(cm.models, rules, estimatorCompiler)
 }
 
-func (cm *compiledModelSet) trackers() map[string]FunctionTracker {
-	cm.trkOnce.Do(func() {
-		var t overloadTable[FunctionTracker]
-		t.compile(cm.models, trackerCompiler())
-		cm.defaultTrackers = t.fns
-	})
-	return cm.defaultTrackers
+func (cm *compiledModelSet) trackers(rules modelRules) map[string]FunctionTracker {
+	return cm.trkCache.get(cm.models, rules, trackerCompiler)
 }
 
 // overloadTable maps overload IDs to the FunctionEstimators or FunctionTrackers which price them.
 //
 // Options populate a table while an estimator or tracker is configured; it is read-only after.
-// A table configured with a single model set under the default rules refers to the set's cached
-// functions rather than copying them, and is copied before its first write.
+// A table configured with a single model set refers to the set's cached functions rather than
+// copying them, and is copied before its first write.
 type overloadTable[F any] struct {
 	fns    map[string]F
 	shared bool
@@ -129,22 +146,13 @@ func (t *overloadTable[F]) compile(models []OverloadModel, compile func(Overload
 	}
 }
 
-// addModelSet binds the functions the models of cm compile to under the given rules.
-func (t *overloadTable[F]) addModelSet(cm *compiledModelSet, rules modelRules,
-	cached func() map[string]F, compile func(...ModelOption) func(OverloadModel) F) error {
-	if cm.err != nil {
-		return cm.err
-	}
-	if !rules.isDefault() {
-		t.compile(cm.models, compile(rules.modelOptions()...))
-		return nil
-	}
+// add binds all functions in fns into the table, sharing fns directly when the table is empty.
+func (t *overloadTable[F]) add(fns map[string]F) {
 	if t.fns == nil {
-		t.fns, t.shared = cached(), true
-		return nil
+		t.fns, t.shared = fns, true
+		return
 	}
-	t.compile(cm.models, compile())
-	return nil
+	maps.Copy(t.mutable(), fns)
 }
 
 func estimatorCompiler(opts ...ModelOption) func(OverloadModel) FunctionEstimator {
@@ -176,18 +184,20 @@ type modelOptions struct {
 
 func (opt ModelOption) applyCoster(c *coster) error {
 	for _, cm := range newModelOptions(opt).modelSets {
-		if err := c.overloadEstimators.addModelSet(cm, c.modelRules, cm.estimators, estimatorCompiler); err != nil {
-			return err
+		if cm.err != nil {
+			return cm.err
 		}
+		c.overloadEstimators.add(cm.estimators(c.modelRules))
 	}
 	return nil
 }
 
 func (opt ModelOption) applyTracker(b *trackerBuilder) error {
 	for _, cm := range newModelOptions(opt).modelSets {
-		if err := b.overloadTrackers.addModelSet(cm, b.modelRules, cm.trackers, trackerCompiler); err != nil {
-			return err
+		if cm.err != nil {
+			return cm.err
 		}
+		b.overloadTrackers.add(cm.trackers(b.modelRules))
 	}
 	return nil
 }

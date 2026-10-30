@@ -1365,3 +1365,16 @@ func (t testHintsEstimator) EstimateSize(node AstNode) *SizeEstimate {
 func (t testHintsEstimator) EstimateCallCost(function, overloadID string, target *AstNode, args []AstNode) *CallEstimate {
 	return nil
 }
+
+func TestTrackedCostPtr(t *testing.T) {
+	for _, v := range []uint64{0, 1, 15, 16, 1000} {
+		tr := Overload("f", EvalCost(Const(v)), argumentsOnly()).FunctionTracker()
+		got := tr(nil, nil)
+		if got == nil || *got != v {
+			t.Fatalf("FunctionTracker() for Const(%d) = %v, want %d", v, got, v)
+		}
+		if v < uint64(len(smallTrackedCosts)) && got != &smallTrackedCosts[v] {
+			t.Errorf("FunctionTracker() for Const(%d) did not reuse smallTrackedCosts[%d]", v, v)
+		}
+	}
+}

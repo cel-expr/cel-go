@@ -129,6 +129,7 @@ type Tracker struct {
 	cost                     uint64
 	presenceTestHasCost      bool
 	modelVersion             uint32
+	argBuf                   [2]ref.Val
 }
 
 // NewTracker creates a new Tracker with a given estimator and a set of functional TrackerOption values.
@@ -152,11 +153,7 @@ func NewTracker(estimator ActualCostEstimator, opts ...TrackerOption) (*Tracker,
 	tracker := b.tracker
 	tracker.modelVersion = b.modelVersion
 	tracker.overloadTrackers = b.overloadTrackers.fns
-	// The package-level trackers are compiled under the default rules.
-	tracker.standardOverloadTrackers = stdOverloadTrackers
-	if !b.modelRules.isDefault() {
-		tracker.standardOverloadTrackers = StandardOverloadTrackersWithOptions(b.modelRules.modelOptions()...)
-	}
+	tracker.standardOverloadTrackers = stdOverloadModels().trackers(b.modelRules)
 	return tracker, nil
 }
 
@@ -166,6 +163,7 @@ func NewTracker(estimator ActualCostEstimator, opts ...TrackerOption) (*Tracker,
 func (c *Tracker) Clone() (*Tracker, error) {
 	tracker := *c
 	tracker.cost = 0
+	tracker.argBuf = [2]ref.Val{}
 	return &tracker, nil
 }
 
@@ -231,17 +229,18 @@ func (c *Tracker) EvalZeroArity(vars any, id int64, call Call, result ref.Val) {
 
 // EvalUnary records the cost for a unary call expression.
 func (c *Tracker) EvalUnary(vars any, id int64, call Call, arg ref.Val, result ref.Val) {
-	var buf [1]ref.Val
-	buf[0] = arg
-	c.recordCallCost(call, buf[:], result)
+	c.argBuf[0] = arg
+	c.recordCallCost(call, c.argBuf[:1], result)
+	c.argBuf[0] = nil
 }
 
 // EvalBinary records the cost for a binary call expression.
 func (c *Tracker) EvalBinary(vars any, id int64, call Call, lhs, rhs ref.Val, result ref.Val) {
-	var buf [2]ref.Val
-	buf[0] = lhs
-	buf[1] = rhs
-	c.recordCallCost(call, buf[:], result)
+	c.argBuf[0] = lhs
+	c.argBuf[1] = rhs
+	c.recordCallCost(call, c.argBuf[:2], result)
+	c.argBuf[0] = nil
+	c.argBuf[1] = nil
 }
 
 // EvalVarArgs records the cost for a variadic call expression.
@@ -291,7 +290,3 @@ func (c *Tracker) CostCall(call Call, args []ref.Val, result ref.Val) uint64 {
 	// - Any functions that don't have a declared cost either here or in provided ActualCostEstimator.
 	return SafeAdd(total, 1)
 }
-
-var (
-	stdOverloadTrackers = StandardOverloadTrackers()
-)

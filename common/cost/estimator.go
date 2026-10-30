@@ -176,11 +176,7 @@ func newCoster(checked *ast.AST, estimator Estimator, opts ...Option) (*coster, 
 			return nil, err
 		}
 	}
-	// The package-level estimators are compiled under the default rules.
-	c.standardOverloadEstimators = stdOverloadEstimators
-	if !c.modelRules.isDefault() {
-		c.standardOverloadEstimators = StandardOverloadEstimatorsWithOptions(c.modelRules.modelOptions()...)
-	}
+	c.standardOverloadEstimators = stdOverloadModels().estimators(c.modelRules)
 	c.est = versionedEstimator{
 		coster:   c,
 		delegate: estimator,
@@ -1010,10 +1006,6 @@ func (c *coster) getPath(e ast.Expr) []string {
 func (c *coster) addPath(e ast.Expr, path []string) {
 	c.exprPaths[e.ID()] = path
 }
-
-var (
-	stdOverloadEstimators = StandardOverloadEstimators()
-)
 
 func isAccumulatorVar(name string) bool {
 	return name == accumulatorName || name == hiddenAccumulatorName

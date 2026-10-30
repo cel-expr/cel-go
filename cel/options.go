@@ -881,9 +881,13 @@ func CostEstimatorOptions(costOpts ...cost.CostOption) EnvOption {
 // can report a problem once evaluation has begun. See cost.OverloadModel.Validate.
 func CostModel(models ...cost.OverloadModel) EnvOption {
 	return func(e *Env) (*Env, error) {
+		if len(models) == 0 {
+			return e, nil
+		}
 		if err := cost.ValidateOverloadModels(models...); err != nil {
 			return nil, err
 		}
+		e.ensureMutableCostConfig()
 		e.costConfig.models = append(e.costConfig.models, models...)
 		return e, nil
 	}
@@ -892,9 +896,21 @@ func CostModel(models ...cost.OverloadModel) EnvOption {
 // CostSizingStrategy configures a SizingStrategy for both cost estimation and runtime cost tracking.
 func CostSizingStrategy(strategy cost.SizingStrategy) EnvOption {
 	return func(e *Env) (*Env, error) {
+		if sameSizingStrategy(e.costConfig.strategy, strategy) {
+			return e, nil
+		}
+		e.ensureMutableCostConfig()
 		e.costConfig.strategy = strategy
 		return e, nil
 	}
+}
+
+func sameSizingStrategy(a, b cost.SizingStrategy) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	ta, tb := reflect.TypeOf(a), reflect.TypeOf(b)
+	return ta == tb && ta.Comparable() && a == b
 }
 
 // CostModelVersion pins cost estimation and runtime cost tracking to a revision of the cost
@@ -912,6 +928,10 @@ func CostSizingStrategy(strategy cost.SizingStrategy) EnvOption {
 // cost.ModelVersion for the per-revision details.
 func CostModelVersion(version uint32) EnvOption {
 	return func(e *Env) (*Env, error) {
+		if e.costConfig.version != nil && *e.costConfig.version == version {
+			return e, nil
+		}
+		e.ensureMutableCostConfig()
 		e.costConfig.version = &version
 		return e, nil
 	}

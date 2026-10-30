@@ -14,7 +14,11 @@
 
 package cost
 
-import "cel.dev/cel-go/common/overloads"
+import (
+	"sync"
+
+	"cel.dev/cel-go/common/overloads"
+)
 
 // StandardOverloadModels defines the cost models for standard CEL functions.
 var StandardOverloadModels = []OverloadModel{
@@ -251,6 +255,10 @@ func StandardOverloadTrackersWithOptions(opts ...ModelOption) map[string]Functio
 	}
 	return trackers
 }
+
+var stdOverloadModels = sync.OnceValue(func() *compiledModelSet {
+	return newCompiledModelSet(StandardOverloadModels)
+})
 
 // estimateUnmodeledCall estimates a call as the estimator does a call it has no model for: a cost
 // of 1, with no result size.
