@@ -1368,6 +1368,14 @@ func (fold *evalFold) ID() int64 {
 // Exec implements the InterpretableV2 interface method.
 func (fold *evalFold) Exec(frame *ExecutionFrame) ref.Val {
 	f := newFolder(fold, frame)
+	if fold.iterRange == nil {
+		if costs := frame.CostTracker(); costs != nil && costs.ModelVersion() == 0 {
+			costs.CreateList(fold.id, nil)
+		}
+		res := f.evalResult()
+		releaseFolder(f)
+		return res
+	}
 	foldRange := fold.iterRange.Exec(frame)
 
 	// Early return if the folder is an error or unknown.

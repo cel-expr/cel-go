@@ -15,6 +15,7 @@
 package ast
 
 import (
+	"cel.dev/cel-go/common/types"
 	"cel.dev/cel-go/common/types/ref"
 )
 
@@ -302,6 +303,30 @@ type ComprehensionExpr interface {
 
 	// marker interface method
 	isExpr()
+}
+
+const unusedIterVar = "#unused"
+
+// IsBind reports whether e is a comprehension expression representing a cel.bind() macro structure.
+func IsBind(e Expr) bool {
+	if e == nil || e.Kind() != ComprehensionKind {
+		return false
+	}
+	comp := e.AsComprehension()
+	iterRange := comp.IterRange()
+	if iterRange.Kind() != ListKind || iterRange.AsList().Size() != 0 {
+		return false
+	}
+	accuVar := comp.AccuVar()
+	if accuVar == "" || accuVar == unusedIterVar || comp.IterVar() != unusedIterVar || comp.HasIterVar2() {
+		return false
+	}
+	loopCond := comp.LoopCondition()
+	if loopCond.Kind() != LiteralKind || loopCond.AsLiteral() != types.False {
+		return false
+	}
+	loopStep := comp.LoopStep()
+	return loopStep.Kind() == IdentKind && loopStep.AsIdent() == accuVar
 }
 
 var _ Expr = &expr{}

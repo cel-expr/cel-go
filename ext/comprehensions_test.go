@@ -321,8 +321,10 @@ func TestTwoVarComprehensionsCost(t *testing.T) {
 			name: "transformMap local bind",
 			expr: `cel.bind(m, {"hello": "hello"},
 			                m.transformMap(k, v, v + "world")) == {"hello": "helloworld"}`,
-			estimatedCost: cost.FixedCostEstimate(108),
-			actualCost:    108,
+			estimatedCost:   cost.FixedCostEstimate(98),
+			estimatedCostV0: costV0(108, 108),
+			actualCost:      98,
+			actualCostV0:    actualV0(108),
 		},
 		{
 			name:            "transformMap filter map",
