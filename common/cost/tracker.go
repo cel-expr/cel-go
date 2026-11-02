@@ -15,8 +15,9 @@
 package cost
 
 import (
-	"cel.dev/cel-go/common/types/ref"
 	"fmt"
+
+	"cel.dev/cel-go/common/types/ref"
 )
 
 // WARNING: Any changes to cost calculations in this file require a corresponding change in estimator.go
@@ -129,6 +130,7 @@ type Tracker struct {
 	cost                     uint64
 	presenceTestHasCost      bool
 	modelVersion             uint32
+	argsBuf                  [2]ref.Val
 }
 
 // NewTracker creates a new Tracker with a given estimator and a set of functional TrackerOption values.
@@ -231,17 +233,19 @@ func (c *Tracker) EvalZeroArity(vars any, id int64, call Call, result ref.Val) {
 
 // EvalUnary records the cost for a unary call expression.
 func (c *Tracker) EvalUnary(vars any, id int64, call Call, arg ref.Val, result ref.Val) {
-	var buf [1]ref.Val
-	buf[0] = arg
-	c.recordCallCost(call, buf[:], result)
+	c.argsBuf[0] = arg
+	c.argsBuf[1] = nil
+	c.recordCallCost(call, c.argsBuf[:1], result)
+	c.argsBuf[0] = nil
 }
 
 // EvalBinary records the cost for a binary call expression.
 func (c *Tracker) EvalBinary(vars any, id int64, call Call, lhs, rhs ref.Val, result ref.Val) {
-	var buf [2]ref.Val
-	buf[0] = lhs
-	buf[1] = rhs
-	c.recordCallCost(call, buf[:], result)
+	c.argsBuf[0] = lhs
+	c.argsBuf[1] = rhs
+	c.recordCallCost(call, c.argsBuf[:2], result)
+	c.argsBuf[0] = nil
+	c.argsBuf[1] = nil
 }
 
 // EvalVarArgs records the cost for a variadic call expression.

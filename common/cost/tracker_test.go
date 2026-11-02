@@ -404,3 +404,54 @@ func TestTracker_ConcurrentCloneRace(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+type zeroAllocEstimator struct {
+	cost uint64
+}
+
+func (e *zeroAllocEstimator) CallCost(function, overloadID string, args []ref.Val, result ref.Val) *uint64 {
+	return &e.cost
+}
+
+func TestTracker_EvalUnaryBinaryAllocs(t *testing.T) {
+	estimator := &zeroAllocEstimator{cost: 3}
+	tracker, err := cost.NewTracker(estimator)
+	if err != nil {
+		t.Fatalf("NewTracker() failed: %v", err)
+	}
+	unmodeledTracker, err := cost.NewTracker(nil)
+	if err != nil {
+		t.Fatalf("NewTracker(nil) failed: %v", err)
+	}
+
+	unaryCall := &testCall{function: "!", overloadID: overloads.LogicalNot}
+	binaryCall := &testCall{function: "_+_", overloadID: overloads.AddInt64}
+	arg1 := types.Int(1)
+	arg2 := types.Int(2)
+	res := types.Int(3)
+
+	if allocs := testing.AllocsPerRun(100, func() {
+		unmodeledTracker.EvalUnary(nil, 1, unaryCall, types.True, types.False)
+	}); allocs != 0 {
+		t.Errorf("EvalUnary (unmodeled) allocated %v times, want 0", allocs)
+	}
+
+	if allocs := testing.AllocsPerRun(100, func() {
+		unmodeledTracker.EvalBinary(nil, 2, binaryCall, arg1, arg2, res)
+	}); allocs != 0 {
+		t.Errorf("EvalBinary (unmodeled) allocated %v times, want 0", allocs)
+	}
+
+	if allocs := testing.AllocsPerRun(100, func() {
+		tracker.EvalUnary(nil, 1, unaryCall, types.True, types.False)
+	}); allocs != 0 {
+		t.Errorf("EvalUnary (with estimator) allocated %v times, want 0", allocs)
+	}
+
+	if allocs := testing.AllocsPerRun(100, func() {
+		tracker.EvalBinary(nil, 2, binaryCall, arg1, arg2, res)
+	}); allocs != 0 {
+		t.Errorf("EvalBinary (with estimator) allocated %v times, want 0", allocs)
+	}
+}
+
