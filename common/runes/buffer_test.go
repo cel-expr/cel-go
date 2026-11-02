@@ -15,6 +15,7 @@
 package runes
 
 import (
+	"strings"
 	"testing"
 	"unicode/utf8"
 )
@@ -126,4 +127,71 @@ func TestNewBufferAndLineOffsetsWithLimit_MultibyteWithinLimit(t *testing.T) {
 	if got, want := len(offs), 1; got != want {
 		t.Fatalf("line offsets mismatch: got %d, want %d", got, want)
 	}
+}
+
+func TestNewBufferAndLineOffsets_MultilineAndInvalidUTF8(t *testing.T) {
+	data := "a\n\u00e9\n\xff\n\U0001F642\nb"
+	rb, offs := NewBufferAndLineOffsets(data)
+	wantRunes := []rune{'a', '\n', '\u00e9', '\n', utf8.RuneError, '\n', '\U0001F642', '\n', 'b'}
+	if got, want := rb.Len(), len(wantRunes); got != want {
+		t.Fatalf("rb.Len() = %d, want %d", got, want)
+	}
+	for i, want := range wantRunes {
+		if got := rb.Get(i); got != want {
+			t.Errorf("rb.Get(%d) = %U, want %U", i, got, want)
+		}
+	}
+	wantOffs := []int32{2, 4, 6, 8, 10}
+	if len(offs) != len(wantOffs) {
+		t.Fatalf("len(offs) = %d, want %d (%v)", len(offs), len(wantOffs), offs)
+	}
+	for i, want := range wantOffs {
+		if offs[i] != want {
+			t.Errorf("offs[%d] = %d, want %d", i, offs[i], want)
+		}
+	}
+}
+
+func BenchmarkNewBuffer(b *testing.B) {
+	ascii100KB := strings.Repeat("a\n", 50000)
+	bmp100K := strings.Repeat("\u00e9\n", 50000)
+	supp100K := strings.Repeat("\U0001F642\n", 50000)
+	exceeded500KB := strings.Repeat("a", 500000)
+
+	b.Run("ASCII_100KB", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			_, _, err := NewBufferAndLineOffsetsWithLimit(ascii100KB, 100000)
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+	b.Run("BMP_100KRunes", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			_, _, err := NewBufferAndLineOffsetsWithLimit(bmp100K, 100000)
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+	b.Run("Supplemental_100KRunes", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			_, _, err := NewBufferAndLineOffsetsWithLimit(supp100K, 100000)
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+	b.Run("Exceeded_500KB", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			_, _, err := NewBufferAndLineOffsetsWithLimit(exceeded500KB, 100000)
+			if err == nil {
+				b.Fatal("expected SizeLimitError")
+			}
+		}
+	})
 }
