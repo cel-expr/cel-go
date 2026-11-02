@@ -3982,3 +3982,94 @@ func (rel *RelativeSource) OffsetLocation(offset int32) (common.Location, bool) 
 	}
 	return rel.Source.OffsetLocation(absOffset + offset)
 }
+
+func TestParseDeepQualifiedStructName(t *testing.T) {
+	deepTypeName := "a" + strings.Repeat(".a", 5000)
+	deepStructExpr := deepTypeName + "{f: 1}"
+
+	for _, pratt := range []bool{false, true} {
+		t.Run(fmt.Sprintf("enablePrattParser=%t", pratt), func(t *testing.T) {
+			p, err := NewParser(
+				Macros(AllMacros...),
+				MaxRecursionDepth(60),
+				EnablePrattParser(pratt),
+			)
+			if err != nil {
+				t.Fatalf("NewParser() unexpected error: %v", err)
+			}
+
+			t.Run("deep_qualified_struct", func(t *testing.T) {
+				parsed, errs := p.Parse(common.NewTextSource(deepStructExpr))
+				if len(errs.GetErrors()) > 0 {
+					t.Fatalf("Parse(deepStructExpr) unexpected errors: %s", errs.ToDisplayString())
+				}
+				if got, want := parsed.Expr().Kind(), ast.StructKind; got != want {
+					t.Fatalf("parsed root kind = %v, want %v", got, want)
+				}
+				if got, want := parsed.Expr().AsStruct().TypeName(), deepTypeName; got != want {
+					t.Errorf("struct TypeName() len = %d, want %d", len(got), len(want))
+				}
+				astIDs := parsed.IDs()
+				for id := range parsed.SourceInfo().OffsetRanges() {
+					if !astIDs[id] {
+						t.Errorf("SourceInfo contains unused offset range for ID %d", id)
+					}
+				}
+			})
+
+			t.Run("leading_dot_qualified_struct", func(t *testing.T) {
+				parsed, errs := p.Parse(common.NewTextSource(".pkg.sub.Msg{f: 1}"))
+				if len(errs.GetErrors()) > 0 {
+					t.Fatalf("Parse(.pkg.sub.Msg{f: 1}) unexpected errors: %s", errs.ToDisplayString())
+				}
+				if got, want := parsed.Expr().AsStruct().TypeName(), ".pkg.sub.Msg"; got != want {
+					t.Errorf("struct TypeName() = %q, want %q", got, want)
+				}
+				astIDs := parsed.IDs()
+				for id := range parsed.SourceInfo().OffsetRanges() {
+					if !astIDs[id] {
+						t.Errorf("SourceInfo contains unused offset range for ID %d", id)
+					}
+				}
+			})
+
+			t.Run("non_ident_root_select_brace_rejected", func(t *testing.T) {
+				_, errs := p.Parse(common.NewTextSource("foo().bar.baz{}"))
+				if len(errs.GetErrors()) == 0 {
+					t.Errorf("Parse(foo().bar.baz{}) succeeded, want syntax error")
+				}
+			})
+		})
+	}
+}
+
+func BenchmarkParseLargePathological(b *testing.B) {
+	deepStruct := "a" + strings.Repeat(".a", 49998) + "{}"
+
+	for _, pratt := range []bool{false, true} {
+		mode := "antlr"
+		if pratt {
+			mode = "pratt"
+		}
+		b.Run(mode, func(b *testing.B) {
+			p, err := NewParser(
+				Macros(AllMacros...),
+				MaxRecursionDepth(60),
+				EnablePrattParser(pratt),
+			)
+			if err != nil {
+				b.Fatalf("NewParser() unexpected error: %v", err)
+			}
+			b.Run("deep_struct_name", func(b *testing.B) {
+				b.ReportAllocs()
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					_, errs := p.Parse(common.NewTextSource(deepStruct))
+					if len(errs.GetErrors()) > 0 {
+						b.Fatalf("Parse() unexpected errors: %s", errs.ToDisplayString())
+					}
+				}
+			})
+		})
+	}
+}
