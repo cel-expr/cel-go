@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package typedef defines declarative CEL type definitions (structs and enums)
-// and aspect property sets.
+// Package typedef defines declarative CEL type definitions (structs, enums, and
+// type definition sets) and aspect property containers.
 package typedef
 
 import (
@@ -27,16 +27,70 @@ import (
 )
 
 var (
-	// ErrBadTypeDef indicates an invalid type, field, or enum constant
-	// definition (e.g., nil receiver, empty name, or non-scalar default).
+	// ErrBadTypeDef indicates an invalid type, field, enum constant, or aspect
+	// definition (e.g., nil receiver, empty name, or non-scalar constant).
 	ErrBadTypeDef = errors.New("invalid typedef")
 
-	// ErrAlreadyExists indicates a duplicate field or enum constant
+	// ErrAlreadyExists indicates a duplicate type, field, or enum constant
 	// definition.
 	ErrAlreadyExists = errors.New("already exists")
 
 	defaultFieldType = &types.Type{}
+	emptyAspect      = &Aspect{}
 )
+
+// Aspect represents a read-only set of schema-specific or extension properties
+// attached to a type definition, field, or enum constant.
+type Aspect struct {
+	properties map[string]ref.Val
+}
+
+// NewAspect creates a new Aspect with a defensive copy of properties.
+//
+// Supported non-nil property values are CEL scalar constants (types.Null,
+// types.Bool, types.Int, types.Uint, types.Double, types.Bytes, types.String,
+// types.Duration, and types.Timestamp); nil values represent unset constants,
+// and any other ref.Val returns ErrBadTypeDef.
+func NewAspect(properties map[string]ref.Val) (*Aspect, error) {
+	if len(properties) == 0 {
+		return &Aspect{}, nil
+	}
+	cloned := make(map[string]ref.Val, len(properties))
+	for k, v := range properties {
+		sanitized, err := sanitizeConstant(v)
+		if err != nil {
+			return nil, fmt.Errorf("aspect property %q: %w", k, err)
+		}
+		cloned[k] = sanitized
+	}
+	return &Aspect{properties: cloned}, nil
+}
+
+// Properties returns a defensive copy of the aspect's properties, or nil if
+// the aspect is nil or has no properties.
+func (a *Aspect) Properties() map[string]ref.Val {
+	if a == nil || len(a.properties) == 0 {
+		return nil
+	}
+	cloned := make(map[string]ref.Val, len(a.properties))
+	for k, v := range a.properties {
+		cloned[k] = cloneConstant(v)
+	}
+	return cloned
+}
+
+// GetProperty looks up a property by key, returning the property value and
+// true if the key is present, or (nil, false) otherwise.
+func (a *Aspect) GetProperty(key string) (ref.Val, bool) {
+	if a == nil || len(a.properties) == 0 {
+		return nil, false
+	}
+	v, ok := a.properties[key]
+	if !ok {
+		return nil, false
+	}
+	return cloneConstant(v), true
+}
 
 // Kind indicates whether a TypeDef holds a struct or an enum definition.
 type Kind int
@@ -107,6 +161,59 @@ func (t *TypeDef) Kind() Kind {
 	return t.kind
 }
 
+// Name returns the underlying struct or enum type's name, or "" if t is nil
+// or unspecified.
+func (t *TypeDef) Name() string {
+	switch t.Kind() {
+	case StructKind:
+		return t.structType.Name()
+	case EnumKind:
+		return t.enumType.Name()
+	default:
+		return ""
+	}
+}
+
+// Doc returns the underlying struct or enum type's documentation string, or ""
+// if t is nil or unspecified.
+func (t *TypeDef) Doc() string {
+	switch t.Kind() {
+	case StructKind:
+		return t.structType.Doc()
+	case EnumKind:
+		return t.enumType.Doc()
+	default:
+		return ""
+	}
+}
+
+// Aspects returns a shallow copy of the underlying struct or enum type's
+// aspects keyed by aspect name, or nil if t is nil, unspecified, or has no
+// aspects.
+func (t *TypeDef) Aspects() map[string]*Aspect {
+	switch t.Kind() {
+	case StructKind:
+		return t.structType.Aspects()
+	case EnumKind:
+		return t.enumType.Aspects()
+	default:
+		return nil
+	}
+}
+
+// Aspect looks up a single aspect on the underlying struct or enum type by
+// aspect name.
+func (t *TypeDef) Aspect(name string) (*Aspect, bool) {
+	switch t.Kind() {
+	case StructKind:
+		return t.structType.Aspect(name)
+	case EnumKind:
+		return t.enumType.Aspect(name)
+	default:
+		return nil, false
+	}
+}
+
 // IsStruct reports whether the TypeDef holds a StructTypeDef.
 func (t *TypeDef) IsStruct() bool {
 	return t.Kind() == StructKind
@@ -135,13 +242,81 @@ func (t *TypeDef) EnumType() *EnumTypeDef {
 	return t.enumType
 }
 
+// TypeDefSet represents a collection of unique TypeDefs (structs and enums)
+// indexed by their fully-qualified CEL type name.
+type TypeDefSet struct {
+	types       []*TypeDef
+	indexByName map[string]int
+}
+
+// NewTypeDefSet creates a new TypeDefSet containing typeDefs in the given
+// order. Returns an error if any TypeDef is invalid or has a duplicate name.
+func NewTypeDefSet(typeDefs ...*TypeDef) (*TypeDefSet, error) {
+	s := &TypeDefSet{}
+	for _, td := range typeDefs {
+		if err := s.AddTypeDef(td); err != nil {
+			return nil, err
+		}
+	}
+	return s, nil
+}
+
+// AddTypeDef adds a TypeDef to the set.
+//
+// Returns ErrBadTypeDef if s is nil, typeDef is nil or unspecified, or the
+// type name is empty, and ErrAlreadyExists if a TypeDef with the same name is
+// already present.
+func (s *TypeDefSet) AddTypeDef(typeDef *TypeDef) error {
+	if s == nil {
+		return fmt.Errorf("%w: cannot add type to nil TypeDefSet", ErrBadTypeDef)
+	}
+	if typeDef == nil || typeDef.Kind() == UnspecifiedKind {
+		return fmt.Errorf("%w: type definition cannot be nil or unspecified", ErrBadTypeDef)
+	}
+	typeName := typeDef.Name()
+	if typeName == "" {
+		return fmt.Errorf("%w: type name cannot be empty", ErrBadTypeDef)
+	}
+	if s.indexByName == nil {
+		s.indexByName = make(map[string]int)
+	}
+	if _, exists := s.indexByName[typeName]; exists {
+		return fmt.Errorf("%w: type %q", ErrAlreadyExists, typeName)
+	}
+	s.indexByName[typeName] = len(s.types)
+	s.types = append(s.types, typeDef)
+	return nil
+}
+
+// FindTypeDef looks up a TypeDef by its fully-qualified name, returning the
+// TypeDef and true if found, or (nil, false) otherwise.
+func (s *TypeDefSet) FindTypeDef(typeName string) (*TypeDef, bool) {
+	if s == nil || len(s.indexByName) == 0 {
+		return nil, false
+	}
+	idx, ok := s.indexByName[typeName]
+	if !ok {
+		return nil, false
+	}
+	return s.types[idx], true
+}
+
+// Types returns the TypeDefs in the order they were added, or nil if s is nil
+// or empty.
+func (s *TypeDefSet) Types() []*TypeDef {
+	if s == nil || len(s.types) == 0 {
+		return nil
+	}
+	return slices.Clone(s.types)
+}
+
 // StructTypeDef represents a declarative struct type with typed fields and
 // optional aspects.
 type StructTypeDef struct {
 	name    string
 	doc     string
 	fields  []*Field
-	aspects map[string]any
+	aspects map[string]*Aspect
 }
 
 // NewStruct creates a new StructTypeDef with the given name and options.
@@ -186,15 +361,15 @@ func (s *StructTypeDef) Fields() []*Field {
 
 // Aspects returns a shallow copy of the aspects (e.g. schema-specific
 // properties) keyed by aspect name.
-func (s *StructTypeDef) Aspects() map[string]any {
+func (s *StructTypeDef) Aspects() map[string]*Aspect {
 	if s == nil || len(s.aspects) == 0 {
 		return nil
 	}
 	return maps.Clone(s.aspects)
 }
 
-// Aspect looks up a single aspect property set by aspect name.
-func (s *StructTypeDef) Aspect(name string) (any, bool) {
+// Aspect looks up a single aspect by aspect name.
+func (s *StructTypeDef) Aspect(name string) (*Aspect, bool) {
 	if s == nil || len(s.aspects) == 0 {
 		return nil, false
 	}
@@ -253,19 +428,18 @@ func StructDoc(doc string) StructOpt {
 	}
 }
 
-// StructAspects merges a map of named aspect property sets into a
-// StructTypeDef.
-func StructAspects(aspects map[string]any) StructOpt {
+// StructAspects merges a map of named aspects into a StructTypeDef.
+func StructAspects(aspects map[string]*Aspect) StructOpt {
 	return func(s *StructTypeDef) error {
 		s.aspects = mergeAspects(s.aspects, aspects)
 		return nil
 	}
 }
 
-// StructAspect sets a single named aspect property set on a StructTypeDef.
-func StructAspect(name string, value any) StructOpt {
+// StructAspect sets a single named aspect on a StructTypeDef.
+func StructAspect(name string, aspect *Aspect) StructOpt {
 	return func(s *StructTypeDef) error {
-		s.aspects = setAspect(s.aspects, name, value)
+		s.aspects = setAspect(s.aspects, name, aspect)
 		return nil
 	}
 }
@@ -288,7 +462,7 @@ type Field struct {
 	fieldType    *types.Type
 	doc          string
 	defaultValue ref.Val
-	aspects      map[string]any
+	aspects      map[string]*Aspect
 }
 
 // NewField creates a new Field with the given non-empty name, CEL type, and
@@ -351,10 +525,7 @@ func (f *Field) DefaultValue() ref.Val {
 	if f == nil || f.defaultValue == nil {
 		return nil
 	}
-	if b, ok := f.defaultValue.(types.Bytes); ok {
-		return slices.Clone(b)
-	}
-	return f.defaultValue
+	return cloneConstant(f.defaultValue)
 }
 
 // HasDefaultValue reports whether a default value is set on the field.
@@ -364,15 +535,15 @@ func (f *Field) HasDefaultValue() bool {
 
 // Aspects returns a shallow copy of the aspects (e.g. schema-specific
 // properties) keyed by aspect name.
-func (f *Field) Aspects() map[string]any {
+func (f *Field) Aspects() map[string]*Aspect {
 	if f == nil || len(f.aspects) == 0 {
 		return nil
 	}
 	return maps.Clone(f.aspects)
 }
 
-// Aspect looks up a single aspect property set by aspect name.
-func (f *Field) Aspect(name string) (any, bool) {
+// Aspect looks up a single aspect by aspect name.
+func (f *Field) Aspect(name string) (*Aspect, bool) {
 	if f == nil || len(f.aspects) == 0 {
 		return nil, false
 	}
@@ -400,27 +571,27 @@ func FieldDoc(doc string) FieldOpt {
 // types.String holding the name of the corresponding EnumConstant.
 func FieldDefaultValue(val ref.Val) FieldOpt {
 	return func(f *Field) error {
-		sanitized, err := sanitizeDefaultValue(val)
+		sanitized, err := sanitizeConstant(val)
 		if err != nil {
-			return err
+			return fmt.Errorf("field default value: %w", err)
 		}
 		f.defaultValue = sanitized
 		return nil
 	}
 }
 
-// FieldAspects merges a map of named aspect property sets into a Field.
-func FieldAspects(aspects map[string]any) FieldOpt {
+// FieldAspects merges a map of named aspects into a Field.
+func FieldAspects(aspects map[string]*Aspect) FieldOpt {
 	return func(f *Field) error {
 		f.aspects = mergeAspects(f.aspects, aspects)
 		return nil
 	}
 }
 
-// FieldAspect sets a single named aspect property set on a Field.
-func FieldAspect(name string, value any) FieldOpt {
+// FieldAspect sets a single named aspect on a Field.
+func FieldAspect(name string, aspect *Aspect) FieldOpt {
 	return func(f *Field) error {
-		f.aspects = setAspect(f.aspects, name, value)
+		f.aspects = setAspect(f.aspects, name, aspect)
 		return nil
 	}
 }
@@ -431,7 +602,7 @@ type EnumTypeDef struct {
 	name      string
 	doc       string
 	constants []*EnumConstant
-	aspects   map[string]any
+	aspects   map[string]*Aspect
 }
 
 // NewEnum creates a new EnumTypeDef with the given name and options.
@@ -476,15 +647,15 @@ func (e *EnumTypeDef) Constants() []*EnumConstant {
 
 // Aspects returns a shallow copy of the aspects (e.g. schema-specific
 // properties) keyed by aspect name.
-func (e *EnumTypeDef) Aspects() map[string]any {
+func (e *EnumTypeDef) Aspects() map[string]*Aspect {
 	if e == nil || len(e.aspects) == 0 {
 		return nil
 	}
 	return maps.Clone(e.aspects)
 }
 
-// Aspect looks up a single aspect property set by aspect name.
-func (e *EnumTypeDef) Aspect(name string) (any, bool) {
+// Aspect looks up a single aspect by aspect name.
+func (e *EnumTypeDef) Aspect(name string) (*Aspect, bool) {
 	if e == nil || len(e.aspects) == 0 {
 		return nil, false
 	}
@@ -543,18 +714,18 @@ func EnumDoc(doc string) EnumOpt {
 	}
 }
 
-// EnumAspects merges a map of named aspect property sets into an EnumTypeDef.
-func EnumAspects(aspects map[string]any) EnumOpt {
+// EnumAspects merges a map of named aspects into an EnumTypeDef.
+func EnumAspects(aspects map[string]*Aspect) EnumOpt {
 	return func(e *EnumTypeDef) error {
 		e.aspects = mergeAspects(e.aspects, aspects)
 		return nil
 	}
 }
 
-// EnumAspect sets a single named aspect property set on an EnumTypeDef.
-func EnumAspect(name string, value any) EnumOpt {
+// EnumAspect sets a single named aspect on an EnumTypeDef.
+func EnumAspect(name string, aspect *Aspect) EnumOpt {
 	return func(e *EnumTypeDef) error {
-		e.aspects = setAspect(e.aspects, name, value)
+		e.aspects = setAspect(e.aspects, name, aspect)
 		return nil
 	}
 }
@@ -576,7 +747,7 @@ type EnumConstant struct {
 	name    string
 	id      int32
 	doc     string
-	aspects map[string]any
+	aspects map[string]*Aspect
 }
 
 // NewEnumConstant creates a new EnumConstant with the given non-empty name,
@@ -627,15 +798,15 @@ func (c *EnumConstant) Doc() string {
 
 // Aspects returns a shallow copy of the aspects (e.g. schema-specific
 // properties) keyed by aspect name.
-func (c *EnumConstant) Aspects() map[string]any {
+func (c *EnumConstant) Aspects() map[string]*Aspect {
 	if c == nil || len(c.aspects) == 0 {
 		return nil
 	}
 	return maps.Clone(c.aspects)
 }
 
-// Aspect looks up a single aspect property set by aspect name.
-func (c *EnumConstant) Aspect(name string) (any, bool) {
+// Aspect looks up a single aspect by aspect name.
+func (c *EnumConstant) Aspect(name string) (*Aspect, bool) {
 	if c == nil || len(c.aspects) == 0 {
 		return nil, false
 	}
@@ -654,25 +825,23 @@ func EnumConstantDoc(doc string) EnumConstantOpt {
 	}
 }
 
-// EnumConstantAspects merges a map of named aspect property sets into an
-// EnumConstant.
-func EnumConstantAspects(aspects map[string]any) EnumConstantOpt {
+// EnumConstantAspects merges a map of named aspects into an EnumConstant.
+func EnumConstantAspects(aspects map[string]*Aspect) EnumConstantOpt {
 	return func(c *EnumConstant) error {
 		c.aspects = mergeAspects(c.aspects, aspects)
 		return nil
 	}
 }
 
-// EnumConstantAspect sets a single named aspect property set on an
-// EnumConstant.
-func EnumConstantAspect(name string, value any) EnumConstantOpt {
+// EnumConstantAspect sets a single named aspect on an EnumConstant.
+func EnumConstantAspect(name string, aspect *Aspect) EnumConstantOpt {
 	return func(c *EnumConstant) error {
-		c.aspects = setAspect(c.aspects, name, value)
+		c.aspects = setAspect(c.aspects, name, aspect)
 		return nil
 	}
 }
 
-func sanitizeDefaultValue(val ref.Val) (ref.Val, error) {
+func sanitizeConstant(val ref.Val) (ref.Val, error) {
 	if val == nil {
 		return nil, nil
 	}
@@ -683,25 +852,40 @@ func sanitizeDefaultValue(val ref.Val) (ref.Val, error) {
 	case types.Bytes:
 		return slices.Clone(v), nil
 	default:
-		return nil, fmt.Errorf("%w: unsupported field default value %T", ErrBadTypeDef, val)
+		return nil, fmt.Errorf("%w: unsupported constant value %T", ErrBadTypeDef, val)
 	}
 }
 
-func mergeAspects(dst, src map[string]any) map[string]any {
+func cloneConstant(val ref.Val) ref.Val {
+	if b, ok := val.(types.Bytes); ok {
+		return slices.Clone(b)
+	}
+	return val
+}
+
+func mergeAspects(dst, src map[string]*Aspect) map[string]*Aspect {
 	if len(src) == 0 {
 		return dst
 	}
 	if dst == nil {
-		dst = make(map[string]any, len(src))
+		dst = make(map[string]*Aspect, len(src))
 	}
-	maps.Copy(dst, src)
+	for name, aspect := range src {
+		if aspect == nil {
+			aspect = emptyAspect
+		}
+		dst[name] = aspect
+	}
 	return dst
 }
 
-func setAspect(dst map[string]any, name string, value any) map[string]any {
+func setAspect(dst map[string]*Aspect, name string, aspect *Aspect) map[string]*Aspect {
 	if dst == nil {
-		dst = make(map[string]any, 1)
+		dst = make(map[string]*Aspect, 1)
 	}
-	dst[name] = value
+	if aspect == nil {
+		aspect = emptyAspect
+	}
+	dst[name] = aspect
 	return dst
 }
