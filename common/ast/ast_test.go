@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"maps"
 	"reflect"
+	"strings"
 	"testing"
 
 	"cel.dev/cel-go/checker"
@@ -510,5 +511,50 @@ func TestSourceInfoRenumberIDs(t *testing.T) {
 		if got != want {
 			t.Errorf("offset range for ID %d incorrect; got %v, want %v", new, got, want)
 		}
+	}
+}
+
+func TestGetLocationByOffset(t *testing.T) {
+	nilSourceInfo := ast.NewSourceInfo(nil)
+	multiLineInfo := ast.NewSourceInfo(common.NewTextSource("ab\ncde\n\nf"))
+
+	tests := []struct {
+		name     string
+		info     *ast.SourceInfo
+		offset   int32
+		wantLine int
+		wantCol  int
+	}{
+		{name: "nil_source_zero", info: nilSourceInfo, offset: 0, wantLine: 1, wantCol: 0},
+		{name: "nil_source_positive", info: nilSourceInfo, offset: 5, wantLine: 1, wantCol: 5},
+		{name: "multi_line_negative", info: multiLineInfo, offset: -1, wantLine: 1, wantCol: -1},
+		{name: "multi_line_start", info: multiLineInfo, offset: 0, wantLine: 1, wantCol: 0},
+		{name: "multi_line_before_first_break", info: multiLineInfo, offset: 2, wantLine: 1, wantCol: 2},
+		{name: "multi_line_at_second_line", info: multiLineInfo, offset: 3, wantLine: 2, wantCol: 0},
+		{name: "multi_line_end_second_line", info: multiLineInfo, offset: 6, wantLine: 2, wantCol: 3},
+		{name: "multi_line_empty_third_line", info: multiLineInfo, offset: 7, wantLine: 3, wantCol: 0},
+		{name: "multi_line_fourth_line", info: multiLineInfo, offset: 8, wantLine: 4, wantCol: 0},
+		{name: "multi_line_past_eof", info: multiLineInfo, offset: 15, wantLine: 5, wantCol: 5},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			loc := tc.info.GetLocationByOffset(tc.offset)
+			if loc.Line() != tc.wantLine || loc.Column() != tc.wantCol {
+				t.Errorf("GetLocationByOffset(%d) = (%d, %d), want (%d, %d)",
+					tc.offset, loc.Line(), loc.Column(), tc.wantLine, tc.wantCol)
+			}
+		})
+	}
+}
+
+func BenchmarkGetLocationByOffsetManyLines(b *testing.B) {
+	content := strings.Repeat("\n", 50000) + "x"
+	info := ast.NewSourceInfo(common.NewTextSource(content))
+	lastOffset := int32(len(content) - 1)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = info.GetLocationByOffset(lastOffset)
 	}
 }

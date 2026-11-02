@@ -157,3 +157,60 @@ func TestNewTextSourceWithLimit_MultibyteWithinLimit(t *testing.T) {
 		t.Fatalf("got %q, want %q", got, want)
 	}
 }
+
+func TestStringSource_OffsetLocation(t *testing.T) {
+	// LineOffsets for "ab\ncde\n\nf":
+	// line 1: "ab\n"   (offsets 0..2, lineOffset[0] = 3)
+	// line 2: "cde\n"  (offsets 3..6, lineOffset[1] = 7)
+	// line 3: "\n"     (offset 7,     lineOffset[2] = 8)
+	// line 4: "f"      (offset 8,     lineOffset[3] = 10)
+	multiLine := NewTextSource("ab\ncde\n\nf")
+	emptySrc := NewTextSource("")
+	singleLine := NewTextSource("abc")
+
+	tests := []struct {
+		name     string
+		src      Source
+		offset   int32
+		wantLine int
+		wantCol  int
+	}{
+		{name: "empty_at_zero", src: emptySrc, offset: 0, wantLine: 2, wantCol: 0},
+		{name: "empty_negative", src: emptySrc, offset: -1, wantLine: 1, wantCol: -1},
+		{name: "single_line_start", src: singleLine, offset: 0, wantLine: 1, wantCol: 0},
+		{name: "single_line_end", src: singleLine, offset: 3, wantLine: 1, wantCol: 3},
+		{name: "single_line_past_eof", src: singleLine, offset: 4, wantLine: 2, wantCol: 0},
+		{name: "multi_line_start", src: multiLine, offset: 0, wantLine: 1, wantCol: 0},
+		{name: "multi_line_first_newline", src: multiLine, offset: 2, wantLine: 1, wantCol: 2},
+		{name: "multi_line_second_line_start", src: multiLine, offset: 3, wantLine: 2, wantCol: 0},
+		{name: "multi_line_second_line_end", src: multiLine, offset: 6, wantLine: 2, wantCol: 3},
+		{name: "multi_line_empty_third_line", src: multiLine, offset: 7, wantLine: 3, wantCol: 0},
+		{name: "multi_line_fourth_line_start", src: multiLine, offset: 8, wantLine: 4, wantCol: 0},
+		{name: "multi_line_fourth_line_eof", src: multiLine, offset: 9, wantLine: 4, wantCol: 1},
+		{name: "multi_line_past_eof", src: multiLine, offset: 15, wantLine: 5, wantCol: 5},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			loc, found := tc.src.OffsetLocation(tc.offset)
+			if !found {
+				t.Fatalf("OffsetLocation(%d) = not found, want found", tc.offset)
+			}
+			if loc.Line() != tc.wantLine || loc.Column() != tc.wantCol {
+				t.Errorf("OffsetLocation(%d) = (%d, %d), want (%d, %d)",
+					tc.offset, loc.Line(), loc.Column(), tc.wantLine, tc.wantCol)
+			}
+		})
+	}
+}
+
+func BenchmarkOffsetLocationManyLines(b *testing.B) {
+	content := strings.Repeat("\n", 50000) + "x"
+	src := NewTextSource(content)
+	lastOffset := int32(len(content) - 1)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = src.OffsetLocation(lastOffset)
+	}
+}
