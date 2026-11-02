@@ -3982,3 +3982,95 @@ func (rel *RelativeSource) OffsetLocation(offset int32) (common.Location, bool) 
 	}
 	return rel.Source.OffsetLocation(absOffset + offset)
 }
+
+func TestParseMultilineMacrosAndMaps(t *testing.T) {
+	const leadingNewlines = 50000
+	macroExpr := strings.Repeat("\n", leadingNewlines) + "[" + strings.Repeat("0.exists_one(x,1),", 2777) + "0]"
+	mapExpr := strings.Repeat("\n", 49995) + "{" + strings.Repeat("0:0,", 12499) + "0:0}"
+
+	for _, pratt := range []bool{false, true} {
+		t.Run(fmt.Sprintf("enablePrattParser=%t", pratt), func(t *testing.T) {
+			p, err := NewParser(
+				Macros(AllMacros...),
+				MaxRecursionDepth(60),
+				EnablePrattParser(pratt),
+			)
+			if err != nil {
+				t.Fatalf("NewParser() unexpected error: %v", err)
+			}
+
+			t.Run("multiline_macros", func(t *testing.T) {
+				parsed, errs := p.Parse(common.NewTextSource(macroExpr))
+				if len(errs.GetErrors()) > 0 {
+					t.Fatalf("Parse(macroExpr) unexpected errors: %s", errs.ToDisplayString())
+				}
+				if got, want := parsed.Expr().AsList().Size(), 2778; got != want {
+					t.Errorf("parsed list size = %d, want %d", got, want)
+				}
+				rootLoc := parsed.SourceInfo().GetStartLocation(parsed.Expr().ID())
+				if got, want := rootLoc.Line(), leadingNewlines+1; got != want {
+					t.Errorf("root start line = %d, want %d", got, want)
+				}
+				if got, want := rootLoc.Column(), 0; got != want {
+					t.Errorf("root start column = %d, want %d", got, want)
+				}
+			})
+
+			t.Run("multiline_map", func(t *testing.T) {
+				parsed, errs := p.Parse(common.NewTextSource(mapExpr))
+				if len(errs.GetErrors()) > 0 {
+					t.Fatalf("Parse(mapExpr) unexpected errors: %s", errs.ToDisplayString())
+				}
+				if got, want := parsed.Expr().AsMap().Size(), 12500; got != want {
+					t.Errorf("parsed map size = %d, want %d", got, want)
+				}
+				rootLoc := parsed.SourceInfo().GetStartLocation(parsed.Expr().ID())
+				if got, want := rootLoc.Line(), 49996; got != want {
+					t.Errorf("root start line = %d, want %d", got, want)
+				}
+			})
+		})
+	}
+}
+
+func BenchmarkParseLargePathological(b *testing.B) {
+	multilineMacros := strings.Repeat("\n", 50000) + "[" + strings.Repeat("0.exists_one(x,1),", 2777) + "0]"
+	multilineMap := strings.Repeat("\n", 49995) + "{" + strings.Repeat("0:0,", 12499) + "0:0}"
+
+	for _, pratt := range []bool{false, true} {
+		mode := "antlr"
+		if pratt {
+			mode = "pratt"
+		}
+		b.Run(mode, func(b *testing.B) {
+			p, err := NewParser(
+				Macros(AllMacros...),
+				MaxRecursionDepth(60),
+				EnablePrattParser(pratt),
+			)
+			if err != nil {
+				b.Fatalf("NewParser() unexpected error: %v", err)
+			}
+			b.Run("multiline_macros", func(b *testing.B) {
+				b.ReportAllocs()
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					_, errs := p.Parse(common.NewTextSource(multilineMacros))
+					if len(errs.GetErrors()) > 0 {
+						b.Fatalf("Parse() unexpected errors: %s", errs.ToDisplayString())
+					}
+				}
+			})
+			b.Run("multiline_map", func(b *testing.B) {
+				b.ReportAllocs()
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					_, errs := p.Parse(common.NewTextSource(multilineMap))
+					if len(errs.GetErrors()) > 0 {
+						b.Fatalf("Parse() unexpected errors: %s", errs.ToDisplayString())
+					}
+				}
+			})
+		})
+	}
+}

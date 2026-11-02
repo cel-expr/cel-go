@@ -30,14 +30,17 @@ type parserHelper struct {
 	source      common.Source
 	sourceInfo  *ast.SourceInfo
 	nextID      int64
+	isRelative  bool
 }
 
 func newParserHelper(source common.Source, fac ast.ExprFactory) *parserHelper {
+	sourceInfo := ast.NewSourceInfo(source)
 	return &parserHelper{
 		exprFactory: fac,
 		source:      source,
-		sourceInfo:  ast.NewSourceInfo(source),
+		sourceInfo:  sourceInfo,
 		nextID:      1,
+		isRelative:  sourceInfo.ComputeOffset(1, 0) != 0,
 	}
 }
 
@@ -154,14 +157,22 @@ func (p *parserHelper) newExpr(ctx any) ast.Expr {
 
 // computeOffset converts a 0-based character offset from the local source content to
 // the corresponding absolute character offset in the parent SourceInfo (e.g. for RelativeSource).
-// If the location cannot be resolved or the source is nil, the original offset is returned.
+// If the source is non-relative, nil, or the location cannot be resolved, the original offset is returned.
 func (p *parserHelper) computeOffset(offset int32) int32 {
-	if p.source != nil {
-		if loc, found := p.source.OffsetLocation(offset); found {
-			return p.sourceInfo.ComputeOffsetAbsolute(int32(loc.Line()), int32(loc.Column()))
-		}
+	if !p.isRelative {
+		return offset
+	}
+	if loc, found := p.source.OffsetLocation(offset); found {
+		return p.sourceInfo.ComputeOffsetAbsolute(int32(loc.Line()), int32(loc.Column()))
 	}
 	return offset
+}
+
+func (p *parserHelper) newOffsetRangeID(start, stop int32) int64 {
+	id := p.nextID
+	p.sourceInfo.SetOffsetRange(id, ast.OffsetRange{Start: start, Stop: stop})
+	p.nextID++
+	return id
 }
 
 func (p *parserHelper) id(ctx any) int64 {
@@ -368,14 +379,17 @@ type exprHelper struct {
 }
 
 func (e *exprHelper) nextMacroID() int64 {
-	return e.parserHelper.id(e.parserHelper.getLocation(e.id))
+	if o, found := e.parserHelper.sourceInfo.GetOffsetRange(e.id); found {
+		return e.parserHelper.newOffsetRangeID(o.Start, o.Start)
+	}
+	return e.parserHelper.newOffsetRangeID(-1, -1)
 }
 
 // Copy implements the ExprHelper interface method by producing a copy of the input Expr value
 // with a fresh set of numeric identifiers the Expr and all its descendants.
 func (e *exprHelper) Copy(expr ast.Expr) ast.Expr {
 	offsetRange, _ := e.parserHelper.sourceInfo.GetOffsetRange(expr.ID())
-	copyID := e.parserHelper.newID(offsetRange)
+	copyID := e.parserHelper.newOffsetRangeID(offsetRange.Start, offsetRange.Stop)
 	switch expr.Kind() {
 	case ast.LiteralKind:
 		return e.exprFactory.NewLiteral(copyID, expr.AsLiteral())
