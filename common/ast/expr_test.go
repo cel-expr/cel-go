@@ -262,6 +262,165 @@ func TestComprehensionNil(t *testing.T) {
 	}
 }
 
+func TestIsBind(t *testing.T) {
+	fac := ast.NewExprFactory()
+	tests := []struct {
+		name string
+		expr ast.Expr
+		want bool
+	}{
+		{
+			name: "nil expr",
+			expr: nil,
+			want: false,
+		},
+		{
+			name: "non-comprehension expr",
+			expr: fac.NewLiteral(1, types.True),
+			want: false,
+		},
+		{
+			name: "valid bind comprehension",
+			expr: fac.NewComprehension(1,
+				fac.NewList(2, []ast.Expr{}, []int32{}),
+				"#unused",
+				"a",
+				fac.NewLiteral(3, types.Int(1)),
+				fac.NewLiteral(4, types.False),
+				fac.NewIdent(5, "a"),
+				fac.NewIdent(6, "a"),
+			),
+			want: true,
+		},
+		{
+			name: "non-empty list iterRange",
+			expr: fac.NewComprehension(1,
+				fac.NewList(2, []ast.Expr{fac.NewLiteral(7, types.Int(1))}, []int32{}),
+				"#unused",
+				"a",
+				fac.NewLiteral(3, types.Int(1)),
+				fac.NewLiteral(4, types.False),
+				fac.NewIdent(5, "a"),
+				fac.NewIdent(6, "a"),
+			),
+			want: false,
+		},
+		{
+			name: "non-list iterRange",
+			expr: fac.NewComprehension(1,
+				fac.NewIdent(2, "items"),
+				"#unused",
+				"a",
+				fac.NewLiteral(3, types.Int(1)),
+				fac.NewLiteral(4, types.False),
+				fac.NewIdent(5, "a"),
+				fac.NewIdent(6, "a"),
+			),
+			want: false,
+		},
+		{
+			name: "empty accuVar",
+			expr: fac.NewComprehension(1,
+				fac.NewList(2, []ast.Expr{}, []int32{}),
+				"#unused",
+				"",
+				fac.NewLiteral(3, types.Int(1)),
+				fac.NewLiteral(4, types.False),
+				fac.NewIdent(5, ""),
+				fac.NewLiteral(6, types.Int(1)),
+			),
+			want: false,
+		},
+		{
+			name: "accuVar equals unusedIterVar",
+			expr: fac.NewComprehension(1,
+				fac.NewList(2, []ast.Expr{}, []int32{}),
+				"#unused",
+				"#unused",
+				fac.NewLiteral(3, types.Int(1)),
+				fac.NewLiteral(4, types.False),
+				fac.NewIdent(5, "#unused"),
+				fac.NewIdent(6, "#unused"),
+			),
+			want: false,
+		},
+		{
+			name: "user iterVar",
+			expr: fac.NewComprehension(1,
+				fac.NewList(2, []ast.Expr{}, []int32{}),
+				"x",
+				"a",
+				fac.NewLiteral(3, types.Int(1)),
+				fac.NewLiteral(4, types.False),
+				fac.NewIdent(5, "a"),
+				fac.NewIdent(6, "a"),
+			),
+			want: false,
+		},
+		{
+			name: "two-var comprehension",
+			expr: fac.NewComprehensionTwoVar(1,
+				fac.NewList(2, []ast.Expr{}, []int32{}),
+				"#unused",
+				"v",
+				"a",
+				fac.NewLiteral(3, types.Int(1)),
+				fac.NewLiteral(4, types.False),
+				fac.NewIdent(5, "a"),
+				fac.NewIdent(6, "a"),
+			),
+			want: false,
+		},
+		{
+			name: "non-false loopCondition",
+			expr: fac.NewComprehension(1,
+				fac.NewList(2, []ast.Expr{}, []int32{}),
+				"#unused",
+				"a",
+				fac.NewLiteral(3, types.Int(1)),
+				fac.NewLiteral(4, types.True),
+				fac.NewIdent(5, "a"),
+				fac.NewIdent(6, "a"),
+			),
+			want: false,
+		},
+		{
+			name: "non-ident loopStep",
+			expr: fac.NewComprehension(1,
+				fac.NewList(2, []ast.Expr{}, []int32{}),
+				"#unused",
+				"a",
+				fac.NewLiteral(3, types.Int(1)),
+				fac.NewLiteral(4, types.False),
+				fac.NewLiteral(5, types.Int(1)),
+				fac.NewIdent(6, "a"),
+			),
+			want: false,
+		},
+		{
+			name: "mismatched loopStep ident",
+			expr: fac.NewComprehension(1,
+				fac.NewList(2, []ast.Expr{}, []int32{}),
+				"#unused",
+				"a",
+				fac.NewLiteral(3, types.Int(1)),
+				fac.NewLiteral(4, types.False),
+				fac.NewIdent(5, "b"),
+				fac.NewIdent(6, "a"),
+			),
+			want: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ast.IsBind(tc.expr); got != tc.want {
+				t.Errorf("ast.IsBind() got %v, wanted %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestIdent(t *testing.T) {
 	fac := ast.NewExprFactory()
 	id := fac.NewIdent(1, "a")

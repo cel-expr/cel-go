@@ -692,9 +692,12 @@ func (p *planBuilder) planComprehension(expr ast.Expr) (InterpretableV2, error) 
 	if err != nil {
 		return nil, err
 	}
-	iterRange, err := p.plan(fold.IterRange())
-	if err != nil {
-		return nil, err
+	var iterRange InterpretableV2
+	if !ast.IsBind(expr) {
+		iterRange, err = p.plan(fold.IterRange())
+		if err != nil {
+			return nil, err
+		}
 	}
 	p.pushLocalVars(fold.AccuVar(), fold.IterVar(), fold.IterVar2())
 	cond, err := p.plan(fold.LoopCondition())

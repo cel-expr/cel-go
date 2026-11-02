@@ -19,8 +19,11 @@ import (
 
 	"cel.dev/cel-go/checker"
 	"cel.dev/cel-go/common"
+	"cel.dev/cel-go/common/ast"
 	"cel.dev/cel-go/common/containers"
+	"cel.dev/cel-go/common/cost"
 	"cel.dev/cel-go/common/decls"
+	"cel.dev/cel-go/common/operators"
 	"cel.dev/cel-go/common/overloads"
 	"cel.dev/cel-go/common/types"
 	"cel.dev/cel-go/common/types/ref"
@@ -225,6 +228,153 @@ func TestListMapAccessCost(t *testing.T) {
 			t.Logf("expr: %s => res: %v, actual cost: %d, expected: %d", expr, res, actual, expected)
 			if actual != expected {
 				t.Errorf("expr %q actual cost = %d, wanted %d (res: %v)", expr, actual, expected, res)
+			}
+		})
+	}
+}
+
+func TestBindSkipsIterRangeInit(t *testing.T) {
+	fac := ast.NewExprFactory()
+	tests := []struct {
+		name              string
+		expr              ast.Expr
+		wantNilIterRange  bool
+		wantCost          uint64
+		wantCostV0        uint64
+		wantResult        ref.Val
+	}{
+		{
+			name: "bind skips iterRange list init",
+			expr: fac.NewComprehension(1,
+				fac.NewList(2, []ast.Expr{}, []int32{}),
+				"#unused",
+				"a",
+				fac.NewLiteral(3, types.Int(42)),
+				fac.NewLiteral(4, types.False),
+				fac.NewIdent(5, "a"),
+				fac.NewCall(6, operators.Add, fac.NewIdent(7, "a"), fac.NewLiteral(8, types.Int(1))),
+			),
+			wantNilIterRange: true,
+			wantCost:         2,
+			wantCostV0:       12,
+			wantResult:       types.Int(43),
+		},
+		{
+			name: "non-bind empty list comprehension with user iterVar retains iterRange",
+			expr: fac.NewComprehension(1,
+				fac.NewList(2, []ast.Expr{}, []int32{}),
+				"x",
+				"a",
+				fac.NewLiteral(3, types.Int(42)),
+				fac.NewLiteral(4, types.False),
+				fac.NewIdent(5, "a"),
+				fac.NewIdent(6, "a"),
+			),
+			wantNilIterRange: false,
+			wantCost:         11,
+			wantCostV0:       11,
+			wantResult:       types.Int(42),
+		},
+		{
+			name: "non-bind comprehension with true loopCondition retains iterRange",
+			expr: fac.NewComprehension(1,
+				fac.NewList(2, []ast.Expr{}, []int32{}),
+				"#unused",
+				"a",
+				fac.NewLiteral(3, types.Int(42)),
+				fac.NewLiteral(4, types.True),
+				fac.NewIdent(5, "a"),
+				fac.NewIdent(6, "a"),
+			),
+			wantNilIterRange: false,
+			wantCost:         11,
+			wantCostV0:       11,
+			wantResult:       types.Int(42),
+		},
+		{
+			name: "non-bind comprehension with non-identity loopStep retains iterRange",
+			expr: fac.NewComprehension(1,
+				fac.NewList(2, []ast.Expr{}, []int32{}),
+				"#unused",
+				"a",
+				fac.NewLiteral(3, types.Int(42)),
+				fac.NewLiteral(4, types.False),
+				fac.NewLiteral(5, types.Int(0)),
+				fac.NewIdent(6, "a"),
+			),
+			wantNilIterRange: false,
+			wantCost:         11,
+			wantCostV0:       11,
+			wantResult:       types.Int(42),
+		},
+		{
+			name: "non-bind two-var comprehension retains iterRange",
+			expr: fac.NewComprehensionTwoVar(1,
+				fac.NewList(2, []ast.Expr{}, []int32{}),
+				"#unused",
+				"v",
+				"a",
+				fac.NewLiteral(3, types.Int(42)),
+				fac.NewLiteral(4, types.False),
+				fac.NewIdent(5, "a"),
+				fac.NewIdent(6, "a"),
+			),
+			wantNilIterRange: false,
+			wantCost:         11,
+			wantCostV0:       11,
+			wantResult:       types.Int(42),
+		},
+	}
+
+	cont := containers.DefaultContainer
+	reg := newTestRegistry(t)
+	attrs := NewAttributeFactory(cont, reg, reg)
+	interp := newStandardInterpreter(t, cont, reg, reg, attrs)
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			checked := ast.NewCheckedAST(ast.NewAST(tc.expr, nil), map[int64]*types.Type{}, map[int64]*ast.ReferenceInfo{})
+			plan, err := interp.NewInterpretable(checked)
+			if err != nil {
+				t.Fatalf("NewInterpretable() failed: %v", err)
+			}
+			fold, ok := plan.(*evalFold)
+			if !ok {
+				t.Fatalf("plan got %T, wanted *evalFold", plan)
+			}
+			if (fold.iterRange == nil) != tc.wantNilIterRange {
+				t.Errorf("fold.iterRange == nil got %v, wanted %v", fold.iterRange == nil, tc.wantNilIterRange)
+			}
+
+			for _, ver := range []struct {
+				opts []cost.TrackerOption
+				want uint64
+			}{
+				{opts: nil, want: tc.wantCost},
+				{opts: []cost.TrackerOption{cost.ModelVersion(0)}, want: tc.wantCostV0},
+			} {
+				tracker, err := NewCostTracker(nil, ver.opts...)
+				if err != nil {
+					t.Fatalf("NewCostTracker() failed: %v", err)
+				}
+				prg, err := interp.NewInterpretable(checked,
+					CostObserver(CostTrackerFactory(func() (*CostTracker, error) {
+						return tracker, nil
+					})))
+				if err != nil {
+					t.Fatalf("NewInterpretable() with cost tracker failed: %v", err)
+				}
+				frame, err := NewExecutionFrame(EmptyActivation())
+				if err != nil {
+					t.Fatalf("NewExecutionFrame() failed: %v", err)
+				}
+				res := prg.Exec(frame)
+				if res.Equal(tc.wantResult) != types.True {
+					t.Errorf("prg.Exec() got %v, wanted %v", res, tc.wantResult)
+				}
+				if got := tracker.ActualCost(); got != ver.want {
+					t.Errorf("tracker.ActualCost() got %d, wanted %d", got, ver.want)
+				}
 			}
 		})
 	}

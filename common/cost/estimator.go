@@ -823,20 +823,17 @@ func isConditionalCall(e ast.Expr) bool {
 
 // isBind returns true if the given expression represents a cel.bind() macro structure.
 func (c *coster) isBind(e ast.Expr) bool {
-	comp := e.AsComprehension()
-	iterRange := comp.IterRange()
-	loopCond := comp.LoopCondition()
-	return iterRange.Kind() == ast.ListKind && iterRange.AsList().Size() == 0 &&
-		loopCond.Kind() == ast.LiteralKind && loopCond.AsLiteral() == types.False &&
-		!isAccumulatorVar(comp.AccuVar())
+	return ast.IsBind(e)
 }
 
 // costBind estimates the cost of a cel.bind() variable declaration macro.
 func (c *coster) costBind(e ast.Expr) CostEstimate {
 	comp := e.AsComprehension()
 	var sum CostEstimate
-	// Binds are lazily initialized, so we retain the cost of an empty iteration range.
-	sum = sum.Add(c.cost(comp.IterRange()))
+	if c.modelVersion == 0 {
+		// Binds are lazily initialized, so we retain the cost of an empty iteration range.
+		sum = sum.Add(c.cost(comp.IterRange()))
+	}
 	initCost := c.cost(comp.AccuInit())
 	if c.modelVersion >= 1 && !mustReadVar(comp.Result(), comp.AccuVar()) {
 		// The bound value is computed only if the result reads it, so unless every evaluation of

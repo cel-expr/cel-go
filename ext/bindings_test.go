@@ -43,31 +43,36 @@ var bindingTests = []struct {
 	// estimatedCostV0 is the estimate under cost.ModelVersion0, set only where the revision moved it.
 	estimatedCostV0 *cost.CostEstimate
 	actualCost      uint64
+	actualCostV0    *uint64
 }{
 	{
 		name: "single bind",
 		expr: `cel.bind(a, 'hell' + 'o' + '!', "%s, %s, %s".format([a, a, a])) ==
 	                       'hello!, hello!, hello' + '!'`,
-		estimatedCost: cost.RangedCostEstimate(30, 32),
-		actualCost:    32,
+		estimatedCost:   cost.RangedCostEstimate(20, 22),
+		estimatedCostV0: costV0(30, 32),
+		actualCost:      22,
+		actualCostV0:    actualV0(32),
 	},
 	{
 		name: "multiple binds",
 		expr: `cel.bind(a, 'hello!',
 		       cel.bind(b, 'goodbye',
 				a + ' and, ' + b)) == 'hello! and, goodbye'`,
-		estimatedCost:   cost.FixedCostEstimate(28),
+		estimatedCost:   cost.FixedCostEstimate(8),
 		estimatedCostV0: costV0(27, 28),
-		actualCost:      28,
+		actualCost:      8,
+		actualCostV0:    actualV0(28),
 	},
 	{
 		name: "shadow binds",
 		expr: `cel.bind(a,
 		       cel.bind(a, 'world', a + '!'),
 		   	    'hello ' + a) == 'hello ' + 'world' + '!'`,
-		estimatedCost:   cost.FixedCostEstimate(31),
+		estimatedCost:   cost.FixedCostEstimate(11),
 		estimatedCostV0: costV0(30, 31),
-		actualCost:      31,
+		actualCost:      11,
+		actualCostV0:    actualV0(31),
 	},
 	{
 		name: "nested bind with int list",
@@ -81,8 +86,10 @@ var bindingTests = []struct {
 		hints: map[string]uint64{
 			"x": 3,
 		},
-		estimatedCost: cost.FixedCostEstimate(39),
-		actualCost:    39,
+		estimatedCost:   cost.FixedCostEstimate(9),
+		estimatedCostV0: costV0(39, 39),
+		actualCost:      9,
+		actualCostV0:    actualV0(39),
 	},
 	{
 		name: "nested bind with string list",
@@ -97,9 +104,10 @@ var bindingTests = []struct {
 			"x":        3,
 			"x.@items": 10,
 		},
-		estimatedCost:   cost.RangedCostEstimate(39, 40),
+		estimatedCost:   cost.RangedCostEstimate(9, 10),
 		estimatedCostV0: costV0(38, 40),
-		actualCost:      39,
+		actualCost:      9,
+		actualCostV0:    actualV0(39),
 	},
 	{
 		name: "shadowed binding",
@@ -108,8 +116,10 @@ var bindingTests = []struct {
 		in: map[string]any{
 			"cel.example.x": "1",
 		},
-		estimatedCost: cost.FixedCostEstimate(12),
-		actualCost:    12,
+		estimatedCost:   cost.FixedCostEstimate(2),
+		estimatedCostV0: costV0(12, 12),
+		actualCost:      2,
+		actualCostV0:    actualV0(12),
 	},
 	{
 		name: "container shadowed binding",
@@ -121,8 +131,10 @@ var bindingTests = []struct {
 		in: map[string]any{
 			"cel.example.x": "1",
 		},
-		estimatedCost: cost.FixedCostEstimate(12),
-		actualCost:    12,
+		estimatedCost:   cost.FixedCostEstimate(2),
+		estimatedCostV0: costV0(12, 12),
+		actualCost:      2,
+		actualCostV0:    actualV0(12),
 	},
 	{
 		name: "shadowing namespace resolution selector",
@@ -134,8 +146,10 @@ var bindingTests = []struct {
 		in: map[string]any{
 			"cel.example.x.y": 1,
 		},
-		estimatedCost: cost.FixedCostEstimate(43),
-		actualCost:    43,
+		estimatedCost:   cost.FixedCostEstimate(33),
+		estimatedCostV0: costV0(43, 43),
+		actualCost:      33,
+		actualCostV0:    actualV0(43),
 	},
 	{
 		name: "shadowing namespace resolution selector with local",
@@ -146,8 +160,10 @@ var bindingTests = []struct {
 		in: map[string]any{
 			"x.y": 0,
 		},
-		estimatedCost: cost.FixedCostEstimate(44),
-		actualCost:    44,
+		estimatedCost:   cost.FixedCostEstimate(34),
+		estimatedCostV0: costV0(44, 44),
+		actualCost:      34,
+		actualCostV0:    actualV0(44),
 	},
 	{
 		name: "namespace disambiguation",
@@ -158,14 +174,18 @@ var bindingTests = []struct {
 		in: map[string]any{
 			"y": 1,
 		},
-		estimatedCost: cost.FixedCostEstimate(13),
-		actualCost:    13,
+		estimatedCost:   cost.FixedCostEstimate(3),
+		estimatedCostV0: costV0(13, 13),
+		actualCost:      3,
+		actualCostV0:    actualV0(13),
 	},
 	{
-		name:          "nesting shadowing",
-		expr:          `cel.bind(y, 0, cel.bind(y, 1, y != 0))`,
-		estimatedCost: cost.FixedCostEstimate(22),
-		actualCost:    22,
+		name:            "nesting shadowing",
+		expr:            `cel.bind(y, 0, cel.bind(y, 1, y != 0))`,
+		estimatedCost:   cost.FixedCostEstimate(2),
+		estimatedCostV0: costV0(22, 22),
+		actualCost:      2,
+		actualCostV0:    actualV0(22),
 	},
 }
 
@@ -191,7 +211,7 @@ func TestBindings(t *testing.T) {
 			testCheckCost(t, env, cAst, tc.hints, tc.estimatedCost, tc.estimatedCostV0)
 			asts = append(asts, cAst)
 			for _, ast := range asts {
-				testEvalWithCost(t, env, ast, tc.in, tc.actualCost)
+				testEvalWithCost(t, env, ast, tc.in, tc.actualCost, ledgerV0(tc.actualCostV0)...)
 			}
 		})
 	}
