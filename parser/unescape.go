@@ -25,7 +25,7 @@ import (
 // This function performs escaping compatible with GoogleSQL.
 func unescape(value string, isBytes bool) (string, error) {
 	// All strings normalize newlines to the \n representation.
-	value = newlineNormalizer.Replace(value)
+	value = normalizeNewlines(value)
 	n := len(value)
 
 	// Nothing to unescape / decode.
@@ -73,6 +73,17 @@ func unescape(value string, isBytes bool) (string, error) {
 	var runeTmp [utf8.UTFMax]byte
 	buf := make([]byte, 0, 3*n/2)
 	for len(value) > 0 {
+		if idx := strings.IndexByte(value, '\\'); idx != 0 {
+			span := value
+			if idx > 0 {
+				span = value[:idx]
+			}
+			for _, r := range span {
+				buf = utf8.AppendRune(buf, r)
+			}
+			value = value[len(span):]
+			continue
+		}
 		c, encode, rest, err := unescapeChar(value, isBytes)
 		if err != nil {
 			return "", err
@@ -105,7 +116,7 @@ func unescapeChar(s string, isBytes bool) (value rune, encode bool, tail string,
 	// 1. Character is not an escape sequence.
 	switch c := s[0]; {
 	case c >= utf8.RuneSelf:
-		r, size := utf8.DecodeRuneInString(s)
+		r, size := utf8.DecodeRuneInString(s[:min(len(s), utf8.UTFMax)])
 		return r, true, s[size:], nil
 	case c != '\\':
 		return rune(s[0]), false, s[1:], nil
@@ -232,6 +243,23 @@ func unhex(b byte) (rune, bool) {
 	return 0, false
 }
 
-var (
-	newlineNormalizer = strings.NewReplacer("\r\n", "\n", "\r", "\n")
-)
+func normalizeNewlines(value string) string {
+	idx := strings.IndexByte(value, '\r')
+	if idx < 0 {
+		return value
+	}
+	var b strings.Builder
+	b.Grow(len(value))
+	b.WriteString(value[:idx])
+	for i := idx; i < len(value); i++ {
+		if value[i] == '\r' {
+			if i+1 < len(value) && value[i+1] == '\n' {
+				i++
+			}
+			b.WriteByte('\n')
+		} else {
+			b.WriteByte(value[i])
+		}
+	}
+	return b.String()
+}
