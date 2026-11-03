@@ -27,6 +27,7 @@ import (
 	"cel.dev/cel-go/common/operators"
 	"cel.dev/cel-go/common/types"
 	"cel.dev/cel-go/common/types/ref"
+	"cel.dev/cel-go/common/types/traits"
 )
 
 // mapInsertFunction is the name of the internal function used by comprehension macros to insert
@@ -869,7 +870,7 @@ func (p *planBuilder) planComprehension(expr ast.Expr) (InterpretableV2, error) 
 	if err != nil {
 		return nil, err
 	}
-	step, err := p.plan(fold.LoopStep())
+	step, err := p.planComprehensionStep(fold, evalF.mutableAccu)
 	if err != nil {
 		return nil, err
 	}
@@ -909,6 +910,176 @@ func (p *planBuilder) planRetained(expr ast.Expr) (InterpretableV2, error) {
 	return i, err
 }
 
+func (p *planBuilder) planComprehensionStep(fold ast.ComprehensionExpr, mutableAccu bool) (InterpretableV2, error) {
+	stepExpr := fold.LoopStep()
+	if !mutableAccu {
+		return p.plan(stepExpr)
+	}
+	condExpr, callExpr, ok := unwrapStepCall(fold, true)
+	if !ok {
+		return p.plan(stepExpr)
+	}
+	stepOp, elided, err := p.tryPlanElidedStepCall(fold, callExpr)
+	if err != nil || !elided {
+		if err != nil {
+			return nil, err
+		}
+		return p.plan(stepExpr)
+	}
+	if condExpr == nil {
+		return stepOp, nil
+	}
+	cond, err := p.plan(condExpr)
+	if err != nil {
+		return nil, err
+	}
+	falsy, err := p.plan(stepExpr.AsCall().Args()[2])
+	if err != nil {
+		return nil, err
+	}
+	return p.decorate(p.planCallConditional(stepExpr, []InterpretableV2{cond, stepOp, falsy}))
+}
+
+func (p *planBuilder) tryPlanElidedStepCall(fold ast.ComprehensionExpr, callExpr ast.Expr) (InterpretableV2, bool, error) {
+	call := callExpr.AsCall()
+	args := call.Args()
+	switch call.FunctionName() {
+	case operators.Add:
+		if fold.AccuInit().Kind() != ast.ListKind || len(args) != 2 || !isIdentNamed(args[0], fold.AccuVar()) || args[1].Kind() != ast.ListKind {
+			return nil, false, nil
+		}
+		listExpr := args[1].AsList()
+		if listExpr.Size() != 1 || len(listExpr.OptionalIndices()) != 0 {
+			return nil, false, nil
+		}
+		_, oName, ok := p.resolveStandardStepCall(callExpr)
+		if !ok {
+			return nil, false, nil
+		}
+		accuPlan, err := p.plan(args[0])
+		if err != nil {
+			return nil, false, err
+		}
+		elemPlan, err := p.plan(listExpr.Elements()[0])
+		if err != nil {
+			return nil, false, err
+		}
+		inst, err := p.decorate(&evalListAppend{
+			id:       callExpr.ID(),
+			listID:   args[1].ID(),
+			overload: oName,
+			accu:     accuPlan,
+			elem:     elemPlan,
+			adapter:  p.adapter,
+		}, nil)
+		return inst, true, err
+
+	case mapInsertFunction:
+		if fold.AccuInit().Kind() != ast.MapKind || len(args) < 2 || !isIdentNamed(args[0], fold.AccuVar()) {
+			return nil, false, nil
+		}
+		fnDef, oName, ok := p.resolveStandardStepCall(callExpr)
+		if !ok {
+			return nil, false, nil
+		}
+		var keyExpr, valExpr ast.Expr
+		var mapID int64
+		var isBinary bool
+		switch len(args) {
+		case 3:
+			if fnDef.Function == nil {
+				return nil, false, nil
+			}
+			keyExpr, valExpr = args[1], args[2]
+		case 2:
+			if fnDef.Binary == nil {
+				return nil, false, nil
+			}
+			if args[1].Kind() != ast.MapKind || args[1].AsMap().Size() != 1 {
+				return nil, false, nil
+			}
+			entry := args[1].AsMap().Entries()[0]
+			if entry.Kind() != ast.MapEntryKind || entry.AsMapEntry().IsOptional() {
+				return nil, false, nil
+			}
+			mapEntry := entry.AsMapEntry()
+			keyExpr, valExpr = mapEntry.Key(), mapEntry.Value()
+			mapID = args[1].ID()
+			isBinary = true
+		default:
+			return nil, false, nil
+		}
+		accuPlan, err := p.plan(args[0])
+		if err != nil {
+			return nil, false, err
+		}
+		keyPlan, err := p.plan(keyExpr)
+		if err != nil {
+			return nil, false, err
+		}
+		valPlan, err := p.plan(valExpr)
+		if err != nil {
+			return nil, false, err
+		}
+		inst, err := p.decorate(&evalMapInsert{
+			id:       callExpr.ID(),
+			mapID:    mapID,
+			overload: oName,
+			accu:     accuPlan,
+			key:      keyPlan,
+			val:      valPlan,
+			adapter:  p.adapter,
+			binary:   isBinary,
+		}, nil)
+		return inst, true, err
+	}
+	return nil, false, nil
+}
+
+func (p *planBuilder) resolveStandardStepCall(expr ast.Expr) (*functions.Overload, string, bool) {
+	target, fnName, oName := p.resolveFunction(expr)
+	if target != nil {
+		return nil, "", false
+	}
+	var fnDef *functions.Overload
+	if oName != "" {
+		fnDef, _ = p.disp.FindOverload(oName)
+	}
+	if fnDef == nil {
+		fnDef, _ = p.disp.FindOverload(fnName)
+	}
+	if fnDef == nil || fnDef.Async != nil || fnDef.LateBound || fnDef.NonStrict {
+		return nil, "", false
+	}
+	if fnName == operators.Add && (fnDef.Binary == nil || fnDef.OperandTrait != traits.AdderType) {
+		return nil, "", false
+	}
+	return fnDef, oName, true
+}
+
+// unwrapStepCall matches comprehension loop steps of the form `call(...)` or
+// `cond ? call(...) : falsy` when the comprehension result is `accuVar`.
+// When requireFalsyAccu is true, the falsy branch of a conditional must be `accuVar`.
+func unwrapStepCall(fold ast.ComprehensionExpr, requireFalsyAccu bool) (condExpr, callExpr ast.Expr, ok bool) {
+	accuVar := fold.AccuVar()
+	if accuVar == "" || !isIdentNamed(fold.Result(), accuVar) {
+		return nil, nil, false
+	}
+	step := fold.LoopStep()
+	if step.Kind() != ast.CallKind {
+		return nil, nil, false
+	}
+	call := step.AsCall()
+	if call.FunctionName() == operators.Conditional && len(call.Args()) == 3 {
+		args := call.Args()
+		if args[1].Kind() != ast.CallKind || (requireFalsyAccu && !isIdentNamed(args[2], accuVar)) {
+			return nil, nil, false
+		}
+		return args[0], args[1], true
+	}
+	return nil, step, true
+}
+
 // isMutableAccuSafe reports whether the comprehension accumulator may be backed by a mutable
 // list or map during evaluation.
 //
@@ -936,34 +1107,19 @@ func isMutableAccuSafe(fold ast.ComprehensionExpr) bool {
 //
 // Returns whether this comprehension appears to be a standard map/filter macro implementation.
 func isOptimizableListAppend(fold ast.ComprehensionExpr) bool {
-	accuVar := fold.AccuVar()
-	if accuVar == "" || !isIdentNamed(fold.Result(), accuVar) {
-		return false
-	}
 	accuInit := fold.AccuInit()
 	if accuInit.Kind() != ast.ListKind || accuInit.AsList().Size() != 0 {
 		return false
 	}
-	step := fold.LoopStep()
-	if step.Kind() != ast.CallKind {
+	_, callExpr, ok := unwrapStepCall(fold, false)
+	if !ok {
 		return false
 	}
-	// Macro loop_step for a filter() will contain a ternary:
-	//   filter ? accu_var + [elem] : accu_var
-	// Macro loop_step for a map() will contain a list concat operation:
-	//   accu_var + [elem]
-	call := step.AsCall()
-	if call.FunctionName() == operators.Conditional && len(call.Args()) == 3 {
-		branch := call.Args()[1]
-		if branch.Kind() != ast.CallKind {
-			return false
-		}
-		call = branch.AsCall()
-	}
+	call := callExpr.AsCall()
 	args := call.Args()
 	return call.FunctionName() == operators.Add &&
 		len(args) == 2 &&
-		isIdentNamed(args[0], accuVar) &&
+		isIdentNamed(args[0], fold.AccuVar()) &&
 		args[1].Kind() == ast.ListKind &&
 		args[1].AsList().Size() == 1
 }
@@ -976,29 +1132,18 @@ func isOptimizableMapInsert(fold ast.ComprehensionExpr) bool {
 	if fold.IterVar() == "" || fold.IterVar2() == "" {
 		return false
 	}
-	accuVar := fold.AccuVar()
-	if accuVar == "" || !isIdentNamed(fold.Result(), accuVar) {
-		return false
-	}
 	if fold.AccuInit().Kind() != ast.MapKind || fold.AccuInit().AsMap().Size() != 0 {
 		return false
 	}
-	step := fold.LoopStep()
-	if step.Kind() != ast.CallKind {
+	_, callExpr, ok := unwrapStepCall(fold, false)
+	if !ok {
 		return false
 	}
-	call := step.AsCall()
-	if call.FunctionName() == operators.Conditional && len(call.Args()) == 3 {
-		branch := call.Args()[1]
-		if branch.Kind() != ast.CallKind {
-			return false
-		}
-		call = branch.AsCall()
-	}
+	call := callExpr.AsCall()
 	args := call.Args()
 	return call.FunctionName() == mapInsertFunction &&
 		(len(args) == 2 || len(args) == 3) &&
-		isIdentNamed(args[0], accuVar)
+		isIdentNamed(args[0], fold.AccuVar())
 }
 
 // isIdentNamed reports whether the expression is an identifier with the given name.

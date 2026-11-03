@@ -1548,6 +1548,17 @@ func (o *evalObj) Type() ref.Type {
 	return types.NewObjectType(o.typeName)
 }
 
+type mutableListAppender interface {
+	traits.MutableLister
+	Append(val ref.Val)
+	IntoImmutableList() traits.Lister
+}
+
+type mutableMapOwner interface {
+	traits.MutableMapper
+	IntoImmutableMap() traits.Mapper
+}
+
 // initMutableAccu replaces an empty list or map accumulator with a mutable one, and returns any
 // other accumulator unchanged.
 func initMutableAccu(initVal ref.Val, adapter types.Adapter) ref.Val {
@@ -1567,8 +1578,12 @@ func toImmutableAccu(res ref.Val) ref.Val {
 		return res
 	}
 	switch v := res.(type) {
+	case mutableListAppender:
+		return v.IntoImmutableList()
 	case traits.MutableLister:
 		return v.ToImmutableList()
+	case mutableMapOwner:
+		return v.IntoImmutableMap()
 	case traits.MutableMapper:
 		return v.ToImmutableMap()
 	}
@@ -1798,6 +1813,217 @@ func (f *slotFolder) foldIterable(iterable traits.Iterable) {
 // Eval implements the Interpretable interface method.
 func (fold *evalFold) Eval(ctx Activation) ref.Val {
 	return EvalActivation(ctx, fold.Exec)
+}
+
+// evalListAppend appends a single element to a comprehension list accumulator without allocating
+// an intermediate single-element list container. It operates identically whether the accumulator
+// is resolved from an ExecutionFrame slot or an Activation, and falls back to immutable
+// traits.Adder concatenation when exhaustive evaluation disables accumulator mutability.
+type evalListAppend struct {
+	id             int64
+	listID         int64
+	overload       string
+	accu           InterpretableV2
+	elem           InterpretableV2
+	adapter        types.Adapter
+	constContainer bool
+}
+
+func (a *evalListAppend) ID() int64 {
+	return a.id
+}
+
+func (a *evalListAppend) Function() string {
+	return operators.Add
+}
+
+func (a *evalListAppend) OverloadID() string {
+	return a.overload
+}
+
+func (a *evalListAppend) Exec(frame *ExecutionFrame) ref.Val {
+	lVal := a.accu.Exec(frame)
+	if isError(lVal) {
+		return lVal
+	}
+	eVal := a.elem.Exec(frame)
+	costs := frame.CostTracker()
+	if isError(eVal) {
+		if isUnknown(lVal) {
+			if costs != nil {
+				costs.EvalBinary(frame, a.id, a, lVal, eVal, lVal)
+			}
+			return lVal
+		}
+		return eVal
+	}
+	if isUnknown(eVal) {
+		if costs != nil && !a.constContainer {
+			costs.CreateList(a.listID, eVal)
+		}
+		res := eVal
+		if isUnknown(lVal) {
+			res = types.MergeUnknowns(lVal.(*types.Unknown), eVal.(*types.Unknown))
+		}
+		if costs != nil {
+			costs.EvalBinary(frame, a.id, a, lVal, eVal, res)
+		}
+		return res
+	}
+	var rVal ref.Val
+	if costs != nil {
+		if costs.HasCustomTracker(a.overload) {
+			rVal = types.NewRefValList(a.adapter, []ref.Val{eVal})
+		}
+		if !a.constContainer {
+			costs.CreateList(a.listID, rVal)
+		}
+	}
+	if isUnknown(lVal) {
+		if costs != nil {
+			costs.EvalBinary(frame, a.id, a, lVal, rVal, lVal)
+		}
+		return lVal
+	}
+	var res ref.Val
+	if ml, ok := lVal.(mutableListAppender); ok {
+		ml.Append(eVal)
+		res = lVal
+	} else if adder, ok := lVal.(traits.Adder); ok {
+		if rVal == nil {
+			rVal = types.NewRefValList(a.adapter, []ref.Val{eVal})
+		}
+		res = labelErrNode(a.id, adder.Add(rVal))
+	} else {
+		res = types.NewErrWithNodeID(a.id, "no such overload: %s", operators.Add)
+	}
+	if costs != nil {
+		costs.EvalBinary(frame, a.id, a, lVal, rVal, res)
+	}
+	return res
+}
+
+func (a *evalListAppend) Eval(ctx Activation) ref.Val {
+	return EvalActivation(ctx, a.Exec)
+}
+
+// evalMapInsert inserts a single key-value entry into a comprehension map accumulator without
+// allocating an intermediate single-entry map literal. It operates identically whether the
+// accumulator is resolved from an ExecutionFrame slot or an Activation, and supports both
+// mutable and immutable mappers via types.InsertMapKeyValue.
+type evalMapInsert struct {
+	id             int64
+	mapID          int64
+	overload       string
+	accu           InterpretableV2
+	key            InterpretableV2
+	val            InterpretableV2
+	adapter        types.Adapter
+	binary         bool
+	constContainer bool
+}
+
+func (m *evalMapInsert) ID() int64 {
+	return m.id
+}
+
+func (m *evalMapInsert) Function() string {
+	return mapInsertFunction
+}
+
+func (m *evalMapInsert) OverloadID() string {
+	return m.overload
+}
+
+func (m *evalMapInsert) Exec(frame *ExecutionFrame) ref.Val {
+	mVal := m.accu.Exec(frame)
+	if isError(mVal) {
+		return mVal
+	}
+	kVal := m.key.Exec(frame)
+	costs := frame.CostTracker()
+	if isError(kVal) {
+		if m.binary && isUnknown(mVal) {
+			if costs != nil {
+				costs.EvalBinary(frame, m.id, m, mVal, kVal, mVal)
+			}
+			return mVal
+		}
+		return kVal
+	}
+	vVal := m.val.Exec(frame)
+	if isError(vVal) {
+		if m.binary && isUnknown(mVal) {
+			if costs != nil {
+				costs.EvalBinary(frame, m.id, m, mVal, vVal, mVal)
+			}
+			return mVal
+		}
+		return vVal
+	}
+	if m.binary {
+		if mapUnk := mergeBinaryUnknowns(kVal, vVal); mapUnk != nil {
+			if costs != nil && !m.constContainer {
+				costs.CreateMap(m.mapID, mapUnk)
+			}
+			res := mapUnk
+			if isUnknown(mVal) {
+				res = types.MergeUnknowns(mVal.(*types.Unknown), mapUnk)
+			}
+			if costs != nil {
+				costs.EvalBinary(frame, m.id, m, mVal, mapUnk, res)
+			}
+			return res
+		}
+		var rVal ref.Val
+		if costs != nil {
+			if costs.HasCustomTracker(m.overload) {
+				rVal = types.NewRefValMap(m.adapter, map[ref.Val]ref.Val{kVal: vVal})
+			}
+			if !m.constContainer {
+				costs.CreateMap(m.mapID, rVal)
+			}
+		}
+		if isUnknown(mVal) {
+			if costs != nil {
+				costs.EvalBinary(frame, m.id, m, mVal, rVal, mVal)
+			}
+			return mVal
+		}
+		res := m.insert(mVal, kVal, vVal)
+		if costs != nil {
+			costs.EvalBinary(frame, m.id, m, mVal, rVal, res)
+		}
+		return res
+	}
+	unk := mergeBinaryUnknowns(mVal, mergeBinaryUnknowns(kVal, vVal))
+	if unk != nil {
+		if costs != nil {
+			var args [3]ref.Val
+			args[0], args[1], args[2] = mVal, kVal, vVal
+			costs.EvalVarArgs(frame, m.id, m, args[:], unk)
+		}
+		return unk
+	}
+	res := m.insert(mVal, kVal, vVal)
+	if costs != nil {
+		var args [3]ref.Val
+		args[0], args[1], args[2] = mVal, kVal, vVal
+		costs.EvalVarArgs(frame, m.id, m, args[:], res)
+	}
+	return res
+}
+
+func (m *evalMapInsert) insert(mVal, kVal, vVal ref.Val) ref.Val {
+	tm, ok := mVal.(traits.Mapper)
+	if !ok {
+		return types.NewErrWithNodeID(m.id, "no such overload: %s", mapInsertFunction)
+	}
+	return labelErrNode(m.id, types.InsertMapKeyValue(tm, kVal, vVal))
+}
+
+func (m *evalMapInsert) Eval(ctx Activation) ref.Val {
+	return EvalActivation(ctx, m.Exec)
 }
 
 // Optional Interpretable implementations that specialize, subsume, or extend the core evaluation

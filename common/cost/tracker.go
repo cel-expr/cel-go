@@ -186,6 +186,19 @@ func (c *Tracker) ModelVersion() uint32 {
 	return c.modelVersion
 }
 
+// HasCustomTracker reports whether the tracker is configured with a custom ActualCostEstimator
+// or a custom OverloadTracker for the given overloadID that may inspect call argument values.
+func (c *Tracker) HasCustomTracker(overloadID string) bool {
+	if c == nil {
+		return false
+	}
+	if c.Estimator != nil {
+		return true
+	}
+	_, found := c.overloadTrackers[overloadID]
+	return found
+}
+
 // CreateList records list literal construction cost.
 func (c *Tracker) CreateList(id int64, res ref.Val) {
 	c.cost = SafeAdd(c.cost, ListCreateBaseCost)
