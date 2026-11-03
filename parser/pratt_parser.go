@@ -16,6 +16,7 @@ package parser
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -686,41 +687,23 @@ loop:
 // extractStructName converts a chain of pre-parsed AST nodes representing field selections,
 // such as "a.b.Msg", into a qualified struct type name.
 func (p *prattParserWorker) extractStructName(expr ast.Expr) (string, bool) {
-	var fields []string
-	var ids []int64
-	cur := expr
-	for cur != nil && cur.Kind() == ast.SelectKind {
-		sel := cur.AsSelect()
+	parts := make([]string, 0, 4)
+	for expr != nil && expr.Kind() == ast.SelectKind {
+		sel := expr.AsSelect()
 		if sel.IsTestOnly() {
 			return "", false
 		}
-		fields = append(fields, sel.FieldName())
-		ids = append(ids, cur.ID())
-		cur = sel.Operand()
+		p.helper.deleteID(expr.ID())
+		parts = append(parts, sel.FieldName())
+		expr = sel.Operand()
 	}
-	if cur == nil || cur.Kind() != ast.IdentKind {
+	if expr == nil || expr.Kind() != ast.IdentKind {
 		return "", false
 	}
-	rootName := cur.AsIdent()
-	for _, id := range ids {
-		p.helper.deleteID(id)
-	}
-	p.helper.deleteID(cur.ID())
-	if len(fields) == 0 {
-		return rootName, true
-	}
-	totalLen := len(rootName) + len(fields)
-	for _, f := range fields {
-		totalLen += len(f)
-	}
-	var sb strings.Builder
-	sb.Grow(totalLen)
-	sb.WriteString(rootName)
-	for i := len(fields) - 1; i >= 0; i-- {
-		sb.WriteByte('.')
-		sb.WriteString(fields[i])
-	}
-	return sb.String(), true
+	p.helper.deleteID(expr.ID())
+	parts = append(parts, expr.AsIdent())
+	slices.Reverse(parts)
+	return strings.Join(parts, "."), true
 }
 
 func (p *prattParserWorker) parseStruct(objID int64, structName string) ast.Expr {
