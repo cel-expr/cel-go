@@ -16,7 +16,6 @@ package parser
 
 import (
 	"fmt"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -687,23 +686,36 @@ loop:
 // extractStructName converts a chain of pre-parsed AST nodes representing field selections,
 // such as "a.b.Msg", into a qualified struct type name.
 func (p *prattParserWorker) extractStructName(expr ast.Expr) (string, bool) {
-	parts := make([]string, 0, 4)
+	parts := make([]string, 0, 8)
+	totalLen := 0
 	for expr != nil && expr.Kind() == ast.SelectKind {
 		sel := expr.AsSelect()
 		if sel.IsTestOnly() {
 			return "", false
 		}
 		p.helper.deleteID(expr.ID())
-		parts = append(parts, sel.FieldName())
+		field := sel.FieldName()
+		parts = append(parts, field)
+		totalLen += len(field) + 1
 		expr = sel.Operand()
 	}
 	if expr == nil || expr.Kind() != ast.IdentKind {
 		return "", false
 	}
 	p.helper.deleteID(expr.ID())
-	parts = append(parts, expr.AsIdent())
-	slices.Reverse(parts)
-	return strings.Join(parts, "."), true
+	ident := expr.AsIdent()
+	if len(parts) == 0 {
+		return ident, true
+	}
+	totalLen += len(ident)
+	var sb strings.Builder
+	sb.Grow(totalLen)
+	sb.WriteString(ident)
+	for i := len(parts) - 1; i >= 0; i-- {
+		sb.WriteByte('.')
+		sb.WriteString(parts[i])
+	}
+	return sb.String(), true
 }
 
 func (p *prattParserWorker) parseStruct(objID int64, structName string) ast.Expr {
