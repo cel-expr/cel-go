@@ -1920,13 +1920,18 @@ func BenchmarkInterpreter(b *testing.B) {
 
 func BenchmarkInterpreterParallel(b *testing.B) {
 	for _, tst := range testData(b) {
-		prg, vars, err := program(b, &tst, Optimize(), CompileRegexConstants(MatchesRegexOptimization))
+		prg, frame, err := program(b, &tst, Optimize(), CompileRegexConstants(MatchesRegexOptimization))
 		if tst.err != "" || tst.progErr != "" {
 			continue
 		}
 		if err != nil {
 			b.Fatal(err)
 		}
+		vars := frame.Unwrap()
+		if vars == nil {
+			vars = EmptyActivation()
+		}
+		frame.Close()
 		b.ResetTimer()
 		b.Run(tst.name,
 			func(b *testing.B) {
@@ -2921,19 +2926,6 @@ func TestInterruptErrorIs(t *testing.T) {
 	}
 }
 
-func TestFolderActivation(t *testing.T) {
-	parentAct := EmptyActivation()
-	frame := mustNewExecutionFrame(t, parentAct)
-	defer frame.Close()
-	fld := newFolder(&evalFold{}, frame)
-	defer releaseFolder(fld)
-	if fld.Parent() != frame {
-		t.Errorf("fld.Parent() = %v, wanted %v", fld.Parent(), frame)
-	}
-	if fld.Unwrap() != frame {
-		t.Errorf("fld.Unwrap() = %v, wanted %v", fld.Unwrap(), frame)
-	}
-}
 
 func TestEvalWatchConstructor(t *testing.T) {
 	watchConst := &evalWatchConstructor{

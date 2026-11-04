@@ -338,8 +338,8 @@ func TestBindSkipsIterRangeInit(t *testing.T) {
 			if err != nil {
 				t.Fatalf("NewInterpretable() failed: %v", err)
 			}
-			fold, ok := plan.(*evalFold)
-			if !ok {
+			fold := unwrapEvalFold(plan)
+			if fold == nil {
 				t.Fatalf("plan got %T, wanted *evalFold", plan)
 			}
 			if (fold.iterRange == nil) != tc.wantNilIterRange {

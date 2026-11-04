@@ -347,37 +347,23 @@ func TestAttributePattern_LocallyBound(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	frame := mustNewExecutionFrame(t, partAct)
-	defer frame.Close()
-
-	// Push a localVariableHolder scope binding "x" only.
-	scope := &localVarTestScope{
-		parent: frame,
-		vars:   map[string]bool{"x": true},
-	}
-	frame1 := frame.Push(scope)
-	defer frame1.Pop()
-
-	// 1. Resolve attribute matching "x".
-	// Because "x" is locally bound in scope, it should not resolve to types.Unknown.
-	attrX := fac.AbsoluteAttribute(1, "x")
-	valX, err := attrX.Resolve(frame1)
+	// Comprehension local slot "x" does not match UnknownAttributePattern("x"), whereas external "y" does.
+	disp := NewDispatcher()
+	addFunctionBindings(t, disp)
+	interp := NewInterpreter(disp, containers.DefaultContainer, reg, reg, fac)
+	prgLocal, err := interp.NewInterpretable(parseMutabilityExpr(t, `[1, 2].map(x, x + 1)`))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("NewInterpretable() failed: %v", err)
 	}
-	if _, isUnk := valX.(*types.Unknown); isUnk {
-		t.Errorf("Resolve(x) got unknown, wanted value (since x is locally bound)")
+	if got := prgLocal.Eval(partAct); got.Equal(reg.NativeToValue([]int64{2, 3})) != types.True {
+		t.Errorf("comprehension with local x got %v, wanted [2, 3]", got)
 	}
-
-	// 2. Resolve attribute matching "y".
-	// Because "y" is NOT locally bound in any local scope layer, it should resolve to types.Unknown.
-	attrY := fac.AbsoluteAttribute(2, "y")
-	valY, err := attrY.Resolve(frame1)
+	prgExt, err := interp.NewInterpretable(parseMutabilityExpr(t, `[1, 2].map(x, x + y)`))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("NewInterpretable() failed: %v", err)
 	}
-	if _, isUnk := valY.(*types.Unknown); !isUnk {
-		t.Errorf("Resolve(y) got %v, wanted types.Unknown (since y is not locally bound)", valY)
+	if got := prgExt.Eval(partAct); !types.IsUnknown(got) {
+		t.Errorf("comprehension referencing unknown y got %v, wanted *types.Unknown", got)
 	}
 }
 

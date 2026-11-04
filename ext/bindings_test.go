@@ -15,10 +15,10 @@
 package ext
 
 import (
+	"context"
 	"fmt"
 	"runtime"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -28,7 +28,6 @@ import (
 	"cel.dev/cel-go/common/operators"
 	"cel.dev/cel-go/common/types"
 	"cel.dev/cel-go/common/types/ref"
-	"cel.dev/cel-go/interpreter"
 	"cel.dev/cel-go/test"
 	proto3pb "cel.dev/cel-go/test/proto3pb"
 )
@@ -259,6 +258,53 @@ func TestBindingsImmutability(t *testing.T) {
 					if out != types.True {
 						t.Errorf("prg.Eval(%q) got %v, wanted true", expr, out)
 					}
+				}
+			})
+		}
+	}
+}
+
+func TestNestedComprehensionInitializers(t *testing.T) {
+	// The comprehension initializer for xs is evaluated before the loop, but it is itself a
+	// loop of another comprehension, so the variables of each comprehension must occupy distinct
+	// slots or evaluating the initializer would clobber the variables of the enclosing loop.
+	tests := []string{
+		`cel.bind(xs, [1, 2, 3].map(i, i * 2), xs.filter(j, j < xs.size())) == [2]`,
+		`cel.bind(a, [10, 20].map(z, z + 1), [1, 2, 3].filter(y, y == 1 || (y == 2 && a[0] > 0))) == [1, 2]`,
+		`[1, 2, 3].transformList(i, x, cel.bind(y, [3, 4, 5].map(w, i > 0 ? x : 2), [6, 7, 8].map(z, z > 6 ? dyn(z) : dyn(y)))) == [[[2, 2, 2], 7, 8], [[2, 2, 2], 7, 8], [[3, 3, 3], 7, 8]]`,
+		`[1, 2, 3].transformList(i, x, cel.bind(y, [3, 4, 5].map(w, i > 0 ? x : 2), [6, 7, 8].map(z, z < 8 ? [z] : y + [z + x]))) == [[[6], [7], [2, 2, 2, 9]], [[6], [7], [2, 2, 2, 10]], [[6], [7], [3, 3, 3, 11]]]`,
+		`[1].transformList(i, x, cel.bind(y, [1].map(z, z), y)).size() < 0 || [1, 2, 3].transformList(i, x, cel.bind(y, [3, 4, 5].map(w, i > 0 ? x : 2), [6, 7, 8].map(z, z > 6 ? dyn(z) : dyn(y)))) == [[[2, 2, 2], 7, 8], [[2, 2, 2], 7, 8], [[3, 3, 3], 7, 8]]`,
+		`cel.bind(y, [1, 2].map(a, a) + [3, 4].map(b, b * 10), [5, 6].map(c, c == 5 ? [c] : y + [c])) == [[5], [1, 2, 30, 40, 6]]`,
+		`cel.bind(y, cel.bind(u, [1, 2].map(a, a + 1), [3, 4].map(b, b + u[0])), [5, 6].filter(c, c == 5 || y[1] == c)) == [5, 6]`,
+	}
+	env, err := cel.NewEnv(Bindings(), TwoVarComprehensions())
+	if err != nil {
+		t.Fatalf("cel.NewEnv() failed: %v", err)
+	}
+	progOpts := map[string][]cel.ProgramOption{
+		"default":    {},
+		"exhaustive": {cel.EvalOptions(cel.OptExhaustiveEval)},
+		"optimized":  {cel.EvalOptions(cel.OptOptimize)},
+		"tracked":    {cel.EvalOptions(cel.OptTrackState)},
+	}
+	for _, tst := range tests {
+		expr := tst
+		for name, opts := range progOpts {
+			t.Run(name+"/"+expr, func(t *testing.T) {
+				checkedAST, iss := env.Compile(expr)
+				if iss.Err() != nil {
+					t.Fatalf("env.Compile(%q) failed: %v", expr, iss.Err())
+				}
+				prg, err := env.Program(checkedAST, opts...)
+				if err != nil {
+					t.Fatalf("env.Program() failed: %v", err)
+				}
+				out, _, err := prg.Eval(cel.NoVars())
+				if err != nil {
+					t.Fatalf("prg.Eval() failed: %v", err)
+				}
+				if out != types.True {
+					t.Errorf("prg.Eval(%q) got %v, wanted true", expr, out)
 				}
 			})
 		}
@@ -650,31 +696,47 @@ func BenchmarkBindings(b *testing.B) {
 	}
 }
 
+// testBlockEnvOptions returns cel.EnvOptions that expose `cel.block([slots...], expr)` and
+// `cel.index(n)` macros in tests so `cel.@block` and `@index<n>` ASTs can be written as
+// human-readable CEL expressions.
+func testBlockEnvOptions() []cel.EnvOption {
+	const maxIndices = 10
+	opts := make([]cel.EnvOption, 0, maxIndices+2)
+	opts = append(opts,
+		Bindings(),
+		cel.Macros(
+			cel.ReceiverMacro("block", 2, func(mef cel.MacroExprFactory, target ast.Expr, args []ast.Expr) (ast.Expr, *cel.Error) {
+				if !macroTargetMatchesNamespace(celNamespace, target) {
+					return nil, nil
+				}
+				return mef.NewCall("cel.@block", args...), nil
+			}),
+			cel.ReceiverMacro("index", 1, func(mef cel.MacroExprFactory, target ast.Expr, args []ast.Expr) (ast.Expr, *cel.Error) {
+				if !macroTargetMatchesNamespace(celNamespace, target) {
+					return nil, nil
+				}
+				idx := args[0].AsLiteral().(types.Int)
+				return mef.NewIdent(fmt.Sprintf("@index%d", idx)), nil
+			}),
+		),
+	)
+	for i := range maxIndices {
+		opts = append(opts, cel.Variable(fmt.Sprintf("@index%d", i), cel.DynType))
+	}
+	return opts
+}
+
 func TestBlockEval(t *testing.T) {
-	fac := ast.NewExprFactory()
 	tests := []struct {
 		name string
-		expr ast.Expr
+		expr string
 		opts []cel.EnvOption
 		in   map[string]any
 		out  ref.Val
 	}{
 		{
 			name: "chained block",
-			expr: fac.NewCall(
-				1, "cel.@block",
-				fac.NewList(2, []ast.Expr{
-					fac.NewIdent(3, "x"),
-					fac.NewIdent(4, "@index0"),
-					fac.NewIdent(5, "@index1"),
-				}, []int32{}),
-				fac.NewCall(9, operators.Add,
-					fac.NewCall(6, operators.Add,
-						fac.NewIdent(7, "@index2"),
-						fac.NewIdent(8, "@index1")),
-					fac.NewIdent(10, "@index0"),
-				),
-			),
+			expr: `cel.block([x, cel.index(0), cel.index(1)], cel.index(2) + cel.index(1) + cel.index(0))`,
 			opts: []cel.EnvOption{
 				cel.Variable("x", cel.StringType),
 			},
@@ -683,28 +745,13 @@ func TestBlockEval(t *testing.T) {
 		},
 		{
 			name: "empty block",
-			expr: fac.NewCall(
-				1, "cel.@block",
-				fac.NewList(2, []ast.Expr{}, []int32{}),
-				fac.NewCall(3, operators.LogicalNot, fac.NewLiteral(4, types.False)),
-			),
-			in:  map[string]any{},
-			out: types.True,
+			expr: `cel.block([], !false)`,
+			in:   map[string]any{},
+			out:  types.True,
 		},
 		{
 			name: "mixed block constant values",
-			expr: fac.NewCall(
-				1, "cel.@block",
-				fac.NewList(2, []ast.Expr{
-					fac.NewLiteral(3, types.String("hello")),
-					fac.NewLiteral(4, types.Int(5)),
-				}, []int32{}),
-				fac.NewCall(5, operators.Equals,
-					fac.NewCall(6, "size",
-						fac.NewIdent(7, "@index0")),
-					fac.NewIdent(8, "@index1"),
-				),
-			),
+			expr: `cel.block(['hello', 5], size(cel.index(0)) == cel.index(1))`,
 			opts: []cel.EnvOption{
 				cel.ExtendedValidations(),
 			},
@@ -713,18 +760,7 @@ func TestBlockEval(t *testing.T) {
 		},
 		{
 			name: "mixed block dynamic values",
-			expr: fac.NewCall(
-				1, "cel.@block",
-				fac.NewList(2, []ast.Expr{
-					fac.NewIdent(3, "x"),
-					fac.NewLiteral(4, types.Int(5)),
-				}, []int32{}),
-				fac.NewCall(5, operators.Equals,
-					fac.NewCall(6, "size",
-						fac.NewIdent(7, "@index0")),
-					fac.NewIdent(8, "@index1"),
-				),
-			),
+			expr: `cel.block([x, 5], size(cel.index(0)) == cel.index(1))`,
 			opts: []cel.EnvOption{
 				cel.Variable("x", cel.StringType),
 				cel.ExtendedValidations(),
@@ -734,39 +770,36 @@ func TestBlockEval(t *testing.T) {
 		},
 		{
 			name: "mixed block constant values dyn var",
-			expr: fac.NewCall(
-				1, "cel.@block",
-				fac.NewList(2, []ast.Expr{
-					fac.NewLiteral(3, types.String("hello")),
-				}, []int32{}),
-				fac.NewCall(4, operators.Equals,
-					fac.NewCall(5, "size",
-						fac.NewIdent(6, "@index0")),
-					fac.NewIdent(7, "y"),
-				),
-			),
+			expr: `cel.block(['hello'], size(cel.index(0)) == y)`,
 			opts: []cel.EnvOption{
 				cel.Variable("y", cel.IntType),
 				cel.ExtendedValidations(),
 			},
-			in: map[string]any{
-				"y": 5,
-			},
+			in:  map[string]any{"y": 5},
 			out: types.True,
+		},
+		{
+			name: "block slot evaluated within nested comprehensions",
+			expr: `[1, 2].map(x, cel.block([[10, 20].map(y, y + x)], [100].map(z, cel.index(0)[0] + x + z)[0]))`,
+			in:   map[string]any{},
+			out:  types.DefaultTypeAdapter.NativeToValue([]int64{112, 114}),
 		},
 	}
 	for _, tst := range tests {
 		tc := tst
 		t.Run(tc.name, func(t *testing.T) {
-			blockAST := ast.NewAST(tc.expr, nil)
-			opts := append([]cel.EnvOption{Bindings()}, tc.opts...)
+			opts := append(testBlockEnvOptions(), tc.opts...)
 			env, err := cel.NewEnv(opts...)
 			if err != nil {
-				t.Fatalf("cel.NewEnv(Bindings()) failed: %v", err)
+				t.Fatalf("cel.NewEnv() failed: %v", err)
 			}
-			prg, err := env.PlanProgram(blockAST, cel.EvalOptions(cel.OptOptimize))
+			checked, iss := env.Compile(tc.expr)
+			if iss.Err() != nil {
+				t.Fatalf("env.Compile(%q) failed: %v", tc.expr, iss.Err())
+			}
+			prg, err := env.Program(checked, cel.EvalOptions(cel.OptOptimize))
 			if err != nil {
-				t.Fatalf("PlanProgram() failed: %v", err)
+				t.Fatalf("env.Program() failed: %v", err)
 			}
 			out, _, err := prg.Eval(tc.in)
 			if err != nil {
@@ -905,72 +938,260 @@ func TestBlockEval_RuntimeErrors(t *testing.T) {
 	}
 }
 
-func TestDynamicBlockEval(t *testing.T) {
-	db := &dynamicBlock{
-		expr: interpreter.NewConstValue(1, types.IntOne),
-		slotActivationPool: &sync.Pool{
-			New: func() any {
-				return &dynamicSlotActivation{}
-			},
-		},
+func TestBlockSlotZeroAllocs(t *testing.T) {
+	env, err := cel.NewEnv(append(testBlockEnvOptions(), cel.Variable("x", cel.StringType))...)
+	if err != nil {
+		t.Fatalf("cel.NewEnv() failed: %v", err)
 	}
-	res := db.Eval(cel.NoVars())
-	if res.Equal(types.IntOne) != types.True {
-		t.Errorf("db.Eval() = %v, wanted 1", res)
+	checked, iss := env.Compile(`cel.block([x == 'hello', cel.index(0), 'hello'], cel.index(1) && x == cel.index(2))`)
+	if iss.Err() != nil {
+		t.Fatalf("env.Compile() failed: %v", iss.Err())
 	}
-
-	slot0 := interpreter.NewConstValue(1, types.IntOne)
-	pooled := newDynamicBlock([]interpreter.InterpretableV2{slot0}, slot0).(*dynamicBlock)
-	sa := pooled.slotActivationPool.Get().(*dynamicSlotActivation)
+	prg, err := env.Program(checked, cel.EvalOptions(cel.OptOptimize))
+	if err != nil {
+		t.Fatalf("env.Program() failed: %v", err)
+	}
+	vars, err := cel.NewActivation(map[string]any{"x": types.String("hello")})
+	if err != nil {
+		t.Fatalf("cel.NewActivation() failed: %v", err)
+	}
 	if allocs := testing.AllocsPerRun(100, func() {
-		sa.reset()
-		for range 2 {
-			if val, found := sa.ResolveName("@index0"); !found || val != types.IntOne {
-				t.Fatalf("ResolveName(@index0) = (%v, %v), wanted (1, true)", val, found)
-			}
+		out, _, err := prg.Eval(vars)
+		if err != nil || out != types.True {
+			t.Fatalf("prg.Eval() = (%v, %v), wanted (true, nil)", out, err)
 		}
 	}); allocs != 0 {
-		t.Errorf("ResolveName allocated %v allocs/run, wanted 0", allocs)
+		t.Errorf("prg.Eval() allocated %v allocs/run, wanted 0", allocs)
 	}
 }
 
-func TestConstantBlockEval(t *testing.T) {
-	cb := &constantBlock{
-		expr: interpreter.NewConstValue(2, types.IntOne),
+func TestBlockSlotLazyAndCached(t *testing.T) {
+	var calls int
+	env, err := cel.NewEnv(
+		append(testBlockEnvOptions(),
+			cel.Function("nextVal",
+				cel.Overload("next_val", nil, cel.IntType,
+					cel.FunctionBinding(func(args ...ref.Val) ref.Val {
+						calls++
+						return types.Int(calls)
+					}),
+				),
+			),
+		)...,
+	)
+	if err != nil {
+		t.Fatalf("cel.NewEnv() failed: %v", err)
 	}
-	res := cb.Eval(cel.NoVars())
-	if res.Equal(types.IntOne) != types.True {
-		t.Errorf("cb.Eval() = %v, wanted 1", res)
+	checked, iss := env.Compile(`cel.block([nextVal(), 1 / 0], cel.index(0) + cel.index(0))`)
+	if iss.Err() != nil {
+		t.Fatalf("env.Compile() failed: %v", iss.Err())
+	}
+	prg, err := env.Program(checked)
+	if err != nil {
+		t.Fatalf("env.Program() failed: %v", err)
+	}
+	out, _, err := prg.Eval(cel.NoVars())
+	if err != nil {
+		t.Fatalf("prg.Eval() failed: %v", err)
+	}
+	if out != types.Int(2) {
+		t.Errorf("prg.Eval() = %v, wanted 2", out)
+	}
+	if calls != 1 {
+		t.Errorf("nextVal() called %d times, wanted 1", calls)
+	}
+}
+
+func TestBlockSlotNestedShadowing(t *testing.T) {
+	env, err := cel.NewEnv(testBlockEnvOptions()...)
+	if err != nil {
+		t.Fatalf("cel.NewEnv() failed: %v", err)
+	}
+	checked, iss := env.Compile(`
+		cel.block(['outer0', 'outer1'],
+			cel.block([cel.index(0) + '_inner'], cel.index(0) + ':' + cel.index(1)) + ':' + cel.index(0))
+	`)
+	if iss.Err() != nil {
+		t.Fatalf("env.Compile() failed: %v", iss.Err())
+	}
+	prg, err := env.Program(checked)
+	if err != nil {
+		t.Fatalf("env.Program() failed: %v", err)
+	}
+	out, _, err := prg.Eval(cel.NoVars())
+	if err != nil {
+		t.Fatalf("prg.Eval() failed: %v", err)
+	}
+	want := types.String("outer0_inner:outer1:outer0")
+	if out != want {
+		t.Errorf("prg.Eval() = %v, wanted %v", out, want)
+	}
+}
+
+func TestBlockSlotObserversAndPartialEval(t *testing.T) {
+	env, err := cel.NewEnv(append(testBlockEnvOptions(), cel.Variable("x", cel.StringType))...)
+	if err != nil {
+		t.Fatalf("cel.NewEnv() failed: %v", err)
+	}
+	checked, iss := env.Compile(`cel.block([x + '!', 6], size(cel.index(0)) == cel.index(1))`)
+	if iss.Err() != nil {
+		t.Fatalf("env.Compile() failed: %v", iss.Err())
+	}
+	prg, err := env.Program(
+		checked,
+		cel.CostTracking(nil),
+		cel.MemoryLimit(1_000_000),
+		cel.EvalOptions(cel.OptTrackState, cel.OptExhaustiveEval, cel.OptPartialEval),
+	)
+	if err != nil {
+		t.Fatalf("env.Program() failed: %v", err)
+	}
+	out, det, err := prg.Eval(map[string]any{"x": "hello"})
+	if err != nil {
+		t.Fatalf("prg.Eval() failed: %v", err)
+	}
+	if out != types.True {
+		t.Errorf("prg.Eval() = %v, wanted true", out)
+	}
+	if det == nil || det.ActualCost() == nil || *det.ActualCost() == 0 {
+		t.Errorf("ActualCost() = %v, wanted non-zero cost", det)
+	}
+
+	pVars, err := cel.PartialVars(map[string]any{}, cel.AttributePattern("x"))
+	if err != nil {
+		t.Fatalf("cel.PartialVars() failed: %v", err)
+	}
+	unkOut, _, err := prg.Eval(pVars)
+	if err != nil {
+		t.Fatalf("prg.Eval(partial) failed: %v", err)
+	}
+	if !types.IsUnknown(unkOut) {
+		t.Errorf("prg.Eval(partial) = %v (%T), wanted unknown", unkOut, unkOut)
+	}
+}
+
+func TestBlockSlotComprehensions(t *testing.T) {
+	env, err := cel.NewEnv(testBlockEnvOptions()...)
+	if err != nil {
+		t.Fatalf("cel.NewEnv() failed: %v", err)
+	}
+	tests := []struct {
+		name string
+		expr string
+	}{
+		{
+			name: "chained_comprehension_slots_in_block",
+			expr: `cel.block(
+				[
+					[1].map(x, x + 1),
+					[1, 2].map(y, y < 2 ? dyn(y) : cel.index(0)),
+					[1, 2, 3].map(z, z == 1 ? dyn(z) : (z == 2 ? cel.index(1) : cel.index(0)))
+				],
+				[1, 2].map(x, cel.index(2))
+			) == [[1, [1, [2]], [2]], [1, [1, [2]], [2]]]`,
+		},
+		{
+			name: "comprehension_vars_and_accumulators_live_after_lazy_block_slots",
+			expr: `cel.block(
+				[
+					[1].map(x, x + 1),
+					[1, 2].map(y, y < 2 ? y : cel.index(0)[0] + y),
+					[1, 2, 3].map(z, z == 1 ? z : (z == 2 ? cel.index(1)[1] + z : cel.index(0)[0] + z))
+				],
+				[1, 2].filter(x, x == 1 || cel.index(2)[1] == x + 4).map(x, cel.index(2)[2] + x)
+			) == [6, 7]`,
+		},
+	}
+	progOpts := map[string][]cel.ProgramOption{
+		"default":    {},
+		"exhaustive": {cel.EvalOptions(cel.OptExhaustiveEval)},
+		"optimized":  {cel.EvalOptions(cel.OptOptimize)},
+		"tracked":    {cel.EvalOptions(cel.OptTrackState)},
+	}
+	for _, tc := range tests {
+		checked, iss := env.Compile(tc.expr)
+		if iss.Err() != nil {
+			t.Fatalf("env.Compile(%q) failed: %v", tc.expr, iss.Err())
+		}
+		for optName, opts := range progOpts {
+			t.Run(tc.name+"/"+optName, func(t *testing.T) {
+				prg, err := env.Program(checked, opts...)
+				if err != nil {
+					t.Fatalf("env.Program() failed: %v", err)
+				}
+				out, _, err := prg.Eval(cel.NoVars())
+				if err != nil {
+					t.Fatalf("prg.Eval() failed: %v", err)
+				}
+				if out != types.True {
+					t.Errorf("prg.Eval() = %v, wanted true", out)
+				}
+			})
+		}
+	}
+}
+
+func TestBlockSlotOptionalValues(t *testing.T) {
+	opts := append(
+		testBlockEnvOptions(),
+		cel.OptionalTypes(),
+		cel.Variable("opt_map", cel.OptionalType(cel.MapType(cel.StringType, cel.MapType(cel.StringType, cel.StringType)))),
+	)
+	env, err := cel.NewEnv(opts...)
+	if err != nil {
+		t.Fatalf("cel.NewEnv() failed: %v", err)
+	}
+	expr := `cel.block(
+		[
+			opt_map[?'k1'],
+			cel.index(0).?a,
+			'k2'
+		],
+		[cel.index(1), opt_map[?cel.index(2)].?a]
+	)`
+	checked, iss := env.Compile(expr)
+	if iss.Err() != nil {
+		t.Fatalf("env.Compile() failed: %v", iss.Err())
+	}
+	prg, err := env.Program(checked, cel.EvalOptions(cel.OptTrackState, cel.OptPartialEval))
+	if err != nil {
+		t.Fatalf("env.Program() failed: %v", err)
+	}
+
+	presentMap := types.OptionalOf(env.CELTypeAdapter().NativeToValue(map[string]map[string]string{
+		"k1": {"a": "b"},
+	}))
+	out, _, err := prg.Eval(map[string]any{"opt_map": presentMap})
+	if err != nil {
+		t.Fatalf("prg.Eval(present) failed: %v", err)
+	}
+	wantPresent := env.CELTypeAdapter().NativeToValue([]any{types.OptionalOf(types.String("b")), types.OptionalNone})
+	if out.Equal(wantPresent) != types.True {
+		t.Errorf("prg.Eval(present) = %v, wanted %v", out, wantPresent)
+	}
+
+	outNone, _, err := prg.Eval(map[string]any{"opt_map": types.OptionalNone})
+	if err != nil {
+		t.Fatalf("prg.Eval(none) failed: %v", err)
+	}
+	wantNone := env.CELTypeAdapter().NativeToValue([]any{types.OptionalNone, types.OptionalNone})
+	if outNone.Equal(wantNone) != types.True {
+		t.Errorf("prg.Eval(none) = %v, wanted %v", outNone, wantNone)
 	}
 }
 
 func BenchmarkBlockEval(b *testing.B) {
-	fac := ast.NewExprFactory()
-	expr := fac.NewCall(
-		1, "cel.@block",
-		fac.NewList(2, []ast.Expr{
-			fac.NewIdent(3, "x"),
-			fac.NewIdent(4, "@index0"),
-			fac.NewIdent(5, "@index1"),
-		}, []int32{}),
-		fac.NewCall(9, operators.Add,
-			fac.NewCall(6, operators.Add,
-				fac.NewIdent(7, "@index2"),
-				fac.NewIdent(8, "@index1")),
-			fac.NewIdent(10, "@index0"),
-		),
-	)
-	blockAST := ast.NewAST(expr, nil)
-	env, err := cel.NewEnv(
-		Bindings(),
-		cel.Variable("x", cel.StringType),
-	)
+	env, err := cel.NewEnv(append(testBlockEnvOptions(), cel.Variable("x", cel.StringType))...)
 	if err != nil {
-		b.Fatalf("cel.NewEnv(Bindings()) failed: %v", err)
+		b.Fatalf("cel.NewEnv() failed: %v", err)
 	}
-	prg, err := env.PlanProgram(blockAST, cel.EvalOptions(cel.OptOptimize))
+	checked, iss := env.Compile(`cel.block([x, cel.index(0), cel.index(1)], cel.index(2) + cel.index(1) + cel.index(0))`)
+	if iss.Err() != nil {
+		b.Fatalf("env.Compile() failed: %v", iss.Err())
+	}
+	prg, err := env.Program(checked, cel.EvalOptions(cel.OptOptimize))
 	if err != nil {
-		b.Fatalf("PlanProgram() failed: %v", err)
+		b.Fatalf("env.Program() failed: %v", err)
 	}
 	input := map[string]any{"x": "hello"}
 	b.ResetTimer()
@@ -1146,5 +1367,104 @@ func TestBindingsLateBoundFunctions(t *testing.T) {
 				t.Errorf("Eval() got %v, wanted %v", out, tc.want)
 			}
 		})
+	}
+}
+func TestBlockMemoryTrackingAcrossPasses(t *testing.T) {
+	// async_list(5) only produces its result on a later ConcurrentEval pass, at which point the
+	// expressions which depend on it are observed a second time. Values which are not within a
+	// block scope must be tracked on every pass, regardless of the memory sampling interval. The
+	// peak memory of 6 is the list container plus its 5 elements.
+	tests := []struct {
+		name string
+		expr string
+	}{
+		{
+			// An empty block introduces no scope, so the call within it is tracked.
+			name: "empty block",
+			expr: `cel.block([], size(async_list(5)) == 5)`,
+		},
+		{
+			// The block itself is outside of its own scope, so its result is tracked.
+			name: "block result",
+			expr: `size(cel.block([async_list(5)], cel.index(0))) == 5`,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			env := asyncListEnv(t)
+			checked, iss := env.Compile(tc.expr)
+			if iss.Err() != nil {
+				t.Fatalf("env.Compile(%q) failed: %v", tc.expr, iss.Err())
+			}
+			prg, err := env.Program(checked,
+				cel.MemoryTracking(types.MemoryTrackerSampleInterval(10)))
+			if err != nil {
+				t.Fatalf("env.Program() failed: %v", err)
+			}
+			checkConcurrentEvalPeak(t, prg, 6)
+		})
+	}
+}
+
+func TestBindingsMemoryTrackingAcrossPasses(t *testing.T) {
+	// The cel.bind() initializer is evaluated once per comprehension, outside of the scope of the
+	// bind, even when the bound variable is first referenced from within a nested loop. The
+	// initializer is therefore tracked on every pass of a ConcurrentEval, regardless of the memory
+	// sampling interval.
+	env := asyncListEnv(t)
+	checked, iss := env.Compile(`cel.bind(z, async_list(5), [1].map(i, z.size() + i)) == [6]`)
+	if iss.Err() != nil {
+		t.Fatalf("env.Compile() failed: %v", iss.Err())
+	}
+	prg, err := env.Program(checked, cel.MemoryTracking(types.MemoryTrackerSampleInterval(10)))
+	if err != nil {
+		t.Fatalf("env.Program() failed: %v", err)
+	}
+	checkConcurrentEvalPeak(t, prg, 6)
+}
+
+// asyncListEnv returns an environment with cel.bind() and cel.block() support, as well as an
+// async_list(n) function which asynchronously produces a list of n zeros.
+func asyncListEnv(t *testing.T) *cel.Env {
+	t.Helper()
+	env, err := cel.NewEnv(
+		append(testBlockEnvOptions(),
+			cel.Function("async_list",
+				cel.Overload("async_list_int", []*cel.Type{cel.IntType}, cel.ListType(cel.IntType),
+					cel.AsyncBinding(func(ctx context.Context, args ...ref.Val) ref.Val {
+						return types.DefaultTypeAdapter.NativeToValue(make([]int64, int(args[0].(types.Int))))
+					}),
+				),
+			),
+		)...,
+	)
+	if err != nil {
+		t.Fatalf("cel.NewEnv() failed: %v", err)
+	}
+	return env
+}
+
+// checkConcurrentEvalPeak evaluates the program, which must produce true, and checks its peak
+// tracked memory.
+func checkConcurrentEvalPeak(t *testing.T, prg cel.Program, wantPeak uint32) {
+	t.Helper()
+	var res cel.EvalResult
+	select {
+	case res = <-prg.ConcurrentEval(context.Background(), cel.NoVars()):
+	case <-time.After(5 * time.Second):
+		t.Fatal("ConcurrentEval() timed out")
+	}
+	if res.Err != nil {
+		t.Fatalf("ConcurrentEval() failed: %v", res.Err)
+	}
+	if res.Val != types.True {
+		t.Fatalf("ConcurrentEval() got %v, wanted true", res.Val)
+	}
+	peak := res.EvalDetails.PeakMemory()
+	if peak == nil {
+		t.Fatal("EvalDetails.PeakMemory() got nil, wanted non-nil peak")
+	}
+	if *peak != wantPeak {
+		t.Errorf("EvalDetails.PeakMemory() got %d, wanted %d", *peak, wantPeak)
 	}
 }

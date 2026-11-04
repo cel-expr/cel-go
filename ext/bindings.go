@@ -15,19 +15,11 @@
 package ext
 
 import (
-	"errors"
-	"fmt"
 	"math"
-	"strconv"
-	"strings"
-	"sync"
 
 	"cel.dev/cel-go/cel"
 	"cel.dev/cel-go/common/ast"
 	"cel.dev/cel-go/common/types"
-	"cel.dev/cel-go/common/types/ref"
-	"cel.dev/cel-go/common/types/traits"
-	"cel.dev/cel-go/interpreter"
 )
 
 // Bindings returns a cel.EnvOption to configure support for local variable
@@ -62,7 +54,6 @@ func Bindings(options ...BindingsOption) cel.EnvOption {
 const (
 	celNamespace  = "cel"
 	bindMacro     = "bind"
-	blockFunc     = "@block"
 	unusedIterVar = "#unused"
 )
 
@@ -107,44 +98,6 @@ func (lib *celBindings) CompileOptions() []cel.EnvOption {
 }
 
 func (lib *celBindings) ProgramOptions() []cel.ProgramOption {
-	if lib.version >= 1 {
-		celBlockPlan := func(i interpreter.InterpretableV2) (interpreter.InterpretableV2, error) {
-			call, ok := i.(interpreter.InterpretableCall)
-			if !ok {
-				return i, nil
-			}
-			switch call.Function() {
-			case "cel.@block":
-				args := call.Args()
-				if len(args) != 2 {
-					return nil, fmt.Errorf("cel.@block expects two arguments, but got %d", len(args))
-				}
-				expr := args[1]
-				// Non-empty block
-				if block, ok := args[0].(interpreter.InterpretableConstructor); ok {
-					slotExprs := block.InitVals()
-					if len(slotExprs) == 0 {
-						return expr, nil
-					}
-					return newDynamicBlock(slotExprs, expr), nil
-				}
-				// Constant valued block which can happen during runtime optimization.
-				if cons, ok := args[0].(interpreter.InterpretableConst); ok {
-					if cons.Value().Type() == types.ListType {
-						l := cons.Value().(traits.Lister)
-						if l.Size().Equal(types.IntZero) == types.True {
-							return args[1], nil
-						}
-						return newConstantBlock(l, expr), nil
-					}
-				}
-				return nil, errors.New("cel.@block expects a list constructor as the first argument")
-			default:
-				return i, nil
-			}
-		}
-		return []cel.ProgramOption{cel.CustomDecoratorV2(celBlockPlan)}
-	}
 	return []cel.ProgramOption{}
 }
 
@@ -192,182 +145,3 @@ func celBind(mef cel.MacroExprFactory, target ast.Expr, args []ast.Expr) (ast.Ex
 		resultExpr,
 	), nil
 }
-
-func newDynamicBlock(slotExprs []interpreter.InterpretableV2, expr interpreter.InterpretableV2) interpreter.InterpretableV2 {
-	bs := &dynamicBlock{
-		slotExprs: slotExprs,
-		expr:      expr,
-	}
-	bs.slotActivationPool = &sync.Pool{
-		New: func() any {
-			slotCount := len(slotExprs)
-			return &dynamicSlotActivation{
-				slotExprs: slotExprs,
-				slotCount: slotCount,
-				slotVals:  make([]slotVal, slotCount),
-			}
-		},
-	}
-	return bs
-}
-
-type dynamicBlock struct {
-	slotExprs          []interpreter.InterpretableV2
-	expr               interpreter.InterpretableV2
-	slotActivationPool *sync.Pool
-}
-
-// ID implements the Interpretable interface method.
-func (b *dynamicBlock) ID() int64 {
-	return b.expr.ID()
-}
-
-// Exec implements the Interpretable interface method and pushes a new frame onto the
-// execution frame for the duration of the block execution.
-func (b *dynamicBlock) Exec(frame *interpreter.ExecutionFrame) ref.Val {
-	sa := b.slotActivationPool.Get().(*dynamicSlotActivation)
-	sa.frame = frame.Push(sa)
-	res := b.expr.Exec(sa.frame)
-	sa.frame.Pop()
-	b.clearSlots(sa)
-	return res
-}
-
-// Eval implements the Interpretable interface method.
-func (b *dynamicBlock) Eval(activation cel.Activation) ref.Val {
-	return interpreter.EvalActivation(activation, b.Exec)
-}
-
-func (b *dynamicBlock) clearSlots(sa *dynamicSlotActivation) {
-	sa.reset()
-	b.slotActivationPool.Put(sa)
-}
-
-type slotVal struct {
-	value     ref.Val
-	visited   bool
-	evaluated bool
-}
-
-type dynamicSlotActivation struct {
-	frame     *interpreter.ExecutionFrame
-	slotExprs []interpreter.InterpretableV2
-	slotCount int
-	slotVals  []slotVal
-}
-
-// Unwrap returns the underlying activation outside the block.
-func (sa *dynamicSlotActivation) Unwrap() cel.Activation {
-	if sa.frame != nil {
-		return sa.frame.Parent()
-	}
-	return nil
-}
-
-// Parent returns the parent activation outside the block.
-func (sa *dynamicSlotActivation) Parent() cel.Activation {
-	if sa.frame != nil {
-		return sa.frame.Parent()
-	}
-	return nil
-}
-
-// IsLocalVariable reports whether the variable is locally bound to a block slot.
-func (sa *dynamicSlotActivation) IsLocalVariable(name string) bool {
-	_, found := matchSlot(name, sa.slotCount)
-	return found
-}
-
-// ResolveName implements the Activation interface method but handles variables prefixed with `@index`
-// as special variables which exist within the slot-based memory of the cel.@block() where each slot
-// refers to an expression which must be computed only once.
-func (sa *dynamicSlotActivation) ResolveName(name string) (any, bool) {
-	if idx, found := matchSlot(name, sa.slotCount); found {
-		v := &sa.slotVals[idx]
-		if v.visited {
-			return v.value, v.evaluated
-		}
-		v.visited = true
-		val := sa.slotExprs[idx].Exec(sa.frame)
-		v.value = val
-		v.evaluated = true
-		return val, true
-	}
-	return nil, false
-}
-
-func (sa *dynamicSlotActivation) reset() {
-	sa.frame = nil
-	clear(sa.slotVals)
-}
-
-func newConstantBlock(slots traits.Lister, expr interpreter.InterpretableV2) interpreter.InterpretableV2 {
-	count := slots.Size().(types.Int)
-	return &constantBlock{slots: slots, slotCount: int(count), expr: expr}
-}
-
-type constantBlock struct {
-	slots     traits.Lister
-	slotCount int
-	expr      interpreter.InterpretableV2
-}
-
-// ID implements the interpreter.Interpretable interface method.
-func (b *constantBlock) ID() int64 {
-	return b.expr.ID()
-}
-
-// Exec implements the Interpretable interface method and evaluates the block with
-// constant slot resolution using a child execution frame scoped to the constant slots.
-func (b *constantBlock) Exec(frame *interpreter.ExecutionFrame) ref.Val {
-	child := frame.Push(b)
-	res := b.expr.Exec(child)
-	child.Pop()
-	return res
-}
-
-// Eval implements the interpreter.Interpretable interface method, and will proxy @index prefixed variable
-// lookups into a set of constant slots determined from the plan step.
-func (b *constantBlock) Eval(activation cel.Activation) ref.Val {
-	return interpreter.EvalActivation(activation, b.Exec)
-}
-
-// ResolveName implements Activation interface method and proxies @index prefixed lookups into the slot
-// activation associated with the block scope.
-func (b *constantBlock) ResolveName(name string) (any, bool) {
-	if idx, found := matchSlot(name, b.slotCount); found {
-		return b.slots.Get(types.Int(idx)), true
-	}
-	return nil, false
-}
-
-// Parent implements the Activation interface.
-func (b *constantBlock) Parent() cel.Activation {
-	return nil
-}
-
-// IsLocalVariable reports whether the variable is locally bound to a block slot.
-func (b *constantBlock) IsLocalVariable(name string) bool {
-	_, found := matchSlot(name, b.slotCount)
-	return found
-}
-
-func matchSlot(name string, slotCount int) (int, bool) {
-	if idx, found := strings.CutPrefix(name, indexPrefix); found {
-		idx, err := strconv.Atoi(idx)
-		// Return not found if the index is not numeric
-		if err != nil {
-			return -1, false
-		}
-		// Return not found if the index is not a valid slot
-		if idx < 0 || idx >= slotCount {
-			return -1, false
-		}
-		return idx, true
-	}
-	return -1, false
-}
-
-var (
-	indexPrefix = "@index"
-)

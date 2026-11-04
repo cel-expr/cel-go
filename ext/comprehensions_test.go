@@ -22,6 +22,7 @@ import (
 	"cel.dev/cel-go/cel"
 	"cel.dev/cel-go/common/cost"
 	"cel.dev/cel-go/common/types"
+	proto3pb "cel.dev/cel-go/test/proto3pb"
 )
 
 func TestTwoVarComprehensions(t *testing.T) {
@@ -803,6 +804,205 @@ func TestTwoVarComprehensionsResidualAST(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestOptionalSlotsAndInputAttributes(t *testing.T) {
+	env := testCompreEnv(t,
+		cel.Container("google.expr.proto3.test"),
+		cel.Types(&proto3pb.TestAllTypes{}),
+		cel.Variable("opt_map", cel.OptionalType(cel.MapType(cel.StringType, cel.MapType(cel.StringType, cel.StringType)))),
+		cel.Variable("opt_list", cel.OptionalType(cel.ListType(cel.MapType(cel.StringType, cel.IntType)))),
+		cel.Variable("opt_msg", cel.OptionalType(cel.ObjectType("google.expr.proto3.test.TestAllTypes"))),
+		cel.Variable("list_of_opt_maps", cel.ListType(cel.OptionalType(cel.MapType(cel.StringType, cel.StringType)))),
+	)
+
+	presentInputs := map[string]any{
+		"opt_map": types.OptionalOf(env.CELTypeAdapter().NativeToValue(map[string]map[string]string{
+			"k1": {"a": "b"},
+			"k2": {"a": "c"},
+		})),
+		"opt_list": types.OptionalOf(env.CELTypeAdapter().NativeToValue([]map[string]int64{
+			{"x": 10},
+			{},
+			{"x": 30},
+		})),
+		"opt_msg": types.OptionalOf(env.CELTypeAdapter().NativeToValue(&proto3pb.TestAllTypes{
+			NestedType: &proto3pb.TestAllTypes_SingleNestedMessage{
+				SingleNestedMessage: &proto3pb.TestAllTypes_NestedMessage{Bb: 99},
+			},
+			MapStringString: map[string]string{"k1": "v1"},
+		})),
+		"list_of_opt_maps": []any{
+			types.OptionalOf(env.CELTypeAdapter().NativeToValue(map[string]string{"a": "b"})),
+			types.OptionalNone,
+			types.OptionalOf(env.CELTypeAdapter().NativeToValue(map[string]string{"a": "c"})),
+		},
+	}
+
+	noneInputs := map[string]any{
+		"opt_map":          types.OptionalNone,
+		"opt_list":         types.OptionalNone,
+		"opt_msg":          types.OptionalNone,
+		"list_of_opt_maps": []any{types.OptionalNone},
+	}
+
+	tests := []struct {
+		name string
+		expr string
+		in   map[string]any
+	}{
+		{
+			name: "one_var_optional_elements_hasValue",
+			expr: `[optional.of('hello'), optional.none()].all(i, i.hasValue()) == false`,
+		},
+		{
+			name: "one_var_optional_map_qualified_hasValue_arg",
+			expr: `[optional.of({'a': 'b'}), optional.of({'a': 'c'})].exists(v, v.a.hasValue('c'))`,
+		},
+		{
+			name: "two_var_list_optional_map_qualified_hasValue_arg",
+			expr: `[optional.of({'a': 'b'}), optional.none(), optional.of({'a': 'c'})].exists(i, v, i == 2 && v.a.hasValue('c'))`,
+		},
+		{
+			name: "optional_slot_select_missing_key_and_none",
+			expr: `[optional.of({'a': 'b'}), optional.none(), optional.of({'other': 'x'})].map(v, v.?a) == [optional.of('b'), optional.none(), optional.none()]`,
+		},
+		{
+			name: "optional_slot_multi_step_select_and_index",
+			expr: `[optional.of({'a': {'b': [10, 20]}}), optional.none(), optional.of({'a': {}})].map(v, v.a.?b[?1]) == [optional.of(20), optional.none(), optional.none()]`,
+		},
+		{
+			name: "two_var_map_of_optionals_qualified",
+			expr: `{'k1': optional.of({'a': 'b'}), 'k2': optional.none(), 'k3': optional.of({'a': 'c'})}.exists(k, v, k == 'k3' && v.a.hasValue('c'))`,
+		},
+		{
+			name: "transformMap_over_optional_values_with_optional_entry_construction",
+			expr: `{'k1': optional.of({'a': 10}), 'k2': optional.none(), 'k3': optional.of({})}.transformMap(k, v, {?'val': v.?a}) == {'k1': {'val': 10}, 'k2': {}, 'k3': {}}`,
+		},
+		{
+			name: "map_optional_list_and_proto_field_construction_from_slot",
+			expr: `[optional.of({'a': 1}), optional.none(), optional.of({})].map(v, [?v.?a]) == [[1], [], []] && [optional.of({'a': 7}), optional.none()].map(v, TestAllTypes{?single_int64: v.?a}) == [TestAllTypes{single_int64: 7}, TestAllTypes{}]`,
+		},
+		{
+			name: "optional_proto_slot_nested_field_qualification",
+			expr: `[optional.of(TestAllTypes{single_nested_message: TestAllTypes.NestedMessage{bb: 42}}), optional.none(), optional.of(TestAllTypes{})].map(m, m.?single_nested_message.bb) == [optional.of(42), optional.none(), optional.none()]`,
+		},
+		{
+			name: "slot_used_as_optional_map_and_list_index_qualifier",
+			expr: `['a', 'missing'].map(k, {'a': 1}[?k]) == [optional.of(1), optional.none()] && [0, 1].map(i, [10, 20][?(i + 1)]) == [optional.of(20), optional.none()]`,
+		},
+		{
+			name: "input_list_of_optional_maps_qualified_in_two_var_exists",
+			expr: `list_of_opt_maps.exists(i, v, i == 2 && v.a.hasValue('c'))`,
+			in:   presentInputs,
+		},
+		{
+			name: "input_list_of_optional_maps_all_none",
+			expr: `!list_of_opt_maps.exists(i, v, v.a.hasValue('c'))`,
+			in:   noneInputs,
+		},
+		{
+			name: "input_optional_map_indexed_by_comprehension_slot_present",
+			expr: `['k1', 'k2', 'k3'].map(k, opt_map[?k].a) == [optional.of('b'), optional.of('c'), optional.none()]`,
+			in:   presentInputs,
+		},
+		{
+			name: "input_optional_map_indexed_by_comprehension_slot_none",
+			expr: `['k1', 'k2'].all(k, !opt_map[?k].a.hasValue())`,
+			in:   noneInputs,
+		},
+		{
+			name: "input_optional_list_indexed_by_slot_and_optMap_comprehension_present",
+			expr: `[0, 1, 2, 3].map(i, opt_list[?i].?x) == [optional.of(10), optional.none(), optional.of(30), optional.none()] && opt_list.optMap(l, l.exists(m, m.?x.hasValue(30))).hasValue(true)`,
+			in:   presentInputs,
+		},
+		{
+			name: "input_optional_list_indexed_by_slot_and_optMap_comprehension_none",
+			expr: `[0, 1].all(i, !opt_list[?i].?x.hasValue()) && !opt_list.optMap(l, l.exists(m, m.?x.hasValue(30))).hasValue()`,
+			in:   noneInputs,
+		},
+		{
+			name: "input_optional_proto_qualified_by_slot_and_nested_select_present",
+			expr: `['k1', 'missing'].map(k, opt_msg.map_string_string[?k]) == [optional.of('v1'), optional.none()] && cel.bind(n, opt_msg.single_nested_message, n.bb.hasValue(99))`,
+			in:   presentInputs,
+		},
+		{
+			name: "input_optional_proto_qualified_by_slot_and_nested_select_none",
+			expr: `['k1'].all(k, !opt_msg.map_string_string[?k].hasValue()) && cel.bind(n, opt_msg.single_nested_message, !n.bb.hasValue())`,
+			in:   noneInputs,
+		},
+	}
+
+	progModes := []struct {
+		name string
+		opts []cel.ProgramOption
+	}{
+		{name: "default"},
+		{name: "optimized", opts: []cel.ProgramOption{cel.EvalOptions(cel.OptOptimize)}},
+		{name: "tracked_cost", opts: []cel.ProgramOption{cel.CostTracking(nil), cel.EvalOptions(cel.OptTrackState)}},
+		{name: "exhaustive_partial", opts: []cel.ProgramOption{cel.EvalOptions(cel.OptExhaustiveEval, cel.OptPartialEval)}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			pAst, iss := env.Parse(tc.expr)
+			if iss.Err() != nil {
+				t.Fatalf("env.Parse(%q) failed: %v", tc.expr, iss.Err())
+			}
+			cAst, iss := env.Check(pAst)
+			if iss.Err() != nil {
+				t.Fatalf("env.Check(%q) failed: %v", tc.expr, iss.Err())
+			}
+			var in any = cel.NoVars()
+			if tc.in != nil {
+				in = tc.in
+			}
+			for _, astVariant := range []struct {
+				label string
+				ast   *cel.Ast
+			}{
+				{label: "checked", ast: cAst},
+				{label: "unchecked", ast: pAst},
+			} {
+				for _, mode := range progModes {
+					prg, err := env.Program(astVariant.ast, mode.opts...)
+					if err != nil {
+						t.Fatalf("%s/%s: env.Program() failed: %v", astVariant.label, mode.name, err)
+					}
+					out, _, err := prg.Eval(in)
+					if err != nil {
+						t.Fatalf("%s/%s: prg.Eval() failed: %v", astVariant.label, mode.name, err)
+					}
+					if out != types.True {
+						t.Errorf("%s/%s: prg.Eval() = %v, wanted true", astVariant.label, mode.name, out)
+					}
+				}
+			}
+		})
+	}
+
+	// Verify partial evaluation when an optional input attribute is unknown while local slots are bound.
+	t.Run("unknown_optional_input_with_local_slot_qualifier", func(t *testing.T) {
+		cAst, iss := env.Compile(`['k1', 'k2'].map(k, opt_map[?k].?a)`)
+		if iss.Err() != nil {
+			t.Fatalf("env.Compile() failed: %v", iss.Err())
+		}
+		prg, err := env.Program(cAst, cel.EvalOptions(cel.OptPartialEval, cel.OptTrackState))
+		if err != nil {
+			t.Fatalf("env.Program() failed: %v", err)
+		}
+		pVars, err := cel.PartialVars(map[string]any{}, cel.AttributePattern("opt_map"))
+		if err != nil {
+			t.Fatalf("cel.PartialVars() failed: %v", err)
+		}
+		out, _, err := prg.Eval(pVars)
+		if err != nil {
+			t.Fatalf("prg.Eval() failed: %v", err)
+		}
+		if !types.IsUnknown(out) {
+			t.Errorf("prg.Eval(unknown opt_map) = %v (%T), wanted *types.Unknown", out, out)
+		}
+	})
 }
 
 func testCompreEnv(t *testing.T, opts ...cel.EnvOption) *cel.Env {

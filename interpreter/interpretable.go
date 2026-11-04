@@ -142,6 +142,34 @@ type InterpretableConstructor interface {
 	Type() ref.Type
 }
 
+// plannedInterpretable wraps a root InterpretableV2 with plan-wide execution metadata
+// such as the maximum local slot count and per-evaluation cost tracker factory.
+type plannedInterpretable struct {
+	InterpretableV2
+	maxSlots           int
+	costTrackerFactory func() (*CostTracker, error)
+}
+
+// Exec implements the InterpretableV2 interface method.
+func (p *plannedInterpretable) Exec(frame *ExecutionFrame) ref.Val {
+	if p.maxSlots > 0 {
+		frame.EnsureSlots(p.maxSlots)
+	}
+	if p.costTrackerFactory != nil && frame.CostTracker() == nil {
+		tracker, err := p.costTrackerFactory()
+		if err != nil {
+			return types.NewErr("cost tracker factory: %v", err)
+		}
+		frame.SetCostTracker(tracker)
+	}
+	return p.InterpretableV2.Exec(frame)
+}
+
+// Eval implements the Interpretable interface method.
+func (p *plannedInterpretable) Eval(ctx Activation) ref.Val {
+	return EvalActivation(ctx, p.Exec)
+}
+
 // ObservableInterpretable is an Interpretable which supports stateful observation, such as tracing
 // or cost-tracking.
 type ObservableInterpretable struct {
@@ -341,6 +369,190 @@ func (cons *evalConst) Eval(ctx Activation) ref.Val {
 // Value implements the InterpretableConst interface method.
 func (cons *evalConst) Value() ref.Val {
 	return cons.val
+}
+
+type evalSlot struct {
+	id         int64
+	slot       int
+	adapter    types.Adapter
+	fac        AttributeFactory
+	qualifiers []Qualifier
+}
+
+var _ InterpretableAttribute = &evalSlot{}
+
+// ID implements the Interpretable and Qualifier interface methods.
+func (s *evalSlot) ID() int64 {
+	qualCount := len(s.qualifiers)
+	if qualCount == 0 {
+		return s.id
+	}
+	return s.qualifiers[qualCount-1].ID()
+}
+
+// Attr implements the InterpretableAttribute interface method.
+func (s *evalSlot) Attr() Attribute {
+	return s
+}
+
+// Adapter implements the InterpretableAttribute interface method.
+func (s *evalSlot) Adapter() types.Adapter {
+	return s.adapter
+}
+
+// IsOptional implements the InterpretableAttribute and Qualifier interface methods.
+func (s *evalSlot) IsOptional() bool {
+	return false
+}
+
+// AddQualifier implements the InterpretableAttribute and Attribute interface methods.
+func (s *evalSlot) AddQualifier(qual Qualifier) (Attribute, error) {
+	s.qualifiers = append(s.qualifiers, qual)
+	return s, nil
+}
+
+// Qualify implements the InterpretableAttribute and Qualifier interface methods.
+func (s *evalSlot) Qualify(vars Activation, obj any) (any, error) {
+	return attrQualify(s.fac, vars, obj, s)
+}
+
+// QualifyIfPresent implements the InterpretableAttribute and Qualifier interface methods.
+func (s *evalSlot) QualifyIfPresent(vars Activation, obj any, presenceOnly bool) (any, bool, error) {
+	return attrQualifyIfPresent(s.fac, vars, obj, s, presenceOnly)
+}
+
+// lazySlot represents an unevaluated local slot initializer stored in ExecutionFrame.localSlots.
+// On first read, resolve evaluates the initializer, caches the resulting value in frame.localSlots,
+// and returns it.
+type lazySlot struct {
+	slot int
+	expr InterpretableV2
+	fold *evalFold
+}
+
+func (l *lazySlot) resolve(frame *ExecutionFrame) ref.Val {
+	if l.fold != nil {
+		return l.fold.initAccu(frame)
+	}
+	val := l.expr.Exec(frame)
+	frame.localSlots[l.slot] = val
+	return val
+}
+
+func (s *evalSlot) resolveFrame(frame *ExecutionFrame) (any, error) {
+	obj := frame.localSlots[s.slot]
+	if lazy, ok := obj.(*lazySlot); ok {
+		obj = lazy.resolve(frame)
+	}
+	if celErr, ok := obj.(*types.Err); ok {
+		return nil, celErr
+	}
+	if _, isUnk := obj.(*types.Unknown); isUnk {
+		return obj, nil
+	}
+	if len(s.qualifiers) == 0 {
+		return obj, nil
+	}
+	obj, isOpt, err := applyQualifiers(frame, obj, s.qualifiers)
+	if err != nil {
+		return nil, err
+	}
+	if isOpt {
+		val := s.adapter.NativeToValue(obj)
+		if types.IsUnknown(val) {
+			return val, nil
+		}
+		return types.OptionalOf(val), nil
+	}
+	return obj, nil
+}
+
+// Resolve implements the InterpretableAttribute and Attribute interface methods.
+func (s *evalSlot) Resolve(vars Activation) (any, error) {
+	frame, ok := vars.(*ExecutionFrame)
+	if !ok {
+		frame = findFrame(vars)
+		if frame == nil {
+			return nil, fmt.Errorf("slot %d requires an ExecutionFrame, got %T", s.slot, vars)
+		}
+	}
+	return s.resolveFrame(frame)
+}
+
+// Exec implements the InterpretableV2 interface method.
+func (s *evalSlot) Exec(frame *ExecutionFrame) ref.Val {
+	var res ref.Val
+	if len(s.qualifiers) == 0 {
+		val := frame.localSlots[s.slot]
+		if lazy, ok := val.(*lazySlot); ok {
+			val = lazy.resolve(frame)
+		}
+		if rVal, ok := val.(ref.Val); ok {
+			res = labelErrNode(s.id, rVal)
+		} else {
+			res = s.adapter.NativeToValue(val)
+		}
+		if costs := frame.CostTracker(); costs != nil {
+			costs.EvalAttribute(s.id, false, res)
+		}
+		return res
+	}
+	v, err := s.resolveFrame(frame)
+	if err != nil {
+		res = types.LabelErrNode(s.ID(), types.WrapErr(err))
+	} else {
+		res = s.adapter.NativeToValue(v)
+	}
+	if costs := frame.CostTracker(); costs != nil {
+		costs.EvalAttribute(s.ID(), false, res)
+	}
+	return res
+}
+
+// Eval implements the Interpretable interface method.
+func (s *evalSlot) Eval(ctx Activation) ref.Val {
+	return EvalActivation(ctx, s.Exec)
+}
+
+type blockSlotInit struct {
+	constVal ref.Val
+	lazy     lazySlot
+}
+
+type evalBlock struct {
+	id        int64
+	firstSlot int
+	inits     []blockSlotInit
+	expr      InterpretableV2
+}
+
+// ID implements the Interpretable interface method.
+func (b *evalBlock) ID() int64 {
+	return b.id
+}
+
+// Exec implements the InterpretableV2 interface method.
+func (b *evalBlock) Exec(frame *ExecutionFrame) ref.Val {
+	if len(b.inits) == 0 {
+		return b.expr.Exec(frame)
+	}
+	slots := frame.localSlots
+	for i := range b.inits {
+		init := &b.inits[i]
+		if init.constVal != nil {
+			slots[b.firstSlot+i] = init.constVal
+		} else {
+			slots[b.firstSlot+i] = &init.lazy
+		}
+	}
+	res := b.expr.Exec(frame)
+	clear(slots[b.firstSlot : b.firstSlot+len(b.inits)])
+	return res
+}
+
+// Eval implements the Interpretable interface method.
+func (b *evalBlock) Eval(ctx Activation) ref.Val {
+	return EvalActivation(ctx, b.Exec)
 }
 
 type evalOr struct {
@@ -1336,11 +1548,51 @@ func (o *evalObj) Type() ref.Type {
 	return types.NewObjectType(o.typeName)
 }
 
+// initMutableAccu replaces an empty list or map accumulator with a mutable one, and returns any
+// other accumulator unchanged.
+func initMutableAccu(initVal ref.Val, adapter types.Adapter) ref.Val {
+	if l, isList := initVal.(traits.Lister); isList && l.Size() == types.IntZero {
+		return types.NewMutableList(adapter)
+	}
+	if m, isMap := initVal.(traits.Mapper); isMap && m.Size() == types.IntZero {
+		return types.NewMutableMap(adapter, nil)
+	}
+	return initVal
+}
+
+// toImmutableAccu converts a mutable list or map result to an immutable one, and returns any other
+// result unchanged, e.g. when a custom accumulation function produced an immutable value.
+func toImmutableAccu(res ref.Val) ref.Val {
+	if types.IsUnknownOrError(res) {
+		return res
+	}
+	switch v := res.(type) {
+	case traits.MutableLister:
+		return v.ToImmutableList()
+	case traits.MutableMapper:
+		return v.ToImmutableMap()
+	}
+	return res
+}
+
+func resolveFoldable(foldRange ref.Val, singleIterVar bool) (foldable traits.Foldable, listV1Fold, unsupported bool) {
+	switch r := foldRange.(type) {
+	case traits.Foldable:
+		if singleIterVar {
+			_, listV1Fold = foldRange.(traits.Lister)
+		}
+		return r, listV1Fold, false
+	case traits.Mapper:
+		return types.ToFoldableMap(r), false, false
+	case traits.Lister:
+		return types.ToFoldableList(r), singleIterVar, false
+	default:
+		return nil, false, !singleIterVar
+	}
+}
+
 type evalFold struct {
 	id        int64
-	accuVar   string
-	iterVar   string
-	iterVar2  string
 	iterRange InterpretableV2
 	accu      InterpretableV2
 	cond      InterpretableV2
@@ -1348,8 +1600,11 @@ type evalFold struct {
 	result    InterpretableV2
 	adapter   types.Adapter
 
-	// depth is the 1-based scope nesting depth of the comprehension loop.
-	depth int
+	accuSlot  int
+	iterSlot  int
+	iter2Slot int
+	depth     int
+	lazyAccu  lazySlot
 
 	// mutableAccu indicates that static analysis of the comprehension has determined that the
 	// accumulator is only ever observed by in-place accumulation steps and the final result, and
@@ -1370,66 +1625,174 @@ func (fold *evalFold) ID() int64 {
 
 // Exec implements the InterpretableV2 interface method.
 func (fold *evalFold) Exec(frame *ExecutionFrame) ref.Val {
-	f := newFolder(fold, frame)
 	if fold.iterRange == nil {
 		if costs := frame.CostTracker(); costs != nil && costs.ModelVersion() == 0 {
 			costs.CreateList(fold.id, nil)
 		}
-		res := f.evalResult()
-		releaseFolder(f)
-		return res
+		if fold.accuSlot >= 0 {
+			frame.localSlots[fold.accuSlot] = &fold.lazyAccu
+		}
+		return fold.evalSlotResult(frame, false)
 	}
 	foldRange := fold.iterRange.Exec(frame)
 
-	// Early return if the folder is an error or unknown.
+	// Early return if the range is an error or unknown.
 	if types.IsUnknownOrError(foldRange) {
-		releaseFolder(f)
 		return foldRange
+	}
+
+	slots := frame.localSlots
+	if fold.accuSlot >= 0 {
+		slots[fold.accuSlot] = &fold.lazyAccu
 	}
 
 	// Short-circuit the iteration if the range is empty.
 	if sizer, ok := foldRange.(traits.Sizer); ok && sizer.Size() == types.IntZero {
-		res := f.evalResult()
-		releaseFolder(f)
-		return res
+		return fold.evalSlotResult(frame, false)
 	}
 
-	// Otherwise, attempt a two variable fold.
-	var foldable traits.Foldable
-	switch r := foldRange.(type) {
-	case traits.Foldable:
-		foldable = r
-		if fold.iterVar2 == "" {
-			_, f.listV1Fold = foldRange.(traits.Lister)
+	foldable, listV1Fold, unsupported := resolveFoldable(foldRange, fold.iter2Slot < 0)
+	if unsupported {
+		if fold.accuSlot >= 0 {
+			slots[fold.accuSlot] = nil
 		}
-	case traits.Mapper:
-		foldable = types.ToFoldableMap(r)
-	case traits.Lister:
-		if fold.iterVar2 == "" {
-			f.listV1Fold = true
-		}
-		foldable = types.ToFoldableList(r)
-	default:
-		if fold.iterVar2 != "" {
-			return types.NewErrWithNodeID(fold.ID(), "unsupported comprehension range type: %T", foldRange)
-		}
+		return types.NewErrWithNodeID(fold.ID(), "unsupported comprehension range type: %T", foldRange)
 	}
 	if foldable != nil {
-		foldable.Fold(f)
-		res := f.evalResult()
-		releaseFolder(f)
+		sf := newSlotFolder(fold, frame)
+		sf.listV1Fold = listV1Fold
+		foldable.Fold(sf)
+		res := fold.evalSlotResult(frame, sf.interrupted)
+		releaseSlotFolder(sf)
 		return res
 	}
 
 	// If the value is not foldable or just a single variable, fallback to an iterable fold.
 	if !foldRange.Type().HasTrait(traits.IterableType) {
-		releaseFolder(f)
+		if fold.accuSlot >= 0 {
+			slots[fold.accuSlot] = nil
+		}
 		return types.ValOrErr(foldRange, "got '%T', expected iterable type", foldRange)
 	}
-	iterable := foldRange.(traits.Iterable)
-	res := f.foldIterable(iterable)
-	releaseFolder(f)
+	sf := newSlotFolder(fold, frame)
+	sf.foldIterable(foldRange.(traits.Iterable))
+	res := fold.evalSlotResult(frame, sf.interrupted)
+	releaseSlotFolder(sf)
 	return res
+}
+
+func (fold *evalFold) initAccu(frame *ExecutionFrame) ref.Val {
+	initVal := fold.accu.Exec(frame)
+	if fold.mutableAccu && !fold.exhaustive {
+		initVal = initMutableAccu(initVal, fold.adapter)
+	}
+	frame.localSlots[fold.accuSlot] = initVal
+	return initVal
+}
+
+func (fold *evalFold) clearIterSlots(slots []any) {
+	if fold.accuSlot >= 0 {
+		slots[fold.accuSlot] = nil
+	}
+	if fold.iterSlot >= 0 {
+		slots[fold.iterSlot] = nil
+	}
+	if fold.iter2Slot >= 0 {
+		slots[fold.iter2Slot] = nil
+	}
+}
+
+func (fold *evalFold) evalSlotResult(frame *ExecutionFrame, interrupted bool) ref.Val {
+	if interrupted {
+		fold.clearIterSlots(frame.localSlots)
+		return types.WrapErr(InterruptError{})
+	}
+	res := fold.result.Exec(frame)
+	fold.clearIterSlots(frame.localSlots)
+	if fold.mutableAccu && !fold.exhaustive {
+		return toImmutableAccu(res)
+	}
+	return res
+}
+
+var slotFolderPool = &sync.Pool{
+	New: func() any {
+		return &slotFolder{}
+	},
+}
+
+func newSlotFolder(fold *evalFold, frame *ExecutionFrame) *slotFolder {
+	f := slotFolderPool.Get().(*slotFolder)
+	f.fold = fold
+	f.frame = frame
+	f.interrupted = false
+	f.listV1Fold = false
+	return f
+}
+
+func releaseSlotFolder(f *slotFolder) {
+	f.fold = nil
+	f.frame = nil
+	f.interrupted = false
+	f.listV1Fold = false
+	slotFolderPool.Put(f)
+}
+
+type slotFolder struct {
+	fold        *evalFold
+	frame       *ExecutionFrame
+	interrupted bool
+	listV1Fold  bool
+}
+
+func (f *slotFolder) FoldKeyOnly() bool {
+	return f.fold.iter2Slot < 0 && !f.listV1Fold
+}
+
+func (f *slotFolder) FoldEntry(key, val any) bool {
+	fold := f.fold
+	frame := f.frame
+	slots := frame.localSlots
+	if f.listV1Fold {
+		if fold.iterSlot >= 0 {
+			slots[fold.iterSlot] = val
+		}
+	} else {
+		if fold.iterSlot >= 0 {
+			slots[fold.iterSlot] = key
+		}
+		if fold.iter2Slot >= 0 {
+			slots[fold.iter2Slot] = val
+		}
+	}
+
+	cond := fold.cond.Exec(frame)
+	if !fold.exhaustive && cond != types.True {
+		if isError(cond) {
+			f.interrupted = true
+		}
+		return false
+	}
+
+	stepVal := fold.step.Exec(frame)
+	if fold.accuSlot >= 0 {
+		slots[fold.accuSlot] = stepVal
+	}
+	if fold.interruptable && frame.CheckInterrupt() {
+		f.interrupted = true
+		return false
+	}
+	return true
+}
+
+func (f *slotFolder) foldIterable(iterable traits.Iterable) {
+	f.listV1Fold = true
+	it := iterable.Iterator()
+	for it.HasNext() == types.True {
+		if !f.FoldEntry(nil, it.Next()) {
+			return
+		}
+	}
 }
 
 // Eval implements the Interpretable interface method.
@@ -1952,230 +2315,6 @@ func invalidOptionalElementInit(value ref.Val) ref.Val {
 	return types.NewErr("cannot initialize optional list element from non-optional value %v", value)
 }
 
-// newFolder creates or initializes a pooled folder instance.
-func newFolder(eval *evalFold, frame *ExecutionFrame) *folder {
-	f := folderPool.Get().(*folder)
-	f.evalFold = eval
-	f.frame = frame.Push(f)
-	return f
-}
-
-// releaseFolder resets and releases a pooled folder instance.
-func releaseFolder(f *folder) {
-	f.reset()
-	folderPool.Put(f)
-}
-
-// folder tracks the state associated with folding a list or map with a comprehension v2 style macro.
-//
-// The folder embeds an interpreter.Activation and Interpretable evalFold value as well as implements
-// the traits.Folder interface methods.
-//
-// Instances of a folder are intended to be pooled to minimize allocation overhead with this temporary
-// bookkeeping object which supports lazy evaluation of the accumulator init expression which is useful
-// in preserving evaluation order semantics which might otherwise be disrupted through the use of
-// cel.bind or cel.@block.
-type folder struct {
-	*evalFold
-	frame *ExecutionFrame
-
-	// fold state objects.
-	accuVal     ref.Val
-	iterVar1Val any
-	iterVar2Val any
-
-	// bookkeeping flags to modify Activation and fold behaviors.
-	initialized   bool
-	mutableValue  bool
-	interrupted   bool
-	computeResult bool
-	listV1Fold    bool
-}
-
-func (f *folder) foldIterable(iterable traits.Iterable) ref.Val {
-	it := iterable.Iterator()
-	for it.HasNext() == types.True {
-		f.iterVar1Val = it.Next()
-
-		cond := f.cond.Exec(f.frame)
-		if f.interrupted {
-			return f.evalResult()
-		}
-		if !f.exhaustive && cond != types.True {
-			if isError(cond) {
-				f.interrupted = true
-			}
-			return f.evalResult()
-		}
-
-		// Update the accumulation value and check for eval interruption.
-		f.accuVal = f.step.Exec(f.frame)
-		f.initialized = true
-		if f.interruptable && f.frame.CheckInterrupt() {
-			f.interrupted = true
-			return f.evalResult()
-		}
-	}
-	return f.evalResult()
-}
-
-// FoldKeyOnly reports whether the folder only consumes the entry key (e.g. 1-variable map
-// comprehensions where iterVar2 is empty and listV1Fold is false).
-func (f *folder) FoldKeyOnly() bool {
-	return f.iterVar2 == "" && !f.listV1Fold
-}
-
-// FoldEntry will either fold comprehension v1 style macros if iterVar2 is unset, or comprehension v2 style
-// macros if both the iterVar and iterVar2 are set to non-empty strings.
-func (f *folder) FoldEntry(key, val any) bool {
-	if f.listV1Fold {
-		f.iterVar1Val = val
-	} else {
-		f.iterVar1Val = key
-		f.iterVar2Val = val
-	}
-
-	// Terminate evaluation if evaluation is interrupted or the condition is not true and exhaustive
-	// eval is not enabled.
-	cond := f.cond.Exec(f.frame)
-	if f.interrupted {
-		return false
-	}
-	if !f.exhaustive && cond != types.True {
-		if isError(cond) {
-			f.interrupted = true
-		}
-		return false
-	}
-
-	// Update the accumulation value and check for eval interruption.
-	f.accuVal = f.step.Exec(f.frame)
-	f.initialized = true
-	if f.interruptable && f.frame.CheckInterrupt() {
-		f.interrupted = true
-		return false
-	}
-	return true
-}
-
-// ResolveName overrides the default Activation lookup to perform lazy initialization of the accumulator
-// and specialized lookups of iteration values with consideration for whether the final result is being
-// computed and the iteration variables should be ignored.
-func (f *folder) ResolveName(name string) (any, bool) {
-	if name == f.accuVar {
-		if !f.initialized {
-			f.initialized = true
-			initVal := f.accu.Exec(f.frame.parent)
-			// Only substitute a mutable accumulator when the planner has proven that the
-			// accumulator cannot be aliased, and when evaluation is not exhaustive since
-			// exhaustive evaluation would apply in-place updates from untaken branches.
-			if f.mutableAccu && !f.exhaustive {
-				if l, isList := initVal.(traits.Lister); isList && l.Size() == types.IntZero {
-					initVal = types.NewMutableList(f.adapter)
-					f.mutableValue = true
-				}
-				if m, isMap := initVal.(traits.Mapper); isMap && m.Size() == types.IntZero {
-					initVal = types.NewMutableMap(f.adapter, map[ref.Val]ref.Val{})
-					f.mutableValue = true
-				}
-			}
-			f.accuVal = initVal
-		}
-		return f.accuVal, true
-	}
-	if !f.computeResult {
-		if name == f.iterVar {
-			return f.iterVar1Val, true
-		}
-		if name == f.iterVar2 {
-			return f.iterVar2Val, true
-		}
-	}
-	return f.frame.parent.ResolveName(name)
-}
-
-// Parent returns the activation embedded into the folder.
-func (f *folder) Parent() Activation {
-	return f.frame.parent
-}
-
-// Unwrap returns the parent activation, thus omitting access to local state
-func (f *folder) Unwrap() Activation {
-	return f.frame.parent
-}
-
-// IsLocalVariable reports whether the variable name is locally bound by the folder scope.
-func (f *folder) IsLocalVariable(name string) bool {
-	if name == f.accuVar {
-		return true
-	}
-	if !f.computeResult && (name == f.iterVar || name == f.iterVar2) {
-		return true
-	}
-	if varHolder, ok := f.Parent().(localVariableHolder); ok {
-		if varHolder.IsLocalVariable(name) {
-			return true
-		}
-	}
-	return false
-}
-
-// UnknownAttributePatterns implements the PartialActivation interface returning the unknown patterns
-// if they were provided to the input activation, or an empty set if the proxied activation is not partial.
-func (f *folder) UnknownAttributePatterns() []*AttributePattern {
-	if f.frame.parent != nil {
-		if partial, isPartial := f.frame.parent.AsPartialActivation(); isPartial {
-			return partial.UnknownAttributePatterns()
-		}
-	}
-	return []*AttributePattern{}
-}
-
-func (f *folder) AsPartialActivation() (PartialActivation, bool) {
-	if f.frame.parent != nil {
-		if _, isPartial := f.frame.parent.AsPartialActivation(); isPartial {
-			return f, true
-		}
-	}
-	return nil, false
-}
-
-// evalResult computes the final result of the fold after all entries have been folded and accumulated.
-func (f *folder) evalResult() ref.Val {
-	f.computeResult = true
-	if f.interrupted {
-		return types.WrapErr(InterruptError{})
-	}
-	res := f.result.Exec(f.frame)
-	// Convert a mutable list or map to an immutable one if the comprehension has generated a list or
-	// map as a result.
-	if !types.IsUnknownOrError(res) && f.mutableValue {
-		if _, ok := res.(traits.MutableLister); ok {
-			res = res.(traits.MutableLister).ToImmutableList()
-		}
-		if _, ok := res.(traits.MutableMapper); ok {
-			res = res.(traits.MutableMapper).ToImmutableMap()
-		}
-	}
-	return res
-}
-
-// reset clears any state associated with folder evaluation.
-func (f *folder) reset() {
-	f.evalFold = nil
-	f.frame.Pop()
-	f.frame = nil
-	f.accuVal = nil
-	f.iterVar1Val = nil
-	f.iterVar2Val = nil
-
-	f.initialized = false
-	f.mutableValue = false
-	f.interrupted = false
-	f.computeResult = false
-	f.listV1Fold = false
-}
-
 // InterruptError is a specialized error type used to signal that program evaluation should check
 // whether a context cancellation is responsible for the error.
 type InterruptError struct{}
@@ -2189,15 +2328,6 @@ func (InterruptError) Error() string {
 func (ie InterruptError) Is(target error) bool {
 	return target.Error() == ie.Error()
 }
-
-var (
-	// pool of var folders to reduce allocations during folds.
-	folderPool = &sync.Pool{
-		New: func() any {
-			return &folder{}
-		},
-	}
-)
 
 func trackCostCreateList(frame *ExecutionFrame, id int64, res ref.Val) {
 	if costs := frame.CostTracker(); costs != nil {
@@ -2248,15 +2378,6 @@ func mergeBinaryUnknowns(lVal, rVal ref.Val) *types.Unknown {
 	return types.MergeUnknowns(lUnk, rUnk)
 }
 
-func mergeUnknown(dst *types.Unknown, src ref.Val) *types.Unknown {
-	if unk, ok := src.(*types.Unknown); ok {
-		if dst == nil {
-			return unk
-		}
-		return types.MergeUnknowns(dst, unk)
-	}
-	return dst
-}
 func labelErrNode(id int64, val ref.Val) ref.Val {
 	if err, ok := val.(*types.Err); ok && err.NodeID() == 0 {
 		return types.LabelErrNode(id, err)

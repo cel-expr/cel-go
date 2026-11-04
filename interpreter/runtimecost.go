@@ -18,8 +18,6 @@ import (
 	"errors"
 
 	"cel.dev/cel-go/common/cost"
-	"cel.dev/cel-go/common/types"
-	"cel.dev/cel-go/common/types/ref"
 )
 
 // WARNING: Any changes to cost calculations in this file require a corresponding change in checker/cost.go
@@ -113,24 +111,4 @@ func CostObserver(opts ...CostTrackPlanOption) PlannerOption {
 // costTrackerFactory holds a factory for producing new CostTracker instances on each Eval call.
 type costTrackerFactory struct {
 	factory func() (*CostTracker, error)
-}
-
-type costTrackingInterpretable struct {
-	InterpretableV2
-	factory func() (*CostTracker, error)
-}
-
-func (c *costTrackingInterpretable) Exec(frame *ExecutionFrame) ref.Val {
-	if frame.CostTracker() == nil {
-		tracker, err := c.factory()
-		if err != nil {
-			return types.NewErr("cost tracker factory: %v", err)
-		}
-		frame.SetCostTracker(tracker)
-	}
-	return c.InterpretableV2.Exec(frame)
-}
-
-func (c *costTrackingInterpretable) Eval(ctx Activation) ref.Val {
-	return EvalActivation(ctx, c.Exec)
 }
