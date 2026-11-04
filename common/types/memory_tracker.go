@@ -149,12 +149,16 @@ func (t *MemoryTracker) Track(val ref.Val) uint32 {
 // up by comprehension loops or bind initializers, where sizing every iteration would be
 // prohibitively expensive.
 func (t *MemoryTracker) Sample(id int64, val ref.Val) uint32 {
+	if t.sampleInterval <= 1 {
+		// Every observation is tracked, so there is no need to count observations.
+		return t.Track(val)
+	}
 	if t.sampleCounts == nil {
 		t.sampleCounts = make(map[int64]uint32)
 	}
 	t.sampleCounts[id]++
 	count := t.sampleCounts[id]
-	if count == 1 || t.sampleInterval <= 1 || count%t.sampleInterval == 0 {
+	if count == 1 || count%t.sampleInterval == 0 {
 		return t.Track(val)
 	}
 	return 0
