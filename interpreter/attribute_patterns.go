@@ -248,11 +248,12 @@ func (fac *partialAttributeFactory) MaybeAttribute(id int64, name string) Attrib
 // example, the expression id representing variable `a` would be listed in the Unknown result,
 // whereas in the other pattern examples, the qualifier `b` would be returned as the Unknown.
 func (fac *partialAttributeFactory) matchesUnknownPatterns(
-	vars PartialActivation,
+	partial PartialActivation,
+	vars Activation,
 	attrID int64,
 	variableNames []string,
 	qualifiers []Qualifier) (*types.Unknown, error) {
-	patterns := vars.UnknownAttributePatterns()
+	patterns := partial.UnknownAttributePatterns()
 	candidateIndices := map[int]struct{}{}
 	for _, variable := range variableNames {
 		if holder, ok := vars.(localVariableHolder); ok && holder.IsLocalVariable(variable) {
@@ -375,6 +376,7 @@ func (m *attributeMatcher) Resolve(vars Activation) (any, error) {
 	if isPartial {
 		unk, err := m.fac.matchesUnknownPatterns(
 			partial,
+			vars,
 			id,
 			m.CandidateVariableNames(),
 			m.qualifiers)

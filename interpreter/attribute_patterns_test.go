@@ -350,20 +350,16 @@ func TestAttributePattern_LocallyBound(t *testing.T) {
 	frame := mustNewExecutionFrame(t, partAct)
 	defer frame.Close()
 
-	// Create folder (representing a local scope for variable "x" only)
-	fold := &evalFold{
-		iterVar: "x",
-		adapter: types.DefaultTypeAdapter,
+	// Push a localVariableHolder scope binding "x" only.
+	scope := &localVarTestScope{
+		parent: frame,
+		vars:   map[string]bool{"x": true},
 	}
-	fld := newFolder(fold, frame)
-	defer releaseFolder(fld)
-
-	// Push onto the frame stack to simulate local variable scope
-	frame1 := frame.Push(fld)
+	frame1 := frame.Push(scope)
 	defer frame1.Pop()
 
 	// 1. Resolve attribute matching "x".
-	// Because "x" is locally bound in fld, it should not resolve to types.Unknown.
+	// Because "x" is locally bound in scope, it should not resolve to types.Unknown.
 	attrX := fac.AbsoluteAttribute(1, "x")
 	valX, err := attrX.Resolve(frame1)
 	if err != nil {

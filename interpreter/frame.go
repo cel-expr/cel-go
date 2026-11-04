@@ -301,15 +301,23 @@ func (f *ExecutionFrame) ResolveFunction(name string) (functions.LateBoundOp, bo
 	return f.functions.ResolveFunction(name)
 }
 
-// AsPartialActivation implements the PartialActivation interface by proxying to the internal scope or parent.
-func (f *ExecutionFrame) AsPartialActivation() (PartialActivation, bool) {
+func (f *ExecutionFrame) findPartialActivation() (PartialActivation, bool) {
 	if f.scope != nil {
 		if pa, ok := AsPartialActivation(f.scope); ok {
 			return pa, true
 		}
 	}
 	if f.parent != nil {
-		return f.parent.AsPartialActivation()
+		return f.parent.findPartialActivation()
+	}
+	return nil, false
+}
+
+// AsPartialActivation implements the PartialActivation interface, returning the ExecutionFrame
+// itself when an underlying scope or parent is partial so frame slots and local scopes remain accessible.
+func (f *ExecutionFrame) AsPartialActivation() (PartialActivation, bool) {
+	if _, ok := f.findPartialActivation(); ok {
+		return f, true
 	}
 	return nil, false
 }
@@ -317,7 +325,7 @@ func (f *ExecutionFrame) AsPartialActivation() (PartialActivation, bool) {
 // UnknownAttributePatterns implements the PartialActivation interface returning the unknown patterns
 // if they were provided to the input activation, or an empty set if the frame is not partial.
 func (f *ExecutionFrame) UnknownAttributePatterns() []*AttributePattern {
-	if pa, ok := f.AsPartialActivation(); ok {
+	if pa, ok := f.findPartialActivation(); ok {
 		return pa.UnknownAttributePatterns()
 	}
 	return []*AttributePattern{}
