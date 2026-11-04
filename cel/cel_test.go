@@ -7000,3 +7000,48 @@ func TestCustomTypeProviderNil(t *testing.T) {
 		t.Errorf("NewEnv(CustomTypeProvider(nil)) got error %v, wanted 'custom type provider must not be nil'", err)
 	}
 }
+
+type testCustomRefValType struct{}
+
+func (testCustomRefValType) HasTrait(int) bool { return false }
+func (testCustomRefValType) TypeName() string  { return "cel.TestMoney" }
+
+type testMoneyVal struct{ Amount int64 }
+
+func (m testMoneyVal) ConvertToNative(reflect.Type) (any, error) { return m, nil }
+func (m testMoneyVal) ConvertToType(ref.Type) ref.Val            { return m }
+func (m testMoneyVal) Equal(other ref.Val) ref.Val               { return types.Bool(other == ref.Val(m)) }
+func (testMoneyVal) Type() ref.Type                              { return testCustomRefValType{} }
+func (m testMoneyVal) Value() any                                { return m }
+
+type testCustomOrder struct {
+	Price testMoneyVal
+}
+
+func TestCustomRefValInNativeStruct(t *testing.T) {
+	env, err := NewEnv(
+		Types(reflect.TypeFor[testCustomOrder]()),
+		Variable("order", ObjectType("cel.testCustomOrder")),
+	)
+	if err != nil {
+		t.Fatalf("NewEnv() failed: %v", err)
+	}
+
+	ast, iss := env.Compile(`order.Price`)
+	if iss.Err() != nil {
+		t.Fatalf("Compile() failed: %v", iss.Err())
+	}
+	prg, err := env.Program(ast)
+	if err != nil {
+		t.Fatalf("Program() failed: %v", err)
+	}
+	out, _, err := prg.Eval(map[string]any{
+		"order": testCustomOrder{Price: testMoneyVal{Amount: 100}},
+	})
+	if err != nil {
+		t.Fatalf("Eval() failed: %v", err)
+	}
+	if out != (testMoneyVal{Amount: 100}) {
+		t.Errorf("Eval() got %v, wanted %v", out, testMoneyVal{Amount: 100})
+	}
+}

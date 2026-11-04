@@ -938,6 +938,109 @@ func TestNativeTypesWithCELTypedFields(t *testing.T) {
 	}
 }
 
+type customValType struct{}
+
+func (customValType) HasTrait(int) bool { return false }
+func (customValType) TypeName() string  { return "custom.Money" }
+
+type customMoneyVal struct{ Amount int64 }
+
+func (m customMoneyVal) ConvertToNative(reflect.Type) (any, error) { return m, nil }
+func (m customMoneyVal) ConvertToType(ref.Type) ref.Val            { return m }
+func (m customMoneyVal) Equal(other ref.Val) ref.Val               { return types.Bool(other == ref.Val(m)) }
+func (customMoneyVal) Type() ref.Type                              { return customValType{} }
+func (m customMoneyVal) Value() any                                { return m }
+
+type customMoneyValPtr struct{ Amount int64 }
+
+func (m *customMoneyValPtr) ConvertToNative(reflect.Type) (any, error) { return m, nil }
+func (m *customMoneyValPtr) ConvertToType(ref.Type) ref.Val            { return m }
+func (m *customMoneyValPtr) Equal(other ref.Val) ref.Val {
+	if o, ok := other.(*customMoneyValPtr); ok {
+		if m == nil && o == nil {
+			return types.Bool(true)
+		}
+		if m == nil || o == nil {
+			return types.Bool(false)
+		}
+		return types.Bool(m.Amount == o.Amount)
+	}
+	return types.Bool(false)
+}
+func (*customMoneyValPtr) Type() ref.Type { return customValType{} }
+func (m *customMoneyValPtr) Value() any   { return m }
+
+type TestCustomRefValStruct struct {
+	Price    customMoneyVal
+	PricePtr *customMoneyValPtr
+}
+
+func TestNativeTypesWithCustomRefValField(t *testing.T) {
+	env, err := cel.NewEnv(
+		cel.Types(reflect.TypeFor[TestCustomRefValStruct]()),
+		cel.Variable("order", cel.ObjectType("types_test.TestCustomRefValStruct")),
+	)
+	if err != nil {
+		t.Fatalf("cel.NewEnv() failed: %v", err)
+	}
+
+	for _, expr := range []string{
+		`order.Price`,
+		`order.PricePtr`,
+		`order.Price == order.Price`,
+		`order.PricePtr == order.PricePtr`,
+	} {
+		ast, iss := env.Compile(expr)
+		if iss.Err() != nil {
+			t.Fatalf("env.Compile(%q) failed: %v", expr, iss.Err())
+		}
+		prg, err := env.Program(ast)
+		if err != nil {
+			t.Fatalf("env.Program(%q) failed: %v", expr, err)
+		}
+		val := TestCustomRefValStruct{
+			Price:    customMoneyVal{Amount: 42},
+			PricePtr: &customMoneyValPtr{Amount: 99},
+		}
+		out, _, err := prg.Eval(map[string]any{
+			"order": val,
+		})
+		if err != nil {
+			t.Fatalf("prg.Eval(%q) failed: %v", expr, err)
+		}
+		if expr == `order.Price == order.Price` || expr == `order.PricePtr == order.PricePtr` {
+			if out != types.True {
+				t.Errorf("Eval(%q) got %v, wanted true", expr, out)
+			}
+		}
+	}
+
+	env2, err := cel.NewEnv(
+		ext.NativeTypes(reflect.TypeFor[TestCustomRefValStruct]()),
+		cel.Variable("order", cel.ObjectType("types_test.TestCustomRefValStruct")),
+	)
+	if err != nil {
+		t.Fatalf("cel.NewEnv(NativeTypes) failed: %v", err)
+	}
+	ast, iss := env2.Compile(`order.Price == order.Price`)
+	if iss.Err() != nil {
+		t.Fatalf("env2.Compile failed: %v", iss.Err())
+	}
+	prg, err := env2.Program(ast)
+	if err != nil {
+		t.Fatalf("env2.Program failed: %v", err)
+	}
+	out, _, err := prg.Eval(map[string]any{
+		"order": TestCustomRefValStruct{Price: customMoneyVal{Amount: 42}},
+	})
+	if err != nil {
+		t.Fatalf("prg.Eval failed: %v", err)
+	}
+	if out != types.True {
+		t.Errorf("got %v, wanted true", out)
+	}
+}
+
 func TestNativeTypeConvertToType(t *testing.T) {
 	var nativeTests = []struct {
 		tag string

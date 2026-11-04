@@ -1639,13 +1639,13 @@ func convertToCelType(refType reflect.Type) (*Type, bool) {
 		}
 		if refType.Implements(refValType) {
 			emptyCelVal := reflect.New(refType).Elem().Interface().(ref.Val)
-			return emptyCelVal.Type().(*Type), true
+			return maybeForeignType(emptyCelVal.Type()), true
 		}
 		return NewObjectType(getNativeTypeName(refType, "")), true
 	case reflect.Pointer:
 		if refType.Implements(refValType) {
 			emptyCelVal := reflect.New(refType.Elem()).Interface().(ref.Val)
-			return emptyCelVal.Type().(*Type), true
+			return maybeForeignType(emptyCelVal.Type()), true
 		}
 		if refType.Implements(pbMsgInterfaceType) {
 			pbMsg := reflect.New(refType.Elem()).Interface().(protoreflect.ProtoMessage)
