@@ -148,9 +148,7 @@ func NewBufferAndLineOffsetsWithLimit(data string, limit int) (Buffer, []int32, 
 }
 
 func countRemainingCodePoints(data string, idx int, count int) int {
-	for idx < len(data) {
-		_, s := utf8.DecodeRuneInString(data[idx:])
-		idx += s
+	for range data[idx:] {
 		count++
 	}
 	return count
@@ -160,6 +158,7 @@ func newBufferWithLimit(data string, lines bool, limit int) (Buffer, []int32, er
 	if len(data) == 0 {
 		return nilBuffer, []int32{0}, nil
 	}
+	maxCap := len(data)
 	if limit >= 0 && len(data) > limit {
 		size := countRemainingCodePoints(data, 0, 0)
 		if size > limit {
@@ -168,46 +167,42 @@ func newBufferWithLimit(data string, lines bool, limit int) (Buffer, []int32, er
 				Limit: limit,
 			}
 		}
+		maxCap = size
 	}
 
 	// The resulting buffers store one element per code point, so the worst case
-	// element count never exceeds len(data).
+	// element count never exceeds maxCap.
 	var (
-		idx         = 0
 		off   int32 = 0
-		buf8        = make([]byte, 0, len(data))
+		buf8        = make([]byte, 0, maxCap)
 		buf16 []uint16
 		buf32 []rune
 		offs  []int32
 	)
-	for idx < len(data) {
-		r, s := utf8.DecodeRuneInString(data[idx:])
-		idx += s
-		if lines && r == '\n' {
-			offs = append(offs, off+1)
-		}
+	for idx, r := range data {
 		if r < utf8.RuneSelf {
+			if lines && r == '\n' {
+				offs = append(offs, off+1)
+			}
 			buf8 = append(buf8, byte(r))
 			off++
 			continue
 		}
 		if r <= 0xffff {
-			buf16 = make([]uint16, len(buf8), len(data))
+			buf16 = make([]uint16, len(buf8), maxCap)
 			for i, v := range buf8 {
 				buf16[i] = uint16(v)
 			}
 			buf8 = nil
-			buf16 = append(buf16, uint16(r))
-			off++
+			data = data[idx:]
 			goto copy16
 		}
-		buf32 = make([]rune, len(buf8), len(data))
+		buf32 = make([]rune, len(buf8), maxCap)
 		for i, v := range buf8 {
 			buf32[i] = rune(uint32(v))
 		}
 		buf8 = nil
-		buf32 = append(buf32, r)
-		off++
+		data = data[idx:]
 		goto copy32
 	}
 	if lines {
@@ -218,24 +213,21 @@ func newBufferWithLimit(data string, lines bool, limit int) (Buffer, []int32, er
 	}, offs, nil
 
 copy16:
-	for idx < len(data) {
-		r, s := utf8.DecodeRuneInString(data[idx:])
-		idx += s
-		if lines && r == '\n' {
-			offs = append(offs, off+1)
-		}
+	for idx, r := range data {
 		if r <= 0xffff {
+			if lines && r == '\n' {
+				offs = append(offs, off+1)
+			}
 			buf16 = append(buf16, uint16(r))
 			off++
 			continue
 		}
-		buf32 = make([]rune, len(buf16), len(data))
+		buf32 = make([]rune, len(buf16), maxCap)
 		for i, v := range buf16 {
 			buf32[i] = rune(uint32(v))
 		}
 		buf16 = nil
-		buf32 = append(buf32, r)
-		off++
+		data = data[idx:]
 		goto copy32
 	}
 	if lines {
@@ -246,9 +238,7 @@ copy16:
 	}, offs, nil
 
 copy32:
-	for idx < len(data) {
-		r, s := utf8.DecodeRuneInString(data[idx:])
-		idx += s
+	for _, r := range data {
 		if lines && r == '\n' {
 			offs = append(offs, off+1)
 		}
