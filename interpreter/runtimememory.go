@@ -86,6 +86,16 @@ func (mt *memoryTrackerFactory) GetState(frame *ExecutionFrame) any {
 // peak at the expression nodes which produced them; constants are part of the program image
 // rather than runtime-materialized memory and are not observed.
 func (mt *memoryTrackerFactory) Observe(vars Activation, id int64, programStep any, val ref.Val) {
+	mt.observe(vars, id, programStep, val, 0)
+}
+
+// ObserveScoped implements the scopedObserver interface for values observed within comprehension
+// loops.
+func (mt *memoryTrackerFactory) ObserveScoped(vars Activation, id int64, programStep any, val ref.Val, depth int) {
+	mt.observe(vars, id, programStep, val, depth)
+}
+
+func (mt *memoryTrackerFactory) observe(vars Activation, id int64, programStep any, val ref.Val, depth int) {
 	frame, ok := vars.(*ExecutionFrame)
 	if !ok || frame.ctx == nil || frame.ctx.memory == nil {
 		return
@@ -93,7 +103,11 @@ func (mt *memoryTrackerFactory) Observe(vars Activation, id int64, programStep a
 	tracker := frame.ctx.memory
 	switch programStep.(type) {
 	case InterpretableAttribute, InterpretableConst, InterpretableCall, InterpretableConstructor, *evalFold:
-		if frame.parent != nil {
+		// Values within comprehension loops may be observed many times in a single evaluation,
+		// so they are sampled. Frames pushed by extensions are treated as scopes as well. All
+		// other values are tracked on every observation, including when an evaluation is
+		// resumed across multiple passes, e.g. during ConcurrentEval.
+		if depth > 0 || frame.parent != nil {
 			tracker.Sample(id, val)
 		} else {
 			tracker.Track(val)

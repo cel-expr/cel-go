@@ -16,11 +16,13 @@ package interpreter
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
 	"cel.dev/cel-go/checker"
 	"cel.dev/cel-go/common"
+	"cel.dev/cel-go/common/ast"
 	"cel.dev/cel-go/common/containers"
 	"cel.dev/cel-go/common/decls"
 	"cel.dev/cel-go/common/types"
@@ -570,6 +572,185 @@ func BenchmarkOptionsComparison(b *testing.B) {
 				b.Run(sc.name, func(b *testing.B) {
 					runOptionsBenchmark(b, w.expr, w.vars, w.in, sc)
 				})
+			}
+		})
+	}
+}
+
+// scopeRecorder is an observer which records the scope depth of each expression id observation.
+type scopeRecorder struct {
+	depths map[int64]map[int]struct{}
+}
+
+func (r *scopeRecorder) InitState(*ExecutionFrame) (any, error) { return nil, nil }
+func (r *scopeRecorder) GetState(*ExecutionFrame) any           { return nil }
+
+func (r *scopeRecorder) Observe(_ Activation, id int64, _ any, _ ref.Val) {
+	r.record(id, 0)
+}
+
+func (r *scopeRecorder) ObserveScoped(_ Activation, id int64, _ any, _ ref.Val, depth int) {
+	r.record(id, depth)
+}
+
+func (r *scopeRecorder) record(id int64, depth int) {
+	if r.depths[id] == nil {
+		r.depths[id] = map[int]struct{}{}
+	}
+	r.depths[id][depth] = struct{}{}
+}
+
+// describeExpr returns a short description of an expression used to identify it in tests.
+func describeExpr(e ast.Expr) string {
+	switch e.Kind() {
+	case ast.IdentKind:
+		return e.AsIdent()
+	case ast.CallKind:
+		return e.AsCall().FunctionName()
+	case ast.ComprehensionKind:
+		return "fold(" + e.AsComprehension().IterVar() + ")"
+	case ast.LiteralKind:
+		return fmt.Sprintf("%v", e.AsLiteral())
+	}
+	return ""
+}
+
+func TestMemoryObserverScopes(t *testing.T) {
+	listInt := types.NewListType(types.IntType)
+	tests := []struct {
+		name string
+		expr string
+		// want maps an expression description to the expected scope depth.
+		// Every expression with the description must be observed with the same scope depth.
+		want map[string]int
+	}{
+		{
+			name: "comprehension",
+			expr: `a.map(x, x * 3)`,
+			want: map[string]int{
+				// The iteration range and the comprehension itself are outside the loop scope.
+				"a":       0,
+				"fold(x)": 0,
+				// The loop step and result are within the loop scope.
+				"x":   1,
+				"_*_": 1,
+			},
+		},
+		{
+			name: "nested_comprehension",
+			expr: `a.exists(x, b.all(y, y < x))`,
+			want: map[string]int{
+				"a":       0,
+				"fold(x)": 0,
+				// The inner comprehension, including its range, is evaluated within the outer loop.
+				"b":       1,
+				"fold(y)": 1,
+				"x":       2,
+				"y":       2,
+				"_<_":     2,
+			},
+		},
+		{
+			name: "deeply_nested_comprehension",
+			expr: `a.exists(x, b.exists(y, c.all(z, x + y + z > 0)))`,
+			want: map[string]int{
+				"a":       0,
+				"fold(x)": 0,
+				"b":       1,
+				"fold(y)": 1,
+				"c":       2,
+				"fold(z)": 2,
+				"x":       3,
+				"y":       3,
+				"z":       3,
+				"_>_":     3,
+			},
+		},
+		{
+			name: "call_with_comprehension",
+			expr: `n - a.filter(y, y > 0).size()`,
+			want: map[string]int{
+				"n":       0,
+				"_-_":     0,
+				"a":       0,
+				"fold(y)": 0,
+				"y":       1,
+				"_>_":     1,
+				"_+_":     1, // from internal `@result + [y]` step
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			src := common.NewTextSource(tc.expr)
+			p, err := parser.NewParser(parser.Macros(parser.AllMacros...))
+			if err != nil {
+				t.Fatalf("parser.NewParser() failed: %v", err)
+			}
+			parsed, errs := p.Parse(src)
+			if len(errs.GetErrors()) != 0 {
+				t.Fatalf("Parse(%q) failed: %v", tc.expr, errs.GetErrors())
+			}
+			cont := containers.DefaultContainer
+			reg := newTestRegistry(t)
+			env := newTestEnv(t, cont, reg)
+			if err := env.AddIdents(
+				decls.NewVariable("a", listInt),
+				decls.NewVariable("b", listInt),
+				decls.NewVariable("c", listInt),
+				decls.NewVariable("n", types.IntType),
+			); err != nil {
+				t.Fatalf("AddIdents() failed: %v", err)
+			}
+			checked, errs := checker.Check(parsed, src, env)
+			if len(errs.GetErrors()) != 0 {
+				t.Fatalf("Check(%q) failed: %v", tc.expr, errs.GetErrors())
+			}
+			rec := &scopeRecorder{depths: map[int64]map[int]struct{}{}}
+			rec2 := &scopeRecorder{depths: map[int64]map[int]struct{}{}}
+			recordScopes := func(p *planner) (*planner, error) {
+				p.observers = append(p.observers, rec, rec2)
+				return p, nil
+			}
+			interp := newStandardInterpreter(t, cont, reg, reg, NewAttributeFactory(cont, reg, reg))
+			prg, err := interp.NewInterpretable(checked, recordScopes)
+			if err != nil {
+				t.Fatalf("NewInterpretable() failed: %v", err)
+			}
+			res := prg.Eval(constructTestActivation(t, map[string]any{
+				"a": []int64{1, 2, 3},
+				"b": []int64{4, 5},
+				"c": []int64{6},
+				"n": int64(10),
+			}))
+			if types.IsError(res) {
+				t.Fatalf("Eval(%q) failed: %v", tc.expr, res)
+			}
+
+			for i, r := range []*scopeRecorder{rec, rec2} {
+				got := map[string]map[int]struct{}{}
+				ast.PostOrderVisit(checked.Expr(), ast.NewExprVisitor(func(e ast.Expr) {
+					desc := describeExpr(e)
+					if _, wanted := tc.want[desc]; !wanted {
+						return
+					}
+					if got[desc] == nil {
+						got[desc] = map[int]struct{}{}
+					}
+					for depth := range r.depths[e.ID()] {
+						got[desc][depth] = struct{}{}
+					}
+				}))
+				for desc, wantDepth := range tc.want {
+					depths := got[desc]
+					if len(depths) == 0 {
+						t.Errorf("observer[%d] %q was never observed", i, desc)
+						continue
+					}
+					if _, ok := depths[wantDepth]; !ok || len(depths) != 1 {
+						t.Errorf("observer[%d] %q observed with depths=%v, wanted only depth=%d", i, desc, depths, wantDepth)
+					}
+				}
 			}
 		})
 	}

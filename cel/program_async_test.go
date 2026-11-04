@@ -1165,3 +1165,32 @@ func trackEvalPasses(count *atomic.Int32) func(int64) cel.ProgramOption {
 		})
 	}
 }
+
+func TestConcurrentEvalMemoryTrackingAcrossPasses(t *testing.T) {
+	// The async result only becomes available on a later evaluation pass, at which point its
+	// top-level call node is observed for a second time. Top-level observations must be tracked
+	// on every pass, regardless of the sample interval, or the peak would miss the result.
+	prg := mustProgram(t, `async_list(5)`,
+		cel.Function("async_list",
+			cel.Overload("async_list_int", []*cel.Type{cel.IntType}, cel.ListType(cel.IntType),
+				cel.AsyncBinding(func(ctx context.Context, args ...ref.Val) ref.Val {
+					n := int(args[0].(types.Int))
+					return types.DefaultTypeAdapter.NativeToValue(make([]int64, n))
+				}),
+			),
+		),
+		cel.MemoryTracking(types.MemoryTrackerSampleInterval(10)),
+	)
+	res := awaitEval(context.Background(), t, prg, cel.NoVars())
+	if res.Err != nil {
+		t.Fatalf("ConcurrentEval() error: %v", res.Err)
+	}
+	peak := res.EvalDetails.PeakMemory()
+	if peak == nil {
+		t.Fatal("EvalDetails.PeakMemory() got nil, wanted non-nil peak")
+	}
+	// 1 (list container) + 5 elements.
+	if *peak != 6 {
+		t.Errorf("EvalDetails.PeakMemory() got %d, wanted 6", *peak)
+	}
+}
