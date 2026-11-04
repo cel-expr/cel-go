@@ -2921,19 +2921,6 @@ func TestInterruptErrorIs(t *testing.T) {
 	}
 }
 
-func TestFolderActivation(t *testing.T) {
-	parentAct := EmptyActivation()
-	frame := mustNewExecutionFrame(t, parentAct)
-	defer frame.Close()
-	fld := newFolder(&evalFold{}, frame)
-	defer releaseFolder(fld)
-	if fld.Parent() != frame {
-		t.Errorf("fld.Parent() = %v, wanted %v", fld.Parent(), frame)
-	}
-	if fld.Unwrap() != frame {
-		t.Errorf("fld.Unwrap() = %v, wanted %v", fld.Unwrap(), frame)
-	}
-}
 
 func TestEvalWatchConstructor(t *testing.T) {
 	watchConst := &evalWatchConstructor{

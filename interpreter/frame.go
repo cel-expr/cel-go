@@ -95,6 +95,30 @@ type ExecutionFrame struct {
 
 	// costTracker provides direct access to the active CostTracker for this evaluation pass.
 	costTracker *CostTracker
+
+	// slots holds fixed local variable slots (such as comprehension iterators and accumulators).
+	slots []any
+}
+
+// maxPooledSlots bounds the slot capacity retained when returning an ExecutionFrame to frameStack.
+const maxPooledSlots = 64
+
+// EnsureSlots ensures that the execution frame has at least n slots available.
+func (f *ExecutionFrame) EnsureSlots(n int) []any {
+	if n <= 0 || len(f.slots) >= n {
+		return f.slots
+	}
+	var slots []any
+	if cap(f.slots) >= n {
+		slots = f.slots[:n]
+	} else {
+		slots = make([]any, n)
+		copy(slots, f.slots)
+	}
+	for cur := f; cur != nil; cur = cur.parent {
+		cur.slots = slots
+	}
+	return slots
 }
 
 // Scope returns the local activation scope for this frame, if present.
@@ -202,6 +226,12 @@ func (f *ExecutionFrame) Close() {
 		f.vars = nil
 		clear(f.lazyVars)
 	}
+	if cap(f.slots) > maxPooledSlots {
+		f.slots = nil
+	} else if len(f.slots) > 0 {
+		clear(f.slots)
+		f.slots = f.slots[:0]
+	}
 	f.scope = nil
 	frameStack.Put(f)
 }
@@ -216,6 +246,7 @@ func (f *ExecutionFrame) Push(activation Activation) *ExecutionFrame {
 	child.ctx = f.ctx
 	child.costTracker = f.costTracker
 	child.scope = activation
+	child.slots = f.slots
 	// Scopes pushed during evaluation never supply late-bound functions, so the child inherits
 	// the bindings resolved for the evaluation rather than searching its own hierarchy.
 	child.functions = f.functions
@@ -233,6 +264,7 @@ func (f *ExecutionFrame) Pop() *ExecutionFrame {
 	f.functions = nil
 	f.ctx = nil
 	f.costTracker = nil
+	f.slots = nil
 	if f.vars != nil {
 		f.vars = nil
 		clear(f.lazyVars)

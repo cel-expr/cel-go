@@ -379,6 +379,25 @@ func TestAttributePattern_LocallyBound(t *testing.T) {
 	if _, isUnk := valY.(*types.Unknown); !isUnk {
 		t.Errorf("Resolve(y) got %v, wanted types.Unknown (since y is not locally bound)", valY)
 	}
+
+	// 3. Comprehension local slot "x" does not match UnknownAttributePattern("x"), whereas external "y" does.
+	disp := NewDispatcher()
+	addFunctionBindings(t, disp)
+	interp := NewInterpreter(disp, containers.DefaultContainer, reg, reg, fac)
+	prgLocal, err := interp.NewInterpretable(parseMutabilityExpr(t, `[1, 2].map(x, x + 1)`))
+	if err != nil {
+		t.Fatalf("NewInterpretable() failed: %v", err)
+	}
+	if got := prgLocal.Eval(partAct); got.Equal(reg.NativeToValue([]int64{2, 3})) != types.True {
+		t.Errorf("comprehension with local x got %v, wanted [2, 3]", got)
+	}
+	prgExt, err := interp.NewInterpretable(parseMutabilityExpr(t, `[1, 2].map(x, x + y)`))
+	if err != nil {
+		t.Fatalf("NewInterpretable() failed: %v", err)
+	}
+	if got := prgExt.Eval(partAct); !types.IsUnknown(got) {
+		t.Errorf("comprehension referencing unknown y got %v, wanted *types.Unknown", got)
+	}
 }
 
 func TestQualifierValueEquals(t *testing.T) {
