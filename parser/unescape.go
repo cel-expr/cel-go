@@ -99,12 +99,13 @@ func unescape(value string, isBytes bool) (string, error) {
 	return string(buf), nil
 }
 
-// unescapeChar takes a string input and returns the following info:
+// unescapeChar unescapes a backslash escape sequence at the start of s (which
+// must begin with '\\') and returns the following info:
 //
-//	value - the escaped unicode rune at the front of the string.
-//	encode - the value should be unicode-encoded
+//	value - the unescaped unicode rune (or byte value if isBytes is true).
+//	encode - the value should be unicode-encoded.
 //	tail - the remainder of the input string.
-//	err - error value, if the character could not be unescaped.
+//	err - error value, if the escape sequence could not be unescaped.
 //
 // When encode is true the return value may still fit within a single byte,
 // but unicode encoding is attempted which is more expensive than when the
@@ -113,13 +114,11 @@ func unescape(value string, isBytes bool) (string, error) {
 // If isBytes is set, unescape as a bytes literal so octal and hex escapes
 // represent byte values, not unicode code points.
 func unescapeChar(s string, isBytes bool) (value rune, encode bool, tail string, err error) {
-	// 1. Character is not an escape sequence.
-	switch c := s[0]; {
-	case c >= utf8.RuneSelf:
-		r, size := utf8.DecodeRuneInString(s[:min(len(s), utf8.UTFMax)])
-		return r, true, s[size:], nil
-	case c != '\\':
-		return rune(s[0]), false, s[1:], nil
+	// 1. Verify that s starts with a backslash. Non-backslash spans are
+	// consumed directly by the fast path in unescape via strings.IndexByte,
+	// so unescapeChar is never called unless s[0] == '\\'.
+	if len(s) == 0 || s[0] != '\\' {
+		panic("unescapeChar: expected '\\' at start of escape sequence")
 	}
 
 	// 2. Last character is the start of an escape sequence.
