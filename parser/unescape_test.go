@@ -86,6 +86,15 @@ func TestUnescape(t *testing.T) {
 	}
 }
 
+func TestUnescapeChar_InvalidLeadingChar(t *testing.T) {
+	for _, in := range []string{"", "a", "hello", "123"} {
+		_, _, _, err := unescapeChar(in, false)
+		if err == nil {
+			t.Errorf("unescapeChar(%q, false) expected error, got nil", in)
+		}
+	}
+}
+
 func BenchmarkUnescape(b *testing.B) {
 	noEscapes := `"` + strings.Repeat("abcdef01", 512) + `"`
 	crlfMultiline := "'''" + strings.Repeat("line\r\n", 1000) + "'''"

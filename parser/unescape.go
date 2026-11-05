@@ -116,9 +116,10 @@ func unescape(value string, isBytes bool) (string, error) {
 func unescapeChar(s string, isBytes bool) (value rune, encode bool, tail string, err error) {
 	// 1. Verify that s starts with a backslash. Non-backslash spans are
 	// consumed directly by the fast path in unescape via strings.IndexByte,
-	// so unescapeChar is never called unless s[0] == '\\'.
+	// so unescapeChar is only called when s[0] == '\\'.
 	if len(s) == 0 || s[0] != '\\' {
-		panic("unescapeChar: expected '\\' at start of escape sequence")
+		err = errors.New("unable to unescape string")
+		return
 	}
 
 	// 2. Last character is the start of an escape sequence.
