@@ -535,19 +535,26 @@ func (p *antlrVisitor) VisitIndex(ctx *gen.IndexContext) any {
 
 // Visit a parse tree produced by CELParser#CreateMessage.
 func (p *antlrVisitor) VisitCreateMessage(ctx *gen.CreateMessageContext) any {
-	messageName := ""
-	for _, id := range ctx.GetIds() {
-		if len(messageName) != 0 {
-			messageName += "."
-		}
-		messageName += id.GetText()
-	}
+	ids := ctx.GetIds()
+	var messageNameBuilder strings.Builder
+	messageNameBuilder.Grow(len(ids) * 2)
 	if ctx.GetLeadingDot() != nil {
-		messageName = "." + messageName
+		messageNameBuilder.WriteByte('.')
+	}
+	hasSegment := false
+	for _, id := range ids {
+		txt := id.GetText()
+		if hasSegment {
+			messageNameBuilder.WriteByte('.')
+		}
+		messageNameBuilder.WriteString(txt)
+		if len(txt) != 0 {
+			hasSegment = true
+		}
 	}
 	objID := p.helper.id(ctx.GetOp())
 	entries := p.VisitIFieldInitializerList(ctx.GetEntries()).([]ast.EntryExpr)
-	return p.helper.newObject(objID, messageName, entries...)
+	return p.helper.newObject(objID, messageNameBuilder.String(), entries...)
 }
 
 // Visit a parse tree of field initializers.
