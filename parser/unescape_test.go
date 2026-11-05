@@ -34,6 +34,10 @@ func TestUnescape(t *testing.T) {
 		{in: `"\\"`, out: `\`},
 		{in: `'''x''x'''`, out: `x''x`},
 		{in: `"""x""x"""`, out: `x""x`},
+		{in: "'''a\r\nb\rc\nd'''", out: "a\nb\nc\nd"},
+		{in: "r'''a\r\nb\rc'''", out: "a\nb\nc"},
+		{in: `"hello\nÿ☺"`, out: "hello\nÿ☺"},
+		{in: "\"\\n\xff\"", out: "\n\ufffd"},
 		{in: `"\303\277"`, out: `Ã¿`},
 		{in: `"\377"`, out: `ÿ`},
 		{in: `"\u263A\u263A"`, out: `☺☺`},
@@ -77,6 +81,41 @@ func TestUnescape(t *testing.T) {
 				}
 			} else if got != tc.out {
 				t.Errorf("unescape(%s, %v) got %v, wanted %v", tc.in, tc.isBytes, got, tc.out)
+			}
+		})
+	}
+}
+
+func TestUnescapeChar_InvalidLeadingChar(t *testing.T) {
+	for _, in := range []string{"", "a", "hello", "123"} {
+		_, _, _, err := unescapeChar(in, false)
+		if err == nil {
+			t.Errorf("unescapeChar(%q, false) expected error, got nil", in)
+		}
+	}
+}
+
+func BenchmarkUnescape(b *testing.B) {
+	noEscapes := `"` + strings.Repeat("abcdef01", 512) + `"`
+	crlfMultiline := "'''" + strings.Repeat("line\r\n", 1000) + "'''"
+	escapedASCII := `"\n` + strings.Repeat("a", 99995) + `"`
+	escapedUTF8 := `"\n` + strings.Repeat("\u00e9", 99995) + `"`
+
+	for _, tc := range []struct {
+		name string
+		in   string
+	}{
+		{name: "NoEscapes_4KB", in: noEscapes},
+		{name: "CRLF_Multiline_6KB", in: crlfMultiline},
+		{name: "EscapedASCII_100KB", in: escapedASCII},
+		{name: "EscapedUTF8_100KRunes", in: escapedUTF8},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				if _, err := unescape(tc.in, false); err != nil {
+					b.Fatal(err)
+				}
 			}
 		})
 	}

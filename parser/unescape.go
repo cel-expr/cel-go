@@ -25,7 +25,7 @@ import (
 // This function performs escaping compatible with GoogleSQL.
 func unescape(value string, isBytes bool) (string, error) {
 	// All strings normalize newlines to the \n representation.
-	value = newlineNormalizer.Replace(value)
+	value = normalizeNewlines(value)
 	n := len(value)
 
 	// Nothing to unescape / decode.
@@ -73,6 +73,17 @@ func unescape(value string, isBytes bool) (string, error) {
 	var runeTmp [utf8.UTFMax]byte
 	buf := make([]byte, 0, 3*n/2)
 	for len(value) > 0 {
+		if idx := strings.IndexByte(value, '\\'); idx != 0 {
+			span := value
+			if idx > 0 {
+				span = value[:idx]
+			}
+			for _, r := range span {
+				buf = utf8.AppendRune(buf, r)
+			}
+			value = value[len(span):]
+			continue
+		}
 		c, encode, rest, err := unescapeChar(value, isBytes)
 		if err != nil {
 			return "", err
@@ -88,12 +99,13 @@ func unescape(value string, isBytes bool) (string, error) {
 	return string(buf), nil
 }
 
-// unescapeChar takes a string input and returns the following info:
+// unescapeChar unescapes a backslash escape sequence at the start of s (which
+// must begin with '\\') and returns the following info:
 //
-//	value - the escaped unicode rune at the front of the string.
-//	encode - the value should be unicode-encoded
+//	value - the unescaped unicode rune (or byte value if isBytes is true).
+//	encode - the value should be unicode-encoded.
 //	tail - the remainder of the input string.
-//	err - error value, if the character could not be unescaped.
+//	err - error value, if the escape sequence could not be unescaped.
 //
 // When encode is true the return value may still fit within a single byte,
 // but unicode encoding is attempted which is more expensive than when the
@@ -102,13 +114,12 @@ func unescape(value string, isBytes bool) (string, error) {
 // If isBytes is set, unescape as a bytes literal so octal and hex escapes
 // represent byte values, not unicode code points.
 func unescapeChar(s string, isBytes bool) (value rune, encode bool, tail string, err error) {
-	// 1. Character is not an escape sequence.
-	switch c := s[0]; {
-	case c >= utf8.RuneSelf:
-		r, size := utf8.DecodeRuneInString(s)
-		return r, true, s[size:], nil
-	case c != '\\':
-		return rune(s[0]), false, s[1:], nil
+	// 1. Verify that s starts with a backslash. Non-backslash spans are
+	// consumed directly by the fast path in unescape via strings.IndexByte,
+	// so unescapeChar is only called when s[0] == '\\'.
+	if len(s) == 0 || s[0] != '\\' {
+		err = errors.New("unable to unescape string")
+		return
 	}
 
 	// 2. Last character is the start of an escape sequence.
@@ -232,6 +243,23 @@ func unhex(b byte) (rune, bool) {
 	return 0, false
 }
 
-var (
-	newlineNormalizer = strings.NewReplacer("\r\n", "\n", "\r", "\n")
-)
+func normalizeNewlines(value string) string {
+	idx := strings.IndexByte(value, '\r')
+	if idx < 0 {
+		return value
+	}
+	var b strings.Builder
+	b.Grow(len(value))
+	b.WriteString(value[:idx])
+	for i := idx; i < len(value); i++ {
+		if value[i] == '\r' {
+			if i+1 < len(value) && value[i+1] == '\n' {
+				i++
+			}
+			b.WriteByte('\n')
+		} else {
+			b.WriteByte(value[i])
+		}
+	}
+	return b.String()
+}
