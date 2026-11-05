@@ -1348,6 +1348,9 @@ type evalFold struct {
 	result    InterpretableV2
 	adapter   types.Adapter
 
+	// depth is the 1-based scope nesting depth of the comprehension loop.
+	depth int
+
 	// mutableAccu indicates that static analysis of the comprehension has determined that the
 	// accumulator is only ever observed by in-place accumulation steps and the final result, and
 	// may therefore be backed by a mutable list or map without the mutation being observable.

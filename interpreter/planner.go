@@ -71,6 +71,10 @@ type planBuilder struct {
 	*planner
 
 	localVars map[string]int
+
+	// scopeDepth tracks the number of comprehension loops which enclose the
+	// expression currently being planned.
+	scopeDepth int
 }
 
 // Plan implements the interpretablePlanner interface. This implementation of the Plan method also
@@ -79,13 +83,30 @@ type planBuilder struct {
 // such as state-tracking, expression re-write, and possibly efficient thread-safe memoization of
 // repeated expressions.
 func (p *planner) Plan(expr ast.Expr) (InterpretableV2, error) {
+	pb := &planBuilder{planner: p, localVars: make(map[string]int)}
 	if len(p.observers) != 0 {
 		// A single decorator reports to every observer. One decorator per observer would not
 		// work, since the second decorator would find the node already wrapped by the first and
 		// leave it alone, silently dropping the second observer's observations.
-		p.decorators = append(p.decorators, decObserveEval(observeAll(p.observers)))
+		//
+		// Nodes planned within a comprehension loop report scoped observations with their
+		// 1-based scope nesting depth to observers which distinguish them, see scopedObserver.
+		var decorators []InterpretableDecoratorV2
+		getDecorator := func(depth int) InterpretableDecoratorV2 {
+			for len(decorators) <= depth {
+				decorators = append(decorators, nil)
+			}
+			dec := decorators[depth]
+			if dec == nil {
+				dec = decObserveEval(observeAll(p.observers, depth))
+				decorators[depth] = dec
+			}
+			return dec
+		}
+		p.decorators = append(p.decorators, func(i InterpretableV2) (InterpretableV2, error) {
+			return getDecorator(pb.scopeDepth)(i)
+		})
 	}
-	pb := &planBuilder{planner: p, localVars: make(map[string]int)}
 	i, err := pb.plan(expr)
 	if err != nil {
 		return nil, err
@@ -99,14 +120,38 @@ func (p *planner) Plan(expr ast.Expr) (InterpretableV2, error) {
 	return &ObservableInterpretable{InterpretableV2: i, observers: p.observers}, nil
 }
 
+// scopedObserver is implemented by observers which distinguish observations of expressions
+// within a comprehension loop from all other observations.
+//
+// Scoped expressions may be evaluated many times within a single evaluation, and so observers
+// may choose to handle them differently, e.g. by sampling rather than recording every value.
+// Whether an expression is scoped, and its nesting depth, is determined when the program is planned.
+type scopedObserver interface {
+	// ObserveScoped is called in place of Observe for expressions within a scope, passing the
+	// 1-based scope nesting depth.
+	ObserveScoped(Activation, int64, any, ref.Val, int)
+}
+
 // observeAll returns an EvalObserver which reports each observation to all of the observers.
-func observeAll(observers []StatefulObserver) EvalObserver {
-	if len(observers) == 1 {
-		return observers[0].Observe
+//
+// When depth > 0, observers which implement scopedObserver receive the observation via
+// ObserveScoped rather than Observe, passing the scope depth.
+func observeAll(observers []StatefulObserver, depth int) EvalObserver {
+	fns := make([]EvalObserver, len(observers))
+	for i, o := range observers {
+		fns[i] = o.Observe
+		if so, ok := o.(scopedObserver); ok && depth > 0 {
+			fns[i] = func(vars Activation, id int64, programStep any, value ref.Val) {
+				so.ObserveScoped(vars, id, programStep, value, depth)
+			}
+		}
+	}
+	if len(fns) == 1 {
+		return fns[0]
 	}
 	return func(vars Activation, id int64, programStep any, value ref.Val) {
-		for _, o := range observers {
-			o.Observe(vars, id, programStep, value)
+		for _, fn := range fns {
+			fn(vars, id, programStep, value)
 		}
 	}
 }
@@ -700,6 +745,10 @@ func (p *planBuilder) planComprehension(expr ast.Expr) (InterpretableV2, error) 
 		}
 	}
 	p.pushLocalVars(fold.AccuVar(), fold.IterVar(), fold.IterVar2())
+	// The loop condition, loop step, and result are evaluated within the comprehension scope,
+	// whereas the accumulator initializer and iteration range are not.
+	p.scopeDepth++
+	defer func() { p.scopeDepth-- }()
 	cond, err := p.plan(fold.LoopCondition())
 	if err != nil {
 		return nil, err
@@ -726,6 +775,7 @@ func (p *planBuilder) planComprehension(expr ast.Expr) (InterpretableV2, error) 
 		result:      result,
 		adapter:     p.adapter,
 		mutableAccu: isMutableAccuSafe(fold),
+		depth:       p.scopeDepth,
 	}, nil
 }
 
