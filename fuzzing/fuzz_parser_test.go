@@ -15,18 +15,33 @@
 package fuzzing
 
 import (
+	"strings"
 	"testing"
 )
 
 func FuzzParser(f *testing.F) {
 	f.Add([]byte("1 + 2"))
 	f.Add([]byte("a.b.c == 'test'"))
+	f.Add([]byte(strings.Repeat("\n", 1000) + "[0.exists_one(x, 1)]"))
+	f.Add([]byte("a" + strings.Repeat(".a", 1000) + "{}"))
+	f.Add([]byte(`"\n` + strings.Repeat("\u00e9", 1000) + `"`))
+	env, err := getCELFuzzEnv()
+	if err != nil {
+		f.Fatal(err)
+	}
 	f.Fuzz(func(t *testing.T, in []byte) {
-		env, err := getCELFuzzEnv()
-		if err != nil {
-			panic(err)
-		}
 		_, _ = env.Parse(string(in))
 	})
 }
 
+func BenchmarkFuzzParserIter(b *testing.B) {
+	in := []byte("a.b.c == 'test'")
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		env, err := getCELFuzzEnv()
+		if err != nil {
+			b.Fatal(err)
+		}
+		_, _ = env.Parse(string(in))
+	}
+}

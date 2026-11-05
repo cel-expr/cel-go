@@ -16,13 +16,14 @@
 package fuzzing
 
 import (
+	"sync"
+
 	"cel.dev/cel-go/cel"
 )
 
-// getCELFuzzEnv creates an environment for running under AddressSanitizer without timing out.
-func getCELFuzzEnv() (*cel.Env, error) {
+// getCELFuzzEnv returns a shared environment configured for running under AddressSanitizer without timing out.
+var getCELFuzzEnv = sync.OnceValues(func() (*cel.Env, error) {
 	// Very dense expressions (balanced trees) can cause AddressSanitizer to
 	// time out even though they typically fail in under a second uninstrumented.
 	return cel.NewEnv(cel.ParserRecursionLimit(60))
-}
-
+})
