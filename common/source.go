@@ -182,15 +182,18 @@ func (s *sourceImpl) findLineOffset(line int) (int32, bool) {
 // Note that the last line is treated as if it contains all offsets
 // beyond the end of the actual source.
 func (s *sourceImpl) findLine(characterOffset int32) (int32, int32) {
-	var line int32 = 1
-	for _, lineOffset := range s.lineOffsets {
-		if lineOffset > characterOffset {
-			break
+	lo, hi := 0, len(s.lineOffsets)
+	for lo < hi {
+		mid := int(uint(lo+hi) >> 1)
+		if s.lineOffsets[mid] > characterOffset {
+			hi = mid
+		} else {
+			lo = mid + 1
 		}
-		line++
 	}
-	if line == 1 {
+	line := int32(lo) + 1
+	if lo == 0 {
 		return line, 0
 	}
-	return line, s.lineOffsets[line-2]
+	return line, s.lineOffsets[lo-1]
 }

@@ -398,16 +398,20 @@ func (s *SourceInfo) GetStopLocation(id int64) common.Location {
 
 // GetLocationByOffset returns the line and column information for a given character offset.
 func (s *SourceInfo) GetLocationByOffset(offset int32) common.Location {
-	line := 1
-	col := int(offset)
-	for _, lineOffset := range s.LineOffsets() {
-		if lineOffset > offset {
-			break
+	lineOffsets := s.LineOffsets()
+	lo, hi := 0, len(lineOffsets)
+	for lo < hi {
+		mid := int(uint(lo+hi) >> 1)
+		if lineOffsets[mid] > offset {
+			hi = mid
+		} else {
+			lo = mid + 1
 		}
-		line++
-		col = int(offset - lineOffset)
 	}
-	return common.NewLocation(line, col)
+	if lo == 0 {
+		return common.NewLocation(1, int(offset))
+	}
+	return common.NewLocation(lo+1, int(offset-lineOffsets[lo-1]))
 }
 
 // ComputeOffset calculates the 0-based character offset from a 1-based line and 0-based column.
