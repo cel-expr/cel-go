@@ -533,6 +533,80 @@ func TestEnumTypeDefConstructionAndLookup(t *testing.T) {
 	}
 }
 
+func TestStructTypeDefPreservesInsertionOrder(t *testing.T) {
+	def, err := typedef.NewStruct("com.example.TestStruct")
+	if err != nil {
+		t.Fatalf("NewStruct() unexpected error: %v", err)
+	}
+
+	inputFields := []*typedef.Field{
+		mustField(t, "zeta", types.IntType),
+		mustField(t, "alpha", types.StringType),
+		mustField(t, "mu", types.BoolType),
+		mustField(t, "beta", types.DoubleType),
+		mustField(t, "omega", types.BytesType),
+	}
+	for _, f := range inputFields {
+		if err := def.AddField(f); err != nil {
+			t.Fatalf("def.AddField(%q) unexpected error: %v", f.Name(), err)
+		}
+	}
+
+	fields := def.Fields()
+	if len(fields) != len(inputFields) {
+		t.Fatalf("len(def.Fields()) = %d, want %d", len(fields), len(inputFields))
+	}
+	for i, want := range inputFields {
+		if fields[i] != want {
+			t.Errorf("def.Fields()[%d] = %v, want %v", i, fields[i], want)
+		}
+		got, ok := def.FindField(want.Name())
+		if !ok || got != want {
+			t.Errorf("def.FindField(%q) = (%v, %v), want (%v, true)", want.Name(), got, ok, want)
+		}
+	}
+	if got, ok := def.FindField("missing"); ok || got != nil {
+		t.Errorf("def.FindField(\"missing\") = (%v, %v), want (nil, false)", got, ok)
+	}
+}
+
+func TestEnumTypeDefPreservesInsertionOrder(t *testing.T) {
+	def, err := typedef.NewEnum("com.example.TestEnum")
+	if err != nil {
+		t.Fatalf("NewEnum() unexpected error: %v", err)
+	}
+
+	inputConstants := []*typedef.EnumConstant{
+		mustEnumConstant(t, "ZETA", 10),
+		mustEnumConstant(t, "ALPHA", 0),
+		mustEnumConstant(t, "MU", 5),
+		mustEnumConstant(t, "BETA", 5),
+		mustEnumConstant(t, "OMEGA", -1),
+	}
+	for _, c := range inputConstants {
+		if err := def.AddConstant(c); err != nil {
+			t.Fatalf("def.AddConstant(%q) unexpected error: %v", c.Name(), err)
+		}
+	}
+
+	constants := def.Constants()
+	if len(constants) != len(inputConstants) {
+		t.Fatalf("len(def.Constants()) = %d, want %d", len(constants), len(inputConstants))
+	}
+	for i, want := range inputConstants {
+		if constants[i] != want {
+			t.Errorf("def.Constants()[%d] = %v, want %v", i, constants[i], want)
+		}
+		got, ok := def.FindConstant(want.Name())
+		if !ok || got != want {
+			t.Errorf("def.FindConstant(%q) = (%v, %v), want (%v, true)", want.Name(), got, ok, want)
+		}
+	}
+	if got, ok := def.FindConstant("MISSING"); ok || got != nil {
+		t.Errorf("def.FindConstant(\"MISSING\") = (%v, %v), want (nil, false)", got, ok)
+	}
+}
+
 func TestTypeDefSetConstructionLookupAndErrors(t *testing.T) {
 	var zeroSet typedef.TypeDefSet
 	if got := zeroSet.Types(); got != nil {

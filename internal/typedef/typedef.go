@@ -246,7 +246,7 @@ func (t *TypeDef) EnumType() *EnumTypeDef {
 // indexed by their fully-qualified CEL type name.
 type TypeDefSet struct {
 	types       []*TypeDef
-	indexByName map[string]int
+	typesByName map[string]*TypeDef
 }
 
 // NewTypeDefSet creates a new TypeDefSet containing typeDefs in the given
@@ -277,13 +277,13 @@ func (s *TypeDefSet) AddTypeDef(typeDef *TypeDef) error {
 	if typeName == "" {
 		return fmt.Errorf("%w: type name cannot be empty", ErrBadTypeDef)
 	}
-	if s.indexByName == nil {
-		s.indexByName = make(map[string]int)
+	if s.typesByName == nil {
+		s.typesByName = make(map[string]*TypeDef)
 	}
-	if _, exists := s.indexByName[typeName]; exists {
+	if _, exists := s.typesByName[typeName]; exists {
 		return fmt.Errorf("%w: type %q", ErrAlreadyExists, typeName)
 	}
-	s.indexByName[typeName] = len(s.types)
+	s.typesByName[typeName] = typeDef
 	s.types = append(s.types, typeDef)
 	return nil
 }
@@ -291,14 +291,11 @@ func (s *TypeDefSet) AddTypeDef(typeDef *TypeDef) error {
 // FindTypeDef looks up a TypeDef by its fully-qualified name, returning the
 // TypeDef and true if found, or (nil, false) otherwise.
 func (s *TypeDefSet) FindTypeDef(typeName string) (*TypeDef, bool) {
-	if s == nil || len(s.indexByName) == 0 {
+	if s == nil || len(s.typesByName) == 0 {
 		return nil, false
 	}
-	idx, ok := s.indexByName[typeName]
-	if !ok {
-		return nil, false
-	}
-	return s.types[idx], true
+	td, ok := s.typesByName[typeName]
+	return td, ok
 }
 
 // Types returns the TypeDefs in the order they were added, or nil if s is nil
@@ -313,10 +310,11 @@ func (s *TypeDefSet) Types() []*TypeDef {
 // StructTypeDef represents a declarative struct type with typed fields and
 // optional aspects.
 type StructTypeDef struct {
-	name    string
-	doc     string
-	fields  []*Field
-	aspects map[string]*Aspect
+	name         string
+	doc          string
+	fields       []*Field
+	fieldsByName map[string]*Field
+	aspects      map[string]*Aspect
 }
 
 // NewStruct creates a new StructTypeDef with the given name and options.
@@ -351,7 +349,8 @@ func (s *StructTypeDef) Doc() string {
 	return s.doc
 }
 
-// Fields returns the struct's fields in declaration order.
+// Fields returns the fields in the order they were added, or nil if s is nil
+// or empty.
 func (s *StructTypeDef) Fields() []*Field {
 	if s == nil || len(s.fields) == 0 {
 		return nil
@@ -385,12 +384,17 @@ func (s *StructTypeDef) AddField(field *Field) error {
 	if s == nil {
 		return fmt.Errorf("%w: cannot add field to nil StructTypeDef", ErrBadTypeDef)
 	}
-	if field == nil || field.Name() == "" {
+	fieldName := field.Name()
+	if fieldName == "" {
 		return fmt.Errorf("%w: field name cannot be empty", ErrBadTypeDef)
 	}
-	if _, found := s.FindField(field.Name()); found {
-		return fmt.Errorf("%w: field %q", ErrAlreadyExists, field.Name())
+	if s.fieldsByName == nil {
+		s.fieldsByName = make(map[string]*Field)
 	}
+	if _, exists := s.fieldsByName[fieldName]; exists {
+		return fmt.Errorf("%w: field %q", ErrAlreadyExists, fieldName)
+	}
+	s.fieldsByName[fieldName] = field
 	s.fields = append(s.fields, field)
 	return nil
 }
@@ -398,15 +402,11 @@ func (s *StructTypeDef) AddField(field *Field) error {
 // FindField looks up a field by name, returning the Field and true if found,
 // or (nil, false) otherwise.
 func (s *StructTypeDef) FindField(fieldName string) (*Field, bool) {
-	if s == nil {
+	if s == nil || len(s.fieldsByName) == 0 {
 		return nil, false
 	}
-	for _, f := range s.fields {
-		if f.Name() == fieldName {
-			return f, true
-		}
-	}
-	return nil, false
+	f, ok := s.fieldsByName[fieldName]
+	return f, ok
 }
 
 // AsTypeDef wraps the StructTypeDef in a TypeDef, or returns nil if s is nil.
@@ -599,10 +599,11 @@ func FieldAspect(name string, aspect *Aspect) FieldOpt {
 // EnumTypeDef represents a named enumeration type with named and numbered
 // constants and optional aspects.
 type EnumTypeDef struct {
-	name      string
-	doc       string
-	constants []*EnumConstant
-	aspects   map[string]*Aspect
+	name            string
+	doc             string
+	constants       []*EnumConstant
+	constantsByName map[string]*EnumConstant
+	aspects         map[string]*Aspect
 }
 
 // NewEnum creates a new EnumTypeDef with the given name and options.
@@ -637,7 +638,8 @@ func (e *EnumTypeDef) Doc() string {
 	return e.doc
 }
 
-// Constants returns the enum's constants in declaration order.
+// Constants returns the constants in the order they were added, or nil if e is
+// nil or empty.
 func (e *EnumTypeDef) Constants() []*EnumConstant {
 	if e == nil || len(e.constants) == 0 {
 		return nil
@@ -671,12 +673,17 @@ func (e *EnumTypeDef) AddConstant(constant *EnumConstant) error {
 	if e == nil {
 		return fmt.Errorf("%w: cannot add constant to nil EnumTypeDef", ErrBadTypeDef)
 	}
-	if constant == nil || constant.Name() == "" {
+	constantName := constant.Name()
+	if constantName == "" {
 		return fmt.Errorf("%w: enum constant name cannot be empty", ErrBadTypeDef)
 	}
-	if _, found := e.FindConstant(constant.Name()); found {
-		return fmt.Errorf("%w: enum constant %q", ErrAlreadyExists, constant.Name())
+	if e.constantsByName == nil {
+		e.constantsByName = make(map[string]*EnumConstant)
 	}
+	if _, exists := e.constantsByName[constantName]; exists {
+		return fmt.Errorf("%w: enum constant %q", ErrAlreadyExists, constantName)
+	}
+	e.constantsByName[constantName] = constant
 	e.constants = append(e.constants, constant)
 	return nil
 }
@@ -684,15 +691,11 @@ func (e *EnumTypeDef) AddConstant(constant *EnumConstant) error {
 // FindConstant looks up an enum constant by name, returning the EnumConstant
 // and true if found, or (nil, false) otherwise.
 func (e *EnumTypeDef) FindConstant(constantName string) (*EnumConstant, bool) {
-	if e == nil {
+	if e == nil || len(e.constantsByName) == 0 {
 		return nil, false
 	}
-	for _, c := range e.constants {
-		if c.Name() == constantName {
-			return c, true
-		}
-	}
-	return nil, false
+	c, ok := e.constantsByName[constantName]
+	return c, ok
 }
 
 // AsTypeDef wraps the EnumTypeDef in a TypeDef, or returns nil if e is nil.
