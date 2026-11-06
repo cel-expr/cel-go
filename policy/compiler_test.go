@@ -207,16 +207,16 @@ func TestWhitespaceHandlingErrorPresentation(t *testing.T) {
 	}
 
 	wantErrors := []string{
-		`ERROR: testdata/yaml_parsing_cel_error/policy.yaml:11:16: found no matching overload for '_+_' applied to '(string, int)'
+		`ERROR: testdata/yaml_parsing_cel_error/policy.yaml:11:16: found no matching overload for '+' applied to '(string, int)'
  |         ("bar" + 1)
  | ...............^`,
-		`ERROR: testdata/yaml_parsing_cel_error/policy.yaml:15:18: found no matching overload for '_+_' applied to '(string, int)'
+		`ERROR: testdata/yaml_parsing_cel_error/policy.yaml:15:18: found no matching overload for '+' applied to '(string, int)'
  |           ("bar" + 1)
  | .................^`,
-		`ERROR: testdata/yaml_parsing_cel_error/policy.yaml:19:16: found no matching overload for '_+_' applied to '(string, int)'
+		`ERROR: testdata/yaml_parsing_cel_error/policy.yaml:19:16: found no matching overload for '+' applied to '(string, int)'
  |         ("bar" + 1)
  | ...............^`,
-		`ERROR: testdata/yaml_parsing_cel_error/policy.yaml:23:18: found no matching overload for '_+_' applied to '(string, int)'
+		`ERROR: testdata/yaml_parsing_cel_error/policy.yaml:23:18: found no matching overload for '+' applied to '(string, int)'
  |           ("bar" + 1)
  | .................^`,
 	}
