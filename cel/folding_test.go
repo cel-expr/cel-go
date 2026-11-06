@@ -1029,6 +1029,7 @@ func TestConstantFoldingOptimizer(t *testing.T) {
 			if iss.Err() != nil {
 				t.Fatalf("Optimize() generated an invalid AST: %v", iss.Err())
 			}
+			assertNormalizedIDs(t, optimized)
 			folded, err := AstToString(optimized)
 			if err != nil {
 				t.Fatalf("AstToString() failed: %v", err)
@@ -1137,6 +1138,7 @@ func TestConstantFoldingInMapIdent(t *testing.T) {
 			if iss.Err() != nil {
 				t.Fatalf("Optimize() generated an invalid AST: %v", iss.Err())
 			}
+			assertNormalizedIDs(t, optimized)
 			folded, err := AstToString(optimized)
 			if err != nil {
 				t.Fatalf("AstToString() failed: %v", err)
@@ -1250,6 +1252,7 @@ func TestConstantFoldingInListIdent(t *testing.T) {
 			if iss.Err() != nil {
 				t.Fatalf("Optimize() generated an invalid AST: %v", iss.Err())
 			}
+			assertNormalizedIDs(t, optimized)
 			folded, err := AstToString(optimized)
 			if err != nil {
 				t.Fatalf("AstToString() failed: %v", err)
@@ -1351,6 +1354,7 @@ func TestConstantFoldingCallsWithSideEffects(t *testing.T) {
 			if iss.Err() != nil {
 				t.Fatalf("Optimize() generated an invalid AST: %v", iss.Err())
 			}
+			assertNormalizedIDs(t, optimized)
 			folded, err := AstToString(optimized)
 			if err != nil {
 				t.Fatalf("AstToString() failed: %v", err)
@@ -1430,6 +1434,7 @@ func TestConstantFoldingOptimizerMacroElimination(t *testing.T) {
 			if iss.Err() != nil {
 				t.Fatalf("Optimize() generated an invalid AST: %v", iss.Err())
 			}
+			assertNormalizedIDs(t, optimized)
 			folded, err := AstToString(optimized)
 			if err != nil {
 				t.Fatalf("AstToString() failed: %v", err)
@@ -1495,6 +1500,7 @@ func TestConstantFoldingOptimizerWithLimit(t *testing.T) {
 			if iss.Err() != nil {
 				t.Fatalf("Optimize() generated an invalid AST: %v", iss.Err())
 			}
+			assertNormalizedIDs(t, optimized)
 			folded, err := AstToString(optimized)
 			if err != nil {
 				t.Fatalf("AstToString() failed: %v", err)
@@ -1783,6 +1789,97 @@ func TestConstantFoldingNormalizeIDs(t *testing.T) {
 	}
 }
 
+// TestConstantFoldingPrunedEntryRenumbering ensures that when branch pruning replaces an
+// expression with a map or struct literal sourced from a NavigableExpr, the key and value
+// expressions within the entries are renumbered alongside the rest of the AST.
+func TestConstantFoldingPrunedEntryRenumbering(t *testing.T) {
+	tests := []struct {
+		expr   string
+		folded string
+	}{
+		{
+			expr:   `true ? {'a': x, 'b': [x, x + 1]} : {}`,
+			folded: `{"a": x, "b": [x, x + 1]}`,
+		},
+		{
+			expr:   `false ? {} : {'a': x, 'b': x + 1}`,
+			folded: `{"a": x, "b": x + 1}`,
+		},
+		{
+			expr:   `[true ? {x: x} : {}, [x, x, x, x, x, x, x, x, x]]`,
+			folded: `[{x: x}, [x, x, x, x, x, x, x, x, x]]`,
+		},
+		{
+			expr:   `{x: (true ? {x: x} : {})}.size() + [x, x, x, x, x, x, x, x, x].size()`,
+			folded: `{x: {x: x}}.size() + [x, x, x, x, x, x, x, x, x].size()`,
+		},
+		{
+			expr:   `[true ? google.expr.proto3.test.TestAllTypes{single_int64: x} : google.expr.proto3.test.TestAllTypes{}, [x, x, x, x, x, x, x, x, x]]`,
+			folded: `[google.expr.proto3.test.TestAllTypes{single_int64: x}, [x, x, x, x, x, x, x, x, x]]`,
+		},
+		{
+			expr:   `(true ? google.expr.proto3.test.TestAllTypes{single_int64: x, single_string: 'a'} : google.expr.proto3.test.TestAllTypes{}).single_int64 + [x, x, x, x, x, x, x, x, x].size()`,
+			folded: `google.expr.proto3.test.TestAllTypes{single_int64: x, single_string: "a"}.single_int64 + [x, x, x, x, x, x, x, x, x].size()`,
+		},
+	}
+	e, err := NewEnv(
+		Types(&proto3pb.TestAllTypes{}),
+		Variable("x", IntType))
+	if err != nil {
+		t.Fatalf("NewEnv() failed: %v", err)
+	}
+	for _, tst := range tests {
+		tc := tst
+		t.Run(tc.expr, func(t *testing.T) {
+			checked, iss := e.Compile(tc.expr)
+			if iss.Err() != nil {
+				t.Fatalf("Compile() failed: %v", iss.Err())
+			}
+			folder, err := NewConstantFoldingOptimizer()
+			if err != nil {
+				t.Fatalf("NewConstantFoldingOptimizer() failed: %v", err)
+			}
+			opt, err := NewStaticOptimizer(folder)
+			if err != nil {
+				t.Fatalf("NewStaticOptimizer() failed: %v", err)
+			}
+			optimized, iss := opt.Optimize(e, checked)
+			if iss.Err() != nil {
+				t.Fatalf("Optimize() generated an invalid AST: %v", iss.Err())
+			}
+			assertNormalizedIDs(t, optimized)
+			folded, err := AstToString(optimized)
+			if err != nil {
+				t.Fatalf("AstToString() failed: %v", err)
+			}
+			if folded != tc.folded {
+				t.Errorf("got %q, wanted %q", folded, tc.folded)
+			}
+			// The optimized program must evaluate identically to the original.
+			vars := map[string]any{"x": 7}
+			prg, err := e.Program(checked)
+			if err != nil {
+				t.Fatalf("Program(checked) failed: %v", err)
+			}
+			fprg, err := e.Program(optimized)
+			if err != nil {
+				t.Fatalf("Program(optimized) failed: %v", err)
+			}
+			want, _, err := prg.Eval(vars)
+			if err != nil {
+				t.Fatalf("prg.Eval() failed: %v", err)
+			}
+			got, _, err := fprg.Eval(vars)
+			if err != nil {
+				t.Fatalf("fprg.Eval() failed: %v", err)
+			}
+			if got.Equal(want) != types.True {
+				t.Errorf("fprg.Eval() got %v, wanted %v", got, want)
+			}
+		})
+	}
+}
+
 func newIDCollector() *idCollector {
 	return &idCollector{
 		ids: int64Slice{},
@@ -1917,6 +2014,7 @@ func TestConstantFoldingOptimizer_EvaluateExpr(t *testing.T) {
 			if iss.Err() != nil {
 				t.Fatalf("Optimize() failed: %v", iss.Err())
 			}
+			assertNormalizedIDs(t, optimized)
 			folded, err := AstToString(optimized)
 			if err != nil {
 				t.Fatalf("AstToString() failed: %v", err)
@@ -1956,6 +2054,7 @@ func TestConstantFoldingOptimizer_VariadicShortcircuitLogic(t *testing.T) {
 	if iss.Err() != nil {
 		t.Fatalf("Optimize() failed: %v", iss.Err())
 	}
+	assertNormalizedIDs(t, optimized)
 	folded, err := AstToString(optimized)
 	if err != nil {
 		t.Fatalf("AstToString() failed: %v", err)

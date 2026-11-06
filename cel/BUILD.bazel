@@ -79,6 +79,7 @@ go_test(
         "io_test.go",
         "memory_test.go",
         "optimizer_macro_test.go",
+        "optimizer_ids_test.go",
         "optimizer_test.go",
         "program_async_test.go",
         "prompt_test.go",

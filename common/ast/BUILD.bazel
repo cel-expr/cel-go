@@ -33,6 +33,7 @@ go_test(
         "ast_test.go",
         "conversion_test.go",
         "equiv_test.go",
+        "expr_internal_test.go",
         "expr_test.go",
         "navigable_test.go",
     ],

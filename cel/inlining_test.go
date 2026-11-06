@@ -102,6 +102,7 @@ func TestInliningOptimizerNoopShadow(t *testing.T) {
 			if iss.Err() != nil {
 				t.Fatalf("Optimize() generated an invalid AST: %v", iss.Err())
 			}
+			cel.AssertNormalizedIDs(t, optimized)
 			inlined, err := cel.AstToString(optimized)
 			if err != nil {
 				t.Fatalf("cel.AstToString() failed: %v", err)
@@ -304,6 +305,7 @@ func TestInliningOptimizerPresenceTests(t *testing.T) {
 			if iss.Err() != nil {
 				t.Fatalf("Optimize() generated an invalid AST: %v", iss.Err())
 			}
+			cel.AssertNormalizedIDs(t, optimized)
 			inlined, err := cel.AstToString(optimized)
 			if err != nil {
 				t.Fatalf("cel.AstToString() failed: %v", err)
@@ -521,6 +523,7 @@ func TestInliningOptimizer(t *testing.T) {
 			if iss.Err() != nil {
 				t.Fatalf("Optimize() generated an invalid AST: %v", iss.Err())
 			}
+			cel.AssertNormalizedIDs(t, optimized)
 			inlined, err := cel.AstToString(optimized)
 			if err != nil {
 				t.Fatalf("cel.AstToString() failed: %v", err)
@@ -540,6 +543,7 @@ func TestInliningOptimizer(t *testing.T) {
 			if iss.Err() != nil {
 				t.Fatalf("Optimize() generated an invalid AST: %v", iss.Err())
 			}
+			cel.AssertNormalizedIDs(t, optimized)
 			folded, err := cel.AstToString(optimized)
 			if err != nil {
 				t.Fatalf("cel.AstToString() failed: %v", err)
@@ -1034,6 +1038,7 @@ func TestInliningOptimizerMultiStage(t *testing.T) {
 			if iss.Err() != nil {
 				t.Fatalf("Optimize() generated an invalid AST: %v", iss.Err())
 			}
+			cel.AssertNormalizedIDs(t, optimized)
 			inlined, err := cel.AstToString(optimized)
 			if err != nil {
 				t.Fatalf("cel.AstToString() failed: %v", err)
@@ -1053,6 +1058,7 @@ func TestInliningOptimizerMultiStage(t *testing.T) {
 			if iss.Err() != nil {
 				t.Fatalf("Optimize() generated an invalid AST: %v", iss.Err())
 			}
+			cel.AssertNormalizedIDs(t, optimized)
 			folded, err := cel.AstToString(optimized)
 			if err != nil {
 				t.Fatalf("cel.AstToString() failed: %v", err)
