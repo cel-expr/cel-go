@@ -1385,6 +1385,23 @@ func TestConstantFoldingOptimizerMacroElimination(t *testing.T) {
 			folded:     `has(x.b)`,
 			macroCount: 1,
 		},
+		{
+			expr:   `[[x].exists(y, y == 1)].all(z, z) || true`,
+			folded: `true`,
+		},
+		{
+			expr:   `true || [x].map(y, [y].exists(z, z == 1)).size() > 0`,
+			folded: `true`,
+		},
+		{
+			expr:   `false && has(x.y) && [x].exists(y, has(y.z))`,
+			folded: `false`,
+		},
+		{
+			expr:       `has(x.b) || ([[x].exists(y, y == 1)].all(z, z) && false)`,
+			folded:     `has(x.b)`,
+			macroCount: 1,
+		},
 	}
 	e, err := NewEnv(
 		OptionalTypes(),

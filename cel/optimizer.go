@@ -176,32 +176,49 @@ func normalizeIDs(idGen ast.IDGenerator, optimized ast.Expr, info *ast.SourceInf
 	}
 }
 
+// cleanupMacroRefs removes macro call metadata which is no longer reachable from the
+// optimized expression.
+//
+// A macro call is considered reachable when its id is referenced within the expression
+// graph or within the call signature of another reachable macro. References from macro
+// calls which are themselves unreachable do not keep nested macros alive, which ensures
+// that macros orphaned by an optimization (e.g. nested macros folded away together) are
+// fully removed from the source info.
 func cleanupMacroRefs(expr ast.Expr, info *ast.SourceInfo) {
-	if len(info.MacroCalls()) == 0 {
+	macroCalls := info.MacroCalls()
+	if len(macroCalls) == 0 {
 		return
 	}
 
 	// Sanitize the macro call references once the optimized expression has been computed
 	// and the ids normalized between the expression and the macros.
-	exprRefMap := make(map[int64]struct{})
-	ast.PostOrderVisit(expr, ast.NewExprVisitor(func(e ast.Expr) {
-		if e.ID() == 0 {
+	reachable := make(map[int64]struct{})
+	var pending []int64
+	collectRefs := ast.NewExprVisitor(func(e ast.Expr) {
+		id := e.ID()
+		if id == 0 {
 			return
 		}
-		exprRefMap[e.ID()] = struct{}{}
-	}))
-	// Update the macro call id references to ensure that macro pointers are
-	// updated consistently across macros.
-	for _, call := range info.MacroCalls() {
-		ast.PostOrderVisit(call, ast.NewExprVisitor(func(e ast.Expr) {
-			if e.ID() == 0 {
-				return
-			}
-			exprRefMap[e.ID()] = struct{}{}
-		}))
+		if _, seen := reachable[id]; seen {
+			return
+		}
+		reachable[id] = struct{}{}
+		if _, isMacro := macroCalls[id]; isMacro {
+			pending = append(pending, id)
+		}
+	})
+	ast.PostOrderVisit(expr, collectRefs)
+
+	// Transitively visit the call signatures of reachable macros to pick up references
+	// to other macros which are only present within macro call metadata.
+	for len(pending) > 0 {
+		id := pending[len(pending)-1]
+		pending = pending[:len(pending)-1]
+		ast.PostOrderVisit(macroCalls[id], collectRefs)
 	}
-	for id := range info.MacroCalls() {
-		if _, found := exprRefMap[id]; !found {
+
+	for id := range macroCalls {
+		if _, found := reachable[id]; !found {
 			info.ClearMacroCall(id)
 		}
 	}
