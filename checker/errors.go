@@ -21,6 +21,7 @@ import (
 	"cel.dev/cel-go/common"
 	"cel.dev/cel-go/common/ast"
 	"cel.dev/cel-go/common/env"
+	"cel.dev/cel-go/common/operators"
 	"cel.dev/cel-go/common/types"
 )
 
@@ -49,6 +50,9 @@ func (e *typeErrors) incompatibleType(id int64, l common.Location, ex ast.Expr, 
 
 func (e *typeErrors) noMatchingOverload(id int64, l common.Location, name string, args []*types.Type, isInstance bool) {
 	signature := formatFunctionDeclType(nil, args, isInstance)
+	if displayName, found := operators.FindReverse(name); found && displayName != "" {
+		name = displayName
+	}
 	e.errs.ReportErrorAtID(id, l, "found no matching overload for '%s' applied to '%s'", name, signature)
 }
 

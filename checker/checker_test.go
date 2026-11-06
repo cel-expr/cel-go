@@ -479,7 +479,7 @@ _!=_(_-_(_+_(1~double, _*_(2~double, 3~double)~double^multiply_double)
 				},
 			},
 			err: `
-ERROR: <input>:1:3: found no matching overload for '_+_' applied to '(list(google.expr.proto3.test.TestAllTypes), list(int))'
+ERROR: <input>:1:3: found no matching overload for '+' applied to '(list(google.expr.proto3.test.TestAllTypes), list(int))'
   | x + y
   | ..^
 		`,
@@ -748,7 +748,7 @@ ERROR: <input>:1:39: undefined field 'undefined'
 				},
 			},
 			err: `
-ERROR: <input>:1:16: found no matching overload for '_!=_' applied to '(int, null)'
+ERROR: <input>:1:16: found no matching overload for '!=' applied to '(int, null)'
  | x.single_int64 != null
  | ...............^
 		`,
@@ -1368,7 +1368,7 @@ _&&_(_==_(list~type(list(dyn))^list,
 		{
 			in: `[].map(x, [].map(y, x in y && y in x))`,
 			err: `
-		ERROR: <input>:1:33: found no matching overload for '@in' applied to '(list(dyn), dyn)'
+		ERROR: <input>:1:33: found no matching overload for 'in' applied to '(list(dyn), dyn)'
 		| [].map(x, [].map(y, x in y && y in x))
 		| ................................^`,
 		},
