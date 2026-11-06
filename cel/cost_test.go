@@ -876,3 +876,101 @@ func (l sinceVersionLib) CompileOptions() []EnvOption {
 func (l sinceVersionLib) ProgramOptions() []ProgramOption {
 	return nil
 }
+
+func TestCostModelSharedOnExtend(t *testing.T) {
+	parentEnv := testEnv(t,
+		Variable("str", StringType),
+		CostModel(
+			cost.MemberOverload(overloads.StartsWithString,
+				cost.EvalCost(cost.Const(50)),
+			),
+		),
+		CostSizingStrategy(cost.DefaultSizingStrategy()),
+		CostModelVersion(1),
+	)
+
+	// Extending without any cost EnvOption (or with unchanged CostModelVersion / CostSizingStrategy)
+	// preserves e.costConfig and e.costModel.
+	for _, opts := range [][]EnvOption{
+		{Variable("other", IntType)},
+		{Variable("other", IntType), CostModel(), CostModelVersion(1), CostSizingStrategy(cost.DefaultSizingStrategy())},
+	} {
+		childShared, err := parentEnv.Extend(opts...)
+		if err != nil {
+			t.Fatalf("parentEnv.Extend() failed: %v", err)
+		}
+		if !childShared.costShared {
+			t.Error("childShared.costShared = false, want true")
+		}
+		if childShared.costConfig != parentEnv.costConfig {
+			t.Error("childShared.costConfig != parentEnv.costConfig, want shared pointer")
+		}
+		if len(childShared.costModel.estimate) == 0 || &childShared.costModel.estimate[0] != &parentEnv.costModel.estimate[0] {
+			t.Error("childShared.costModel.estimate does not share backing array with parentEnv")
+		}
+		if len(childShared.costModel.tracker) == 0 || &childShared.costModel.tracker[0] != &parentEnv.costModel.tracker[0] {
+			t.Error("childShared.costModel.tracker does not share backing array with parentEnv")
+		}
+	}
+
+	// Extending with a cost EnvOption copies costConfig on write and rebuilds costModel without
+	// mutating the parent or previously extended sibling.
+	for _, tc := range []struct {
+		name string
+		opt  EnvOption
+	}{
+		{
+			name: "CostModel",
+			opt: CostModel(cost.MemberOverload(overloads.EndsWithString,
+				cost.EvalCost(cost.Const(25)),
+			)),
+		},
+		{
+			name: "CostSizingStrategy",
+			opt:  CostSizingStrategy(cost.AggregateSizingStrategy()),
+		},
+		{
+			name: "CostModelVersion",
+			opt:  CostModelVersion(0),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			childMut, err := parentEnv.Extend(tc.opt)
+			if err != nil {
+				t.Fatalf("parentEnv.Extend(%s) failed: %v", tc.name, err)
+			}
+			if childMut.costShared {
+				t.Errorf("childMut.costShared = true after %s, want false", tc.name)
+			}
+			if childMut.costConfig == parentEnv.costConfig {
+				t.Errorf("childMut.costConfig == parentEnv.costConfig after %s, want copy", tc.name)
+			}
+			if &childMut.costModel.estimate[0] == &parentEnv.costModel.estimate[0] {
+				t.Errorf("childMut.costModel.estimate shares backing array with parentEnv after %s", tc.name)
+			}
+		})
+	}
+
+	// Extending with non-comparable SizingStrategy implementations must not panic.
+	ncEnv1 := testEnv(t, CostSizingStrategy(nonComparableCelSizingStrategy{sizes: map[string]uint64{"a": 1}}))
+	ncEnv2, err := ncEnv1.Extend(CostSizingStrategy(nonComparableCelSizingStrategy{sizes: map[string]uint64{"a": 2}}))
+	if err != nil {
+		t.Fatalf("ncEnv1.Extend(nonComparableCelSizingStrategy) failed: %v", err)
+	}
+	if ncEnv2.costShared {
+		t.Error("ncEnv2.costShared = true for non-comparable SizingStrategy, want false")
+	}
+}
+
+type nonComparableCelSizingStrategy struct {
+	sizes map[string]uint64
+}
+
+func (nonComparableCelSizingStrategy) EstimateSize(cost.EstimateContext, cost.AstNode) (cost.SizeEstimate, bool) {
+	return cost.FixedSizeEstimate(1), true
+}
+
+func (nonComparableCelSizingStrategy) TrackSize(cost.TrackContext, ref.Val) (uint64, bool) {
+	return 1, true
+}
+

@@ -1293,8 +1293,20 @@ func (m OverloadModel) buildTracker(strategy SizingStrategy, version uint32) Fun
 		if floor {
 			costVal = max(costVal, minCallCost)
 		}
-		return &costVal
+		return trackedCostPtr(costVal)
 	}
+}
+
+var smallTrackedCosts = [...]uint64{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}
+
+// trackedCostPtr returns a pointer to v without a heap allocation when v falls within
+// smallTrackedCosts, allocating on the heap only for larger costs.
+func trackedCostPtr(v uint64) *uint64 {
+	if v < uint64(len(smallTrackedCosts)) {
+		return &smallTrackedCosts[v]
+	}
+	cost := v
+	return &cost
 }
 
 // versionOf reports the cost model version of an EstimateContext.
