@@ -791,6 +791,18 @@ const (
 	// OptTrackMemory enables the runtime peak memory tracking and returns the peak watermark within
 	// evalDetails via func PeakMemory()
 	OptTrackMemory EvalOption = 1 << iota
+
+	// OptTraceIterations tracks state and additionally records, in evaluation order, the start of
+	// each comprehension iteration with its list index or map key, and each observed value with the
+	// iteration in which it was observed.
+	//
+	// The records of the EvalState returned from EvalDetails.State() are available from
+	// interpreter.TraceRecords. Combine with OptExhaustiveEval to observe every iteration rather
+	// than only the iterations evaluated before the result was determined.
+	//
+	// Tracing is intended for diagnosing an evaluation result, e.g. re-evaluating an input which
+	// failed a policy, and adds overhead proportional to the number of observed values.
+	OptTraceIterations EvalOption = 1<<iota | OptTrackState
 )
 
 // EvalOptions sets one or more evaluation options which may affect the evaluation or Result.

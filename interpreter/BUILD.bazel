@@ -23,6 +23,7 @@ go_library(
         "prune.go",
         "runtimecost.go",
         "runtimememory.go",
+        "tracing.go",
     ],
     importpath = "cel.dev/cel-go/interpreter",
     deps = [
@@ -59,6 +60,7 @@ go_test(
         "prune_test.go",
         "runtimecost_test.go",
         "runtimememory_test.go",
+        "tracing_test.go",
     ],
     embed = [
         ":go_default_library",
