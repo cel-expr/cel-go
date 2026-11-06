@@ -460,7 +460,7 @@ func (e *expr) SetKindCase(other Expr) {
 		e.exprKindCase = &baseLiteral{Val: other.AsLiteral()}
 	case MapKind:
 		e.exprKindCase = &baseMapExpr{
-			entries: other.AsMap().Entries(),
+			entries: rebuildEntries(other.AsMap().Entries()),
 		}
 	case SelectKind:
 		s := other.AsSelect()
@@ -473,11 +473,48 @@ func (e *expr) SetKindCase(other Expr) {
 		s := other.AsStruct()
 		e.exprKindCase = &baseStructExpr{
 			typeName: s.TypeName(),
-			fields:   s.Fields(),
+			fields:   rebuildEntries(s.Fields()),
 		}
 	case UnspecifiedExprKind:
 		e.exprKindCase = nil
 	}
+}
+
+// rebuildEntries returns a new slice of entries whose kind cases are guaranteed to be
+// baseMapEntry or baseStructField values, ensuring that alternative EntryExpr implementations
+// (such as those produced by a NavigableExpr) do not leak into the base expression graph.
+//
+// Note, the key and value expressions are shared rather than deep-copied, consistent with the
+// treatment of other child expressions within SetKindCase.
+func rebuildEntries(entries []EntryExpr) []EntryExpr {
+	rebuilt := make([]EntryExpr, len(entries))
+	for i, entry := range entries {
+		switch entry.Kind() {
+		case MapEntryKind:
+			me := entry.AsMapEntry()
+			rebuilt[i] = &entryExpr{
+				id: entry.ID(),
+				entryExprKindCase: &baseMapEntry{
+					key:        me.Key(),
+					value:      me.Value(),
+					isOptional: me.IsOptional(),
+				},
+			}
+		case StructFieldKind:
+			sf := entry.AsStructField()
+			rebuilt[i] = &entryExpr{
+				id: entry.ID(),
+				entryExprKindCase: &baseStructField{
+					field:      sf.Name(),
+					value:      sf.Value(),
+					isOptional: sf.IsOptional(),
+				},
+			}
+		default:
+			rebuilt[i] = entry
+		}
+	}
+	return rebuilt
 }
 
 func (e *expr) RenumberIDs(idGen IDGenerator) {

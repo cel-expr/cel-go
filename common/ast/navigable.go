@@ -518,7 +518,10 @@ func (e navigableEntryImpl) IsOptional() bool {
 	return e.isOpt
 }
 
-func (e navigableEntryImpl) renumberIDs(IDGenerator) {}
+func (e navigableEntryImpl) renumberIDs(idGen IDGenerator) {
+	e.key.RenumberIDs(idGen)
+	e.val.RenumberIDs(idGen)
+}
 
 func (e navigableEntryImpl) isEntryExpr() {}
 
@@ -585,7 +588,9 @@ func (f navigableFieldImpl) IsOptional() bool {
 	return f.isOpt
 }
 
-func (f navigableFieldImpl) renumberIDs(IDGenerator) {}
+func (f navigableFieldImpl) renumberIDs(idGen IDGenerator) {
+	f.val.RenumberIDs(idGen)
+}
 
 func (f navigableFieldImpl) isEntryExpr() {}
 
