@@ -28,12 +28,15 @@ var StandardOverloadModels = []OverloadModel{
 		ResultSize(ArgElem(0)),
 	),
 
-	// O(n) prefix/suffix functions
+	// O(min(m, n)) prefix/suffix functions. From version 2 the traversal is bounded by the
+	// shorter of the receiver and the argument; earlier versions scale the argument alone.
 	MemberOverload(overloads.StartsWithString,
-		EvalCost(Scale(Arg(0), StringTraversalCostFactor)),
+		EvalCost(Scale(Min(Target(), Arg(0)), StringTraversalCostFactor)),
+		BeforeVersion(2, EvalCost(Scale(Arg(0), StringTraversalCostFactor))),
 	),
 	MemberOverload(overloads.EndsWithString,
-		EvalCost(Scale(Arg(0), StringTraversalCostFactor)),
+		EvalCost(Scale(Min(Target(), Arg(0)), StringTraversalCostFactor)),
+		BeforeVersion(2, EvalCost(Scale(Arg(0), StringTraversalCostFactor))),
 	),
 
 	// O(n) conversion & format functions

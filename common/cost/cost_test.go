@@ -806,6 +806,8 @@ func TestCostEstimateAndTracking(t *testing.T) {
 		expectExceedsLimit bool
 		wantEst            *cost.CostEstimate
 		wantEstV0          *cost.CostEstimate
+		wantEstV1          *cost.CostEstimate
+		wantEstV2          *cost.CostEstimate
 		wantTrack          *uint64
 	}{
 		{
@@ -1220,7 +1222,8 @@ func TestCostEstimateAndTracking(t *testing.T) {
 			in:        map[string]any{"input": "idc", "arg1": string(randSeq(500))},
 			wantEst:   new(cost.CostEstimate{Min: 3, Max: 52}),
 			wantEstV0: new(cost.CostEstimate{Min: 2, Max: 52}),
-			wantTrack: trackPtr(52),
+			wantEstV1: new(cost.CostEstimate{Min: 3, Max: 52}),
+			wantTrack: trackPtr(3),
 		},
 		{
 			name: "endsWith",
@@ -1233,7 +1236,32 @@ func TestCostEstimateAndTracking(t *testing.T) {
 			in:        map[string]any{"input": "idc", "arg1": string(randSeq(500))},
 			wantEst:   new(cost.CostEstimate{Min: 3, Max: 52}),
 			wantEstV0: new(cost.CostEstimate{Min: 2, Max: 52}),
-			wantTrack: trackPtr(52),
+			wantEstV1: new(cost.CostEstimate{Min: 3, Max: 52}),
+			wantTrack: trackPtr(3),
+		},
+		{
+			name: "startsWith bounded by receiver size",
+			expr: `input.startsWith(arg1)`,
+			vars: []*decls.VariableDecl{
+				decls.NewVariable("input", types.StringType),
+				decls.NewVariable("arg1", types.StringType),
+			},
+			hints:     map[string]uint64{"input": 10, "arg1": 1_000_000},
+			wantEst:   new(cost.CostEstimate{Min: 3, Max: 3}),
+			wantEstV0: new(cost.CostEstimate{Min: 2, Max: 100002}),
+			wantEstV1: new(cost.CostEstimate{Min: 3, Max: 100002}),
+		},
+		{
+			name: "endsWith bounded by receiver size",
+			expr: `input.endsWith(arg1)`,
+			vars: []*decls.VariableDecl{
+				decls.NewVariable("input", types.StringType),
+				decls.NewVariable("arg1", types.StringType),
+			},
+			hints:     map[string]uint64{"input": 10, "arg1": 1_000_000},
+			wantEst:   new(cost.CostEstimate{Min: 3, Max: 3}),
+			wantEstV0: new(cost.CostEstimate{Min: 2, Max: 100002}),
+			wantEstV1: new(cost.CostEstimate{Min: 3, Max: 100002}),
 		},
 		{
 			name: "size receiver",
@@ -1440,7 +1468,9 @@ func TestCostEstimateAndTracking(t *testing.T) {
 				decls.NewVariable("str1", types.StringType),
 				decls.NewVariable("str2", types.StringType),
 			},
-			wantEst: new(cost.CostEstimate{Min: 9, Max: 9}),
+			wantEst:   new(cost.CostEstimate{Min: 5, Max: 9}),
+			wantEstV0: new(cost.CostEstimate{Min: 9, Max: 9}),
+			wantEstV1: new(cost.CostEstimate{Min: 9, Max: 9}),
 		},
 		{
 			name:    "nested subexpression operators",
@@ -2153,17 +2183,26 @@ func TestCostEstimateAndTracking(t *testing.T) {
 				if est.Min != tc.wantEst.Min || est.Max != tc.wantEst.Max {
 					t.Errorf("estimated cost got [%d, %d], wanted [%d, %d]", est.Min, est.Max, tc.wantEst.Min, tc.wantEst.Max)
 				}
-				wantLegacy := *tc.wantEst
-				if tc.wantEstV0 != nil {
-					wantLegacy = *tc.wantEstV0
-				}
-				legacyOpts := append(slices.Clone(costOpts), cost.ModelVersion(0))
-				legacyEst, err := cost.Cost(checked.NativeRep(), testCostEstimator{hints: tc.hints}, legacyOpts...)
-				if err != nil {
-					t.Fatalf("Cost(version 0) failed: %v", err)
-				}
-				if legacyEst.Min != wantLegacy.Min || legacyEst.Max != wantLegacy.Max {
-					t.Errorf("version 0 estimated cost got [%d, %d], wanted [%d, %d]", legacyEst.Min, legacyEst.Max, wantLegacy.Min, wantLegacy.Max)
+				for _, pin := range []struct {
+					version uint32
+					want    *cost.CostEstimate
+				}{
+					{version: 0, want: tc.wantEstV0},
+					{version: 1, want: tc.wantEstV1},
+					{version: 2, want: tc.wantEstV2},
+				} {
+					want := tc.wantEst
+					if pin.want != nil {
+						want = pin.want
+					}
+					pinnedOpts := append(slices.Clone(costOpts), cost.ModelVersion(pin.version))
+					pinnedEst, err := cost.Cost(checked.NativeRep(), testCostEstimator{hints: tc.hints}, pinnedOpts...)
+					if err != nil {
+						t.Fatalf("Cost(version %d) failed: %v", pin.version, err)
+					}
+					if pinnedEst.Min != want.Min || pinnedEst.Max != want.Max {
+						t.Errorf("version %d estimated cost got [%d, %d], wanted [%d, %d]", pin.version, pinnedEst.Min, pinnedEst.Max, want.Min, want.Max)
+					}
 				}
 			}
 
@@ -2440,6 +2479,75 @@ func TestAbsentOptionalQualifierModelVersion0(t *testing.T) {
 			}
 			if detV0.ActualCost() == nil || *detV0.ActualCost() != tc.wantV0 {
 				t.Errorf("ActualCost(ModelVersion(0)) = %v, want %d", detV0.ActualCost(), tc.wantV0)
+			}
+		})
+	}
+}
+
+// TestPrefixSuffixTrackedCostModelVersions checks that tracking honors the revision: the latest
+// revision charges the shorter of the receiver and the argument, while versions before 2 charge
+// the argument alone.
+func TestPrefixSuffixTrackedCostModelVersions(t *testing.T) {
+	env, err := testCelEnv.Extend(cel.VariableDecls(
+		decls.NewVariable("input", types.StringType),
+		decls.NewVariable("arg1", types.StringType),
+	))
+	if err != nil {
+		t.Fatalf("env.Extend() failed: %v", err)
+	}
+	tests := []struct {
+		name   string
+		expr   string
+		in     map[string]any
+		wantV2 uint64
+		wantV1 uint64
+		wantV0 uint64
+	}{
+		{
+			name:   "startsWith",
+			expr:   `input.startsWith(arg1)`,
+			in:     map[string]any{"input": "idc", "arg1": string(randSeq(500))},
+			wantV2: 3,
+			wantV1: 52,
+			wantV0: 52,
+		},
+		{
+			name:   "endsWith",
+			expr:   `input.endsWith(arg1)`,
+			in:     map[string]any{"input": "idc", "arg1": string(randSeq(500))},
+			wantV2: 3,
+			wantV1: 52,
+			wantV0: 52,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			checked, iss := env.Compile(tc.expr)
+			if iss.Err() != nil {
+				t.Fatalf("env.Compile(%q) failed: %v", tc.expr, iss.Err())
+			}
+			ctx := constructActivation(t, tc.in)
+			for _, pin := range []struct {
+				version uint32
+				want    uint64
+			}{
+				{math.MaxUint32, tc.wantV2},
+				{1, tc.wantV1},
+				{0, tc.wantV0},
+			} {
+				prg, err := env.Program(checked,
+					cel.CostTracking(nil),
+					cel.CostTrackerOptions(cost.ModelVersion(pin.version)))
+				if err != nil {
+					t.Fatalf("env.Program(version %d) failed: %v", pin.version, err)
+				}
+				_, det, err := prg.Eval(ctx)
+				if err != nil {
+					t.Fatalf("Eval(version %d) failed: %v", pin.version, err)
+				}
+				if det.ActualCost() == nil || *det.ActualCost() != pin.want {
+					t.Errorf("ActualCost(ModelVersion(%d)) = %v, want %d", pin.version, det.ActualCost(), pin.want)
+				}
 			}
 		})
 	}
