@@ -55,6 +55,15 @@ func EquivIgnoreIdentifiers(enabled ...bool) EquivOption {
 	}
 }
 
+// IsEquivIgnoreIdentifiers determines whether identifier names should be ignored based on the given EquivOptions.
+func IsEquivIgnoreIdentifiers(opts ...EquivOption) bool {
+	optState := &equivOptions{}
+	for _, opt := range opts {
+		opt(optState)
+	}
+	return optState.ignoreIdentifiers
+}
+
 // EquivMacroCalls configures whether to compare expressions by their macro call metadata
 // if present, rather than their expanded AST representation.
 func EquivMacroCalls(enabled ...bool) EquivOption {

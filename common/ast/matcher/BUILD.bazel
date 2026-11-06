@@ -1,0 +1,36 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+package(
+    default_visibility = ["//visibility:public"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+go_library(
+    name = "go_default_library",
+    srcs = [
+        "matcher.go",
+    ],
+    importpath = "cel.dev/cel-go/common/ast/matcher",
+    deps = [
+        "//common:go_default_library",
+        "//common/ast:go_default_library",
+        "//common/types:go_default_library",
+        "//parser:go_default_library",
+    ],
+)
+
+go_test(
+    name = "go_default_test",
+    srcs = [
+        "matcher_test.go",
+    ],
+    deps = [
+        ":go_default_library",
+        "//cel:go_default_library",
+        "//common:go_default_library",
+        "//common/ast:go_default_library",
+        "//common/types:go_default_library",
+        "//ext:go_default_library",
+        "//parser:go_default_library",
+    ],
+)
