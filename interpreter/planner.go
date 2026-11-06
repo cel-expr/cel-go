@@ -16,6 +16,7 @@ package interpreter
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"cel.dev/cel-go/common/ast"
@@ -67,10 +68,18 @@ type planner struct {
 	costTrackerFactory func() (*CostTracker, error)
 }
 
+type localVar struct {
+	name string
+	slot int
+}
+
 type planBuilder struct {
 	*planner
 
-	localVars map[string]int
+	nextSlot    int
+	maxSlots    int
+	retainSlots int
+	localVars   []localVar
 
 	// scopeDepth tracks the number of comprehension loops which enclose the
 	// expression currently being planned.
@@ -83,7 +92,7 @@ type planBuilder struct {
 // such as state-tracking, expression re-write, and possibly efficient thread-safe memoization of
 // repeated expressions.
 func (p *planner) Plan(expr ast.Expr) (InterpretableV2, error) {
-	pb := &planBuilder{planner: p, localVars: make(map[string]int)}
+	pb := &planBuilder{planner: p}
 	if len(p.observers) != 0 {
 		// A single decorator reports to every observer. One decorator per observer would not
 		// work, since the second decorator would find the node already wrapped by the first and
@@ -194,20 +203,17 @@ func (p *planBuilder) decorate(i InterpretableV2, err error) (InterpretableV2, e
 	return i, nil
 }
 
-// planIdent creates an Interpretable that resolves an identifier from an Activation.
+// planIdent creates an Interpretable that resolves an identifier from an Activation or local slot.
 func (p *planBuilder) planIdent(expr ast.Expr) (InterpretableV2, error) {
 	// Establish whether the identifier is in the reference map.
 	if identRef, found := p.refMap[expr.ID()]; found {
 		return p.planCheckedIdent(expr.ID(), identRef)
 	}
-	// Create the possible attribute list for the unresolved reference.
 	ident := expr.AsIdent()
-	if p.isLocalVar(ident) {
-		return &evalAttr{
-			adapter: p.adapter,
-			attr:    p.attrFactory.AbsoluteAttribute(expr.ID(), ident),
-		}, nil
+	if localEval, ok := p.planLocalVar(expr.ID(), ident); ok {
+		return localEval, nil
 	}
+	// Create the possible attribute list for the unresolved reference.
 	return &evalAttr{
 		adapter: p.adapter,
 		attr:    p.attrFactory.MaybeAttribute(expr.ID(), ident),
@@ -231,11 +237,30 @@ func (p *planBuilder) planCheckedIdent(id int64, identRef *ast.ReferenceInfo) (I
 		return NewConstValue(id, cVal), nil
 	}
 
+	if localEval, ok := p.planLocalVar(id, identRef.Name); ok {
+		return localEval, nil
+	}
+
 	// Otherwise, return the attribute for the resolved identifier name.
 	return &evalAttr{
 		adapter: p.adapter,
 		attr:    p.attrFactory.AbsoluteAttribute(id, identRef.Name),
 	}, nil
+}
+
+func (p *planBuilder) planLocalVar(id int64, name string) (InterpretableV2, bool) {
+	for i := len(p.localVars) - 1; i >= 0; i-- {
+		lv := p.localVars[i]
+		if lv.name == name {
+			return &evalSlot{
+				id:      id,
+				slot:    lv.slot,
+				adapter: p.adapter,
+				fac:     p.attrFactory,
+			}, true
+		}
+	}
+	return nil, false
 }
 
 // planSelect creates an Interpretable with either:
@@ -733,7 +758,10 @@ func (p *planBuilder) planCreateStruct(expr ast.Expr) (InterpretableV2, error) {
 // planComprehension generates an Interpretable fold operation.
 func (p *planBuilder) planComprehension(expr ast.Expr) (InterpretableV2, error) {
 	fold := expr.AsComprehension()
+	savedNextSlot := p.nextSlot
+	p.retainSlots++
 	accu, err := p.plan(fold.AccuInit())
+	p.retainSlots--
 	if err != nil {
 		return nil, err
 	}
@@ -744,7 +772,18 @@ func (p *planBuilder) planComprehension(expr ast.Expr) (InterpretableV2, error) 
 			return nil, err
 		}
 	}
-	p.pushLocalVars(fold.AccuVar(), fold.IterVar(), fold.IterVar2())
+	evalF := &evalFold{
+		id:          expr.ID(),
+		iterRange:   iterRange,
+		accu:        accu,
+		adapter:     p.adapter,
+		mutableAccu: isMutableAccuSafe(fold),
+		depth:       p.scopeDepth,
+	}
+	accuSlot := p.pushLocalVar(fold.AccuVar())
+	iterSlot := p.pushLocalVar(fold.IterVar())
+	iter2Slot := p.pushLocalVar(fold.IterVar2())
+
 	// The loop condition, loop step, and result are evaluated within the comprehension scope,
 	// whereas the accumulator initializer and iteration range are not.
 	p.scopeDepth++
@@ -757,26 +796,26 @@ func (p *planBuilder) planComprehension(expr ast.Expr) (InterpretableV2, error) 
 	if err != nil {
 		return nil, err
 	}
-	p.popLocalVars(fold.IterVar(), fold.IterVar2())
+	p.popLocalVar(iter2Slot)
+	p.popLocalVar(iterSlot)
+
 	result, err := p.plan(fold.Result())
 	if err != nil {
 		return nil, err
 	}
-	p.popLocalVars(fold.AccuVar())
-	return &evalFold{
-		id:          expr.ID(),
-		accuVar:     fold.AccuVar(),
-		accu:        accu,
-		iterVar:     fold.IterVar(),
-		iterVar2:    fold.IterVar2(),
-		iterRange:   iterRange,
-		cond:        cond,
-		step:        step,
-		result:      result,
-		adapter:     p.adapter,
-		mutableAccu: isMutableAccuSafe(fold),
-		depth:       p.scopeDepth,
-	}, nil
+	p.popLocalVar(accuSlot)
+	if p.retainSlots == 0 {
+		p.nextSlot = savedNextSlot
+	}
+
+	evalF.cond = cond
+	evalF.step = step
+	evalF.result = result
+	evalF.accuSlot = accuSlot
+	evalF.iterSlot = iterSlot
+	evalF.iter2Slot = iter2Slot
+	evalF.slotCount = p.maxSlots
+	return evalF, nil
 }
 
 // isMutableAccuSafe reports whether the comprehension accumulator may be backed by a mutable
@@ -1017,35 +1056,36 @@ func (p *planBuilder) toQualifiedName(operand ast.Expr) (string, bool) {
 	return "", false
 }
 
-func (p *planBuilder) pushLocalVars(names ...string) {
-	for _, name := range names {
-		if name == "" {
-			continue
-		}
-		if cnt, found := p.localVars[name]; found {
-			p.localVars[name] = cnt + 1
-		} else {
-			p.localVars[name] = 1
-		}
+func (p *planBuilder) pushLocalVar(name string) int {
+	if name == "" {
+		return -1
 	}
+	slot := p.nextSlot
+	p.nextSlot++
+	if p.nextSlot > p.maxSlots {
+		p.maxSlots = p.nextSlot
+	}
+	p.localVars = append(p.localVars, localVar{name: name, slot: slot})
+	return slot
 }
 
-func (p *planBuilder) popLocalVars(names ...string) {
-	for _, name := range names {
-		if name == "" {
-			continue
-		}
-		if cnt, found := p.localVars[name]; found {
-			if cnt == 1 {
-				delete(p.localVars, name)
-			} else {
-				p.localVars[name] = cnt - 1
-			}
+// popLocalVar removes the local variable declared in the slot returned by pushLocalVar, and frees
+// the slot when it is the most recently allocated one and no enclosing initializer retains it.
+//
+// The variable is identified by slot rather than by name, since a comprehension may declare more than
+// one variable with the same name, and an enclosing scope may declare a variable which it shadows.
+// Local variables are pushed and popped in nested order, so the variable is always the last one.
+func (p *planBuilder) popLocalVar(slot int) {
+	if slot < 0 {
+		return
+	}
+	for i, v := range slices.Backward(p.localVars) {
+		if v.slot == slot {
+			p.localVars = append(p.localVars[:i], p.localVars[i+1:]...)
+			break
 		}
 	}
-}
-
-func (p *planBuilder) isLocalVar(name string) bool {
-	_, found := p.localVars[name]
-	return found
+	if p.retainSlots == 0 && slot == p.nextSlot-1 {
+		p.nextSlot--
+	}
 }

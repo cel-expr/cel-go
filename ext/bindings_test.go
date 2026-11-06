@@ -15,6 +15,7 @@
 package ext
 
 import (
+	"context"
 	"fmt"
 	"runtime"
 	"strings"
@@ -259,6 +260,48 @@ func TestBindingsImmutability(t *testing.T) {
 					if out != types.True {
 						t.Errorf("prg.Eval(%q) got %v, wanted true", expr, out)
 					}
+				}
+			})
+		}
+	}
+}
+
+func TestNestedComprehensionInitializers(t *testing.T) {
+	// The comprehension initializer for xs is evaluated before the loop, but it is itself a
+	// loop of another comprehension, so the variables of each comprehension must occupy distinct
+	// slots or evaluating the initializer would clobber the variables of the enclosing loop.
+	tests := []string{
+		`cel.bind(xs, [1, 2, 3].map(i, i * 2), xs.filter(j, j < xs.size())) == [2]`,
+		`cel.bind(a, [10, 20].map(z, z + 1), [1, 2, 3].filter(y, y == 1 || (y == 2 && a[0] > 0))) == [1, 2]`,
+	}
+	env, err := cel.NewEnv(Bindings())
+	if err != nil {
+		t.Fatalf("cel.NewEnv() failed: %v", err)
+	}
+	progOpts := map[string][]cel.ProgramOption{
+		"default":    {},
+		"exhaustive": {cel.EvalOptions(cel.OptExhaustiveEval)},
+		"optimized":  {cel.EvalOptions(cel.OptOptimize)},
+		"tracked":    {cel.EvalOptions(cel.OptTrackState)},
+	}
+	for _, tst := range tests {
+		expr := tst
+		for name, opts := range progOpts {
+			t.Run(name+"/"+expr, func(t *testing.T) {
+				checkedAST, iss := env.Compile(expr)
+				if iss.Err() != nil {
+					t.Fatalf("env.Compile(%q) failed: %v", expr, iss.Err())
+				}
+				prg, err := env.Program(checkedAST, opts...)
+				if err != nil {
+					t.Fatalf("env.Program() failed: %v", err)
+				}
+				out, _, err := prg.Eval(cel.NoVars())
+				if err != nil {
+					t.Fatalf("prg.Eval() failed: %v", err)
+				}
+				if out != types.True {
+					t.Errorf("prg.Eval(%q) got %v, wanted true", expr, out)
 				}
 			})
 		}
@@ -1146,5 +1189,67 @@ func TestBindingsLateBoundFunctions(t *testing.T) {
 				t.Errorf("Eval() got %v, wanted %v", out, tc.want)
 			}
 		})
+	}
+}
+
+func TestBindingsMemoryTrackingAcrossPasses(t *testing.T) {
+	// The cel.bind() initializer is evaluated once per comprehension, outside of the scope of the
+	// bind, even when the bound variable is first referenced from within a nested loop. The
+	// initializer is therefore tracked on every pass of a ConcurrentEval, regardless of the memory
+	// sampling interval.
+	env := asyncListEnv(t)
+	checked, iss := env.Compile(`cel.bind(z, async_list(5), [1].map(i, z.size() + i)) == [6]`)
+	if iss.Err() != nil {
+		t.Fatalf("env.Compile() failed: %v", iss.Err())
+	}
+	prg, err := env.Program(checked, cel.MemoryTracking(types.MemoryTrackerSampleInterval(10)))
+	if err != nil {
+		t.Fatalf("env.Program() failed: %v", err)
+	}
+	checkConcurrentEvalPeak(t, prg, 6)
+}
+
+// asyncListEnv returns an environment with cel.bind() and cel.@block() support, as well as an
+// async_list(n) function which asynchronously produces a list of n zeros.
+func asyncListEnv(t *testing.T) *cel.Env {
+	t.Helper()
+	env, err := cel.NewEnv(
+		Bindings(),
+		cel.Function("async_list",
+			cel.Overload("async_list_int", []*cel.Type{cel.IntType}, cel.ListType(cel.IntType),
+				cel.AsyncBinding(func(ctx context.Context, args ...ref.Val) ref.Val {
+					return types.DefaultTypeAdapter.NativeToValue(make([]int64, int(args[0].(types.Int))))
+				}),
+			),
+		),
+	)
+	if err != nil {
+		t.Fatalf("cel.NewEnv() failed: %v", err)
+	}
+	return env
+}
+
+// checkConcurrentEvalPeak evaluates the program, which must produce true, and checks its peak
+// tracked memory.
+func checkConcurrentEvalPeak(t *testing.T, prg cel.Program, wantPeak uint32) {
+	t.Helper()
+	var res cel.EvalResult
+	select {
+	case res = <-prg.ConcurrentEval(context.Background(), cel.NoVars()):
+	case <-time.After(5 * time.Second):
+		t.Fatal("ConcurrentEval() timed out")
+	}
+	if res.Err != nil {
+		t.Fatalf("ConcurrentEval() failed: %v", res.Err)
+	}
+	if res.Val != types.True {
+		t.Fatalf("ConcurrentEval() got %v, wanted true", res.Val)
+	}
+	peak := res.EvalDetails.PeakMemory()
+	if peak == nil {
+		t.Fatal("EvalDetails.PeakMemory() got nil, wanted non-nil peak")
+	}
+	if *peak != wantPeak {
+		t.Errorf("EvalDetails.PeakMemory() got %d, wanted %d", *peak, wantPeak)
 	}
 }
