@@ -17,10 +17,12 @@ package cel
 import (
 	"context"
 	"errors"
+	"fmt"
 	"maps"
 	"math"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 
 	"google.golang.org/protobuf/encoding/prototext"
@@ -2124,5 +2126,1030 @@ func TestUpdateMetadata(t *testing.T) {
 	updateMetadata(checked, 1, 3)
 	if _, found := checked.ReferenceMap()[1]; found {
 		t.Errorf("expected target ID 1 to be removed from ReferenceMap")
+	}
+}
+
+func TestConstantFolding_ComprehensionUnroll(t *testing.T) {
+	hugeBlob := strings.Repeat("x", 1024)
+	attestations := []map[string]any{
+		{
+			"name":      "frontend",
+			"huge_blob": hugeBlob,
+			"predicate": map[string]any{
+				"builder": map[string]any{
+					"id": "builder-1",
+				},
+			},
+		},
+		{
+			"name":      "backend",
+			"huge_blob": hugeBlob,
+			"predicate": map[string]any{
+				"builder": map[string]any{
+					"id": "builder-2",
+				},
+			},
+		},
+	}
+	envRegions := []map[string]any{
+		{"env": "prod", "region": "us"},
+		{"env": "dev", "region": "eu"},
+	}
+
+	tests := []struct {
+		name           string
+		expr           string
+		knownValues    map[string]any
+		foldingOpts    []ConstantFoldingOption
+		wantFolded     string
+		forbidSubstr   string
+		evalInputs     []map[string]any
+		wantMacroCount int
+		checkMacroCnt  bool
+	}{
+		// 1. Large Map / Attestation Projection (Core Use Case)
+		{
+			name:        "attestation_projection_exists",
+			expr:        `a.exists(x, x.name == baz.name && x.predicate.builder.id == baz.expected_builder)`,
+			knownValues: map[string]any{"a": attestations},
+			wantFolded: "\"frontend\" == baz.name && \"builder-1\" == baz.expected_builder || \"backend\" == baz.name &&\n" +
+				"\"builder-2\" == baz.expected_builder",
+			forbidSubstr: "huge_blob",
+			evalInputs: []map[string]any{
+				{"baz": map[string]any{"name": "frontend", "expected_builder": "builder-1"}},
+				{"baz": map[string]any{"name": "backend", "expected_builder": "builder-2"}},
+				{"baz": map[string]any{"name": "frontend", "expected_builder": "builder-2"}},
+				{"baz": map[string]any{"name": "unknown", "expected_builder": "builder-1"}},
+			},
+			wantMacroCount: 0,
+			checkMacroCnt:  true,
+		},
+		{
+			name:        "attestation_projection_all",
+			expr:        `a.all(x, x.predicate.builder.id == baz.expected_builder)`,
+			knownValues: map[string]any{"a": attestations},
+			wantFolded:  `"builder-1" == baz.expected_builder && "builder-2" == baz.expected_builder`,
+			forbidSubstr: "huge_blob",
+			evalInputs: []map[string]any{
+				{"baz": map[string]any{"expected_builder": "builder-1"}},
+				{"baz": map[string]any{"expected_builder": "builder-2"}},
+			},
+			wantMacroCount: 0,
+			checkMacroCnt:  true,
+		},
+		// 2. Partial Short-Circuiting Inside Unrolled Branches
+		{
+			name:        "partial_short_circuit_exists_branch_pruned",
+			expr:        `a.exists(x, x.env == "prod" && x.region == baz.region)`,
+			knownValues: map[string]any{"a": envRegions},
+			wantFolded:  `"us" == baz.region`,
+			evalInputs: []map[string]any{
+				{"baz": map[string]any{"region": "us"}},
+				{"baz": map[string]any{"region": "eu"}},
+			},
+		},
+		{
+			name:        "partial_short_circuit_exists_unconditional_true",
+			expr:        `a.exists(x, x.env == "prod" || x.region == baz.region)`,
+			knownValues: map[string]any{"a": envRegions},
+			wantFolded:  `true`,
+			evalInputs: []map[string]any{
+				{"baz": map[string]any{"region": "us"}},
+				{"baz": map[string]any{"region": "ap"}},
+			},
+		},
+		{
+			name:        "partial_short_circuit_all_unconditional_false",
+			expr:        `a.all(x, x.env == "prod" && x.region == baz.region)`,
+			knownValues: map[string]any{"a": envRegions},
+			wantFolded:  `false`,
+			evalInputs: []map[string]any{
+				{"baz": map[string]any{"region": "us"}},
+				{"baz": map[string]any{"region": "eu"}},
+			},
+		},
+		// 3. Empty & Single-Element Lists
+		{
+			name:           "empty_list_literal_exists",
+			expr:           `[].exists(x, x == baz.name)`,
+			wantFolded:     `false`,
+			evalInputs:     []map[string]any{{"baz": map[string]any{"name": "frontend"}}},
+			wantMacroCount: 0,
+			checkMacroCnt:  true,
+		},
+		{
+			name:           "empty_list_literal_all",
+			expr:           `[].all(x, x == baz.name)`,
+			wantFolded:     `true`,
+			evalInputs:     []map[string]any{{"baz": map[string]any{"name": "frontend"}}},
+			wantMacroCount: 0,
+			checkMacroCnt:  true,
+		},
+		{
+			name:        "empty_known_list_exists",
+			expr:        `a.exists(x, x.name == baz.name)`,
+			knownValues: map[string]any{"a": []map[string]any{}},
+			wantFolded:  `false`,
+			evalInputs:  []map[string]any{{"baz": map[string]any{"name": "frontend"}}},
+		},
+		{
+			name:        "empty_known_list_all",
+			expr:        `a.all(x, x.name == baz.name)`,
+			knownValues: map[string]any{"a": []map[string]any{}},
+			wantFolded:  `true`,
+			evalInputs:  []map[string]any{{"baz": map[string]any{"name": "frontend"}}},
+		},
+		{
+			name:        "single_element_list_exists",
+			expr:        `[foo].exists(x, x.name == baz.name)`,
+			knownValues: map[string]any{"foo": attestations[0]},
+			wantFolded:  `"frontend" == baz.name`,
+			forbidSubstr: "huge_blob",
+			evalInputs: []map[string]any{
+				{"baz": map[string]any{"name": "frontend"}},
+				{"baz": map[string]any{"name": "backend"}},
+			},
+		},
+		{
+			name:        "single_element_list_all",
+			expr:        `[foo].all(x, x.name == baz.name)`,
+			knownValues: map[string]any{"foo": attestations[0]},
+			wantFolded:  `"frontend" == baz.name`,
+			forbidSubstr: "huge_blob",
+			evalInputs: []map[string]any{
+				{"baz": map[string]any{"name": "frontend"}},
+				{"baz": map[string]any{"name": "backend"}},
+			},
+		},
+		// 4. Shadowed & Nested Comprehensions + Presence Tests
+		{
+			name:       "shadowed_same_iter_var_nested_all",
+			expr:       `[1, 2].all(x, [3, 4].all(x, x > baz.min))`,
+			wantFolded: `3 > baz.min && 4 > baz.min`,
+			evalInputs: []map[string]any{
+				{"baz": map[string]any{"min": int64(2)}},
+				{"baz": map[string]any{"min": int64(3)}},
+			},
+		},
+		{
+			name:       "shadowed_same_iter_var_referenced_in_inner_range",
+			expr:       `[1, 2].all(x, [x, 4].all(x, x > baz.min))`,
+			wantFolded: `1 > baz.min && 4 > baz.min && 2 > baz.min && 4 > baz.min`,
+			evalInputs: []map[string]any{
+				{"baz": map[string]any{"min": int64(0)}},
+				{"baz": map[string]any{"min": int64(1)}},
+			},
+		},
+		{
+			name:       "outer_unroll_around_inner_dynamic_comprehension",
+			expr:       `[1, 2].exists(x, dyn_list.exists(y, x == y))`,
+			wantFolded: `dyn_list.exists(y, 1 == y) || dyn_list.exists(y, 2 == y)`,
+			evalInputs: []map[string]any{
+				{"dyn_list": []int64{2, 5}},
+				{"dyn_list": []int64{3, 4}},
+			},
+			wantMacroCount: 2,
+			checkMacroCnt:  true,
+		},
+		{
+			name:       "inner_unroll_inside_outer_dynamic_comprehension",
+			expr:       `dyn_list.exists(y, [1, 2].exists(x, x == y))`,
+			wantFolded: `dyn_list.exists(y, 1 == y || 2 == y)`,
+			evalInputs: []map[string]any{
+				{"dyn_list": []int64{2, 5}},
+				{"dyn_list": []int64{3, 4}},
+			},
+			wantMacroCount: 1,
+			checkMacroCnt:  true,
+		},
+		{
+			name:       "variable_capture_avoidance",
+			expr:       `[y].all(x, dyn_list.all(y, x == y))`,
+			wantFolded: `[y].all(x, dyn_list.all(y, x == y))`,
+			evalInputs: []map[string]any{
+				{"y": int64(10), "dyn_list": []int64{1, 2}},
+				{"y": int64(1), "dyn_list": []int64{1, 1}},
+			},
+		},
+		{
+			name:       "presence_test_map_literals",
+			expr:       `[{"a": 1, "name": "ok"}, {"b": 2, "name": "skip"}].exists(x, has(x.a) && x.name == baz.name)`,
+			wantFolded: `"ok" == baz.name`,
+			evalInputs: []map[string]any{
+				{"baz": map[string]any{"name": "ok"}},
+				{"baz": map[string]any{"name": "skip"}},
+			},
+		},
+		{
+			name:       "presence_test_proto_structs",
+			expr:       `[google.expr.proto3.test.TestAllTypes{single_int32: 42, single_string: "p1"}, google.expr.proto3.test.TestAllTypes{single_string: "p2"}].exists(x, has(x.single_int32) && x.single_string == baz.name)`,
+			wantFolded: `"p1" == baz.name`,
+			evalInputs: []map[string]any{
+				{"baz": map[string]any{"name": "p1"}},
+				{"baz": map[string]any{"name": "p2"}},
+			},
+		},
+		{
+			name:       "resolved_optional_list_elements_unrolled",
+			expr:       `[?optional.of(1), ?optional.none(), 2].exists(x, x == baz.min)`,
+			wantFolded: `1 == baz.min || 2 == baz.min`,
+			evalInputs: []map[string]any{
+				{"baz": map[string]any{"min": int64(1)}},
+				{"baz": map[string]any{"min": int64(3)}},
+			},
+		},
+		// 5. Non-Unrollable / Bypass Cases
+		{
+			name:       "dynamic_list_not_unrolled",
+			expr:       `dyn_list.exists(x, x == baz.min)`,
+			wantFolded: `dyn_list.exists(x, x == baz.min)`,
+			evalInputs: []map[string]any{
+				{"dyn_list": []int64{1, 2}, "baz": map[string]any{"min": int64(2)}},
+			},
+		},
+		{
+			name:       "unresolved_optional_list_element_not_unrolled",
+			expr:       `[?opt_x, 1].exists(x, x == baz.min)`,
+			wantFolded: `[?opt_x, 1].exists(x, x == baz.min)`,
+			evalInputs: []map[string]any{
+				{"opt_x": types.OptionalNone, "baz": map[string]any{"min": int64(1)}},
+				{"opt_x": types.OptionalOf(types.Int(5)), "baz": map[string]any{"min": int64(5)}},
+			},
+		},
+		{
+			name:        "exceeds_max_comprehension_unroll_size",
+			expr:        `[1, 2, 3].exists(x, x == baz.min)`,
+			foldingOpts: []ConstantFoldingOption{MaxComprehensionUnrollSize(2)},
+			wantFolded:  `[1, 2, 3].exists(x, x == baz.min)`,
+			evalInputs: []map[string]any{
+				{"baz": map[string]any{"min": int64(2)}},
+				{"baz": map[string]any{"min": int64(5)}},
+			},
+		},
+		{
+			name:        "disabled_comprehension_unroll_zero",
+			expr:        `[1, 2].exists(x, x == baz.min)`,
+			foldingOpts: []ConstantFoldingOption{MaxComprehensionUnrollSize(0)},
+			wantFolded:  `[1, 2].exists(x, x == baz.min)`,
+			evalInputs: []map[string]any{
+				{"baz": map[string]any{"min": int64(2)}},
+			},
+		},
+		{
+			name:       "filter_not_unrolled",
+			expr:       `[1, 2, 3].filter(x, x == baz.min)`,
+			wantFolded: `[1, 2, 3].filter(x, x == baz.min)`,
+			evalInputs: []map[string]any{
+				{"baz": map[string]any{"min": int64(2)}},
+			},
+		},
+		{
+			name:       "map_not_unrolled",
+			expr:       `[1, 2, 3].map(x, x + baz.min)`,
+			wantFolded: `[1, 2, 3].map(x, x + baz.min)`,
+			evalInputs: []map[string]any{
+				{"baz": map[string]any{"min": int64(2)}},
+			},
+		},
+		{
+			name:       "exists_one_not_unrolled",
+			expr:       `[1, 2, 3].exists_one(x, x >= baz.min)`,
+			wantFolded: `[1, 2, 3].exists_one(x, x >= baz.min)`,
+			evalInputs: []map[string]any{
+				{"baz": map[string]any{"min": int64(3)}},
+				{"baz": map[string]any{"min": int64(2)}},
+			},
+		},
+		// 6. Adversarial Edge Cases
+		{
+			name:       "presence_test_partially_dynamic_map",
+			expr:       `[{"a": baz.name}, {"b": "other"}].exists(x, has(x.a))`,
+			wantFolded: `has({"a": baz.name}.a)`,
+			evalInputs: []map[string]any{
+				{"baz": map[string]any{"name": "frontend"}},
+				{"baz": map[string]any{"name": ""}},
+			},
+			wantMacroCount: 1,
+			checkMacroCnt:  true,
+		},
+		{
+			name:        "presence_test_known_values_list",
+			expr:        `a.exists(x, has(x.predicate) && x.name == baz.name)`,
+			knownValues: map[string]any{"a": attestations},
+			wantFolded:  `"frontend" == baz.name || "backend" == baz.name`,
+			forbidSubstr: "huge_blob",
+			evalInputs: []map[string]any{
+				{"baz": map[string]any{"name": "frontend"}},
+				{"baz": map[string]any{"name": "unknown"}},
+			},
+			wantMacroCount: 0,
+			checkMacroCnt:  true,
+		},
+		{
+			name:        "multiple_iter_var_refs_in_single_predicate",
+			expr:        `a.exists(x, x.env == "prod" && x.region == baz.region || x.env == "dev" && x.region == baz.fallback)`,
+			knownValues: map[string]any{"a": envRegions},
+			wantFolded:  `"us" == baz.region || "eu" == baz.fallback`,
+			evalInputs: []map[string]any{
+				{"baz": map[string]any{"region": "us", "fallback": "ap"}},
+				{"baz": map[string]any{"region": "ap", "fallback": "eu"}},
+				{"baz": map[string]any{"region": "ap", "fallback": "ap"}},
+			},
+			wantMacroCount: 0,
+			checkMacroCnt:  true,
+		},
+		{
+			name:       "odd_sized_list_3_elements_exists",
+			expr:       `[1, 2, 3].exists(x, x == baz.min)`,
+			wantFolded: `1 == baz.min || 2 == baz.min || 3 == baz.min`,
+			evalInputs: []map[string]any{
+				{"baz": map[string]any{"min": int64(2)}},
+				{"baz": map[string]any{"min": int64(4)}},
+			},
+			wantMacroCount: 0,
+			checkMacroCnt:  true,
+		},
+		{
+			name:       "odd_sized_list_5_elements_all",
+			expr:       `[1, 2, 3, 4, 5].all(x, x > baz.min)`,
+			wantFolded: `1 > baz.min && 2 > baz.min && 3 > baz.min && 4 > baz.min && 5 > baz.min`,
+			evalInputs: []map[string]any{
+				{"baz": map[string]any{"min": int64(0)}},
+				{"baz": map[string]any{"min": int64(1)}},
+			},
+			wantMacroCount: 0,
+			checkMacroCnt:  true,
+		},
+		{
+			name:       "nested_list_of_lists_multi_pass_unroll",
+			expr:       `[[1, 2], [3, 4]].exists(x, x.exists(y, y == baz.min))`,
+			wantFolded: `1 == baz.min || 2 == baz.min || 3 == baz.min || 4 == baz.min`,
+			evalInputs: []map[string]any{
+				{"baz": map[string]any{"min": int64(3)}},
+				{"baz": map[string]any{"min": int64(9)}},
+			},
+			wantMacroCount: 0,
+			checkMacroCnt:  true,
+		},
+		{
+			name:       "outer_var_same_name_as_iter_var_in_range_not_unrolled",
+			expr:       `[y, 4].all(y, y > baz.min)`,
+			wantFolded: `[y, 4].all(y, y > baz.min)`,
+			evalInputs: []map[string]any{
+				{"y": int64(5), "baz": map[string]any{"min": int64(2)}},
+				{"y": int64(1), "baz": map[string]any{"min": int64(2)}},
+			},
+			wantMacroCount: 1,
+			checkMacroCnt:  true,
+		},
+		{
+			name:       "outer_var_different_name_than_iter_var_in_range_unrolled",
+			expr:       `[y, 4].all(x, x > baz.min)`,
+			wantFolded: `y > baz.min && 4 > baz.min`,
+			evalInputs: []map[string]any{
+				{"y": int64(5), "baz": map[string]any{"min": int64(2)}},
+				{"y": int64(1), "baz": map[string]any{"min": int64(2)}},
+			},
+			wantMacroCount: 0,
+			checkMacroCnt:  true,
+		},
+		{
+			name:       "unused_iter_var_with_non_constant_elem_not_unrolled",
+			expr:       `[y, 1].exists(x, baz.min == 1)`,
+			wantFolded: `[y, 1].exists(x, baz.min == 1)`,
+			evalInputs: []map[string]any{
+				{"y": int64(5), "baz": map[string]any{"min": int64(1)}},
+				{"y": int64(5), "baz": map[string]any{"min": int64(2)}},
+			},
+		},
+		{
+			name:       "optional_select_on_unrolled_maps",
+			expr:       `[{"a": "ok"}, {"b": "skip"}].exists(x, x.?a.orValue("none") == baz.name)`,
+			wantFolded: `"ok" == baz.name || "none" == baz.name`,
+			evalInputs: []map[string]any{
+				{"baz": map[string]any{"name": "ok"}},
+				{"baz": map[string]any{"name": "none"}},
+				{"baz": map[string]any{"name": "other"}},
+			},
+			wantMacroCount: 0,
+			checkMacroCnt:  true,
+		},
+		{
+			name:       "nested_inner_macro_with_presence_test",
+			expr:       `[{"a": 1}, {"b": 2}].exists(x, dyn_list.exists(y, has(x.a) && y == 1))`,
+			wantFolded: `dyn_list.exists(y, y == 1) || dyn_list.exists(y, false)`,
+			evalInputs: []map[string]any{
+				{"dyn_list": []int64{1, 2}},
+				{"dyn_list": []int64{2, 3}},
+			},
+			wantMacroCount: 2,
+			checkMacroCnt:  true,
+		},
+		{
+			name:        "disabled_comprehension_unroll_negative",
+			expr:        `[1, 2].exists(x, x == baz.min)`,
+			foldingOpts: []ConstantFoldingOption{MaxComprehensionUnrollSize(-5)},
+			wantFolded:  `[1, 2].exists(x, x == baz.min)`,
+			evalInputs: []map[string]any{
+				{"baz": map[string]any{"min": int64(2)}},
+			},
+		},
+	}
+
+	env, err := NewEnv(
+		OptionalTypes(),
+		EnableMacroCallTracking(),
+		Types(&proto3pb.TestAllTypes{}),
+		Variable("a", ListType(MapType(StringType, DynType))),
+		Variable("foo", MapType(StringType, DynType)),
+		Variable("baz", MapType(StringType, DynType)),
+		Variable("dyn_list", ListType(IntType)),
+		Variable("y", IntType),
+		Variable("opt_x", OptionalType(IntType)),
+	)
+	if err != nil {
+		t.Fatalf("NewEnv() failed: %v", err)
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			checked, iss := env.Compile(tc.expr)
+			if iss.Err() != nil {
+				t.Fatalf("Compile(%q) failed: %v", tc.expr, iss.Err())
+			}
+			var opts []ConstantFoldingOption
+			if tc.knownValues != nil {
+				act, err := NewActivation(tc.knownValues)
+				if err != nil {
+					t.Fatalf("NewActivation() failed: %v", err)
+				}
+				opts = append(opts, FoldKnownValues(act))
+			}
+			opts = append(opts, tc.foldingOpts...)
+			folder, err := NewConstantFoldingOptimizer(opts...)
+			if err != nil {
+				t.Fatalf("NewConstantFoldingOptimizer() failed: %v", err)
+			}
+			opt, err := NewStaticOptimizer(folder)
+			if err != nil {
+				t.Fatalf("NewStaticOptimizer() failed: %v", err)
+			}
+			optimized, iss := opt.Optimize(env, checked)
+			if iss.Err() != nil {
+				t.Fatalf("Optimize() failed: %v", iss.Err())
+			}
+
+			gotFolded, err := AstToString(optimized)
+			if err != nil {
+				t.Fatalf("AstToString() failed: %v", err)
+			}
+			if gotFolded != tc.wantFolded {
+				t.Errorf("AstToString() got %q, want %q", gotFolded, tc.wantFolded)
+			}
+			if tc.forbidSubstr != "" && strings.Contains(gotFolded, tc.forbidSubstr) {
+				t.Errorf("AstToString() = %q unexpectedly contains %q", gotFolded, tc.forbidSubstr)
+			}
+			if tc.checkMacroCnt {
+				if gotMacros := len(optimized.NativeRep().SourceInfo().MacroCalls()); gotMacros != tc.wantMacroCount {
+					t.Errorf("len(MacroCalls()) = %d, want %d", gotMacros, tc.wantMacroCount)
+				}
+			}
+
+			// 6. AST ID Normalization & CheckedExpr Round-Trip Verification
+			checkedPB, err := AstToCheckedExpr(optimized)
+			if err != nil {
+				t.Fatalf("AstToCheckedExpr() failed: %v", err)
+			}
+			wireBytes, err := proto.Marshal(checkedPB)
+			if err != nil {
+				t.Fatalf("proto.Marshal() failed: %v", err)
+			}
+			roundTripPB := &exprpb.CheckedExpr{}
+			if err := proto.Unmarshal(wireBytes, roundTripPB); err != nil {
+				t.Fatalf("proto.Unmarshal() failed: %v", err)
+			}
+			roundTripAST := CheckedExprToAst(roundTripPB)
+
+			origPrg, err := env.Program(checked)
+			if err != nil {
+				t.Fatalf("env.Program(checked) failed: %v", err)
+			}
+			optPrg, err := env.Program(optimized)
+			if err != nil {
+				t.Fatalf("env.Program(optimized) failed: %v", err)
+			}
+			rtPrg, err := env.Program(roundTripAST)
+			if err != nil {
+				t.Fatalf("env.Program(roundTripAST) failed: %v", err)
+			}
+
+			for _, in := range tc.evalInputs {
+				evalVars := map[string]any{}
+				if tc.knownValues != nil {
+					maps.Copy(evalVars, tc.knownValues)
+				}
+				maps.Copy(evalVars, in)
+
+				wantOut, _, wantErr := origPrg.Eval(evalVars)
+				gotOut, _, gotErr := optPrg.Eval(in)
+				rtOut, _, rtErr := rtPrg.Eval(in)
+
+				if (gotErr != nil) != (wantErr != nil) {
+					t.Errorf("optPrg.Eval(%v) error = %v, want %v", in, gotErr, wantErr)
+					continue
+				}
+				if gotErr == nil && gotOut.Equal(wantOut) != types.True {
+					t.Errorf("optPrg.Eval(%v) = %v, want %v", in, gotOut, wantOut)
+				}
+				if (rtErr != nil) != (wantErr != nil) {
+					t.Errorf("rtPrg.Eval(%v) error = %v, want %v", in, rtErr, wantErr)
+					continue
+				}
+				if rtErr == nil && rtOut.Equal(wantOut) != types.True {
+					t.Errorf("rtPrg.Eval(%v) = %v, want %v", in, rtOut, wantOut)
+				}
+			}
+		})
+	}
+}
+
+func TestConstantFolding_ComprehensionUnrollBalancedDepth(t *testing.T) {
+	const count = 100
+	items := make([]map[string]any, count)
+	for i := 0; i < count; i++ {
+		items[i] = map[string]any{
+			"id":        int64(i),
+			"huge_blob": strings.Repeat("blob", 256),
+		}
+	}
+	env, err := NewEnv(
+		EnableMacroCallTracking(),
+		Variable("a", ListType(MapType(StringType, DynType))),
+		Variable("target_id", IntType),
+	)
+	if err != nil {
+		t.Fatalf("NewEnv() failed: %v", err)
+	}
+	checked, iss := env.Compile(`a.exists(x, x.id == target_id)`)
+	if iss.Err() != nil {
+		t.Fatalf("Compile() failed: %v", iss.Err())
+	}
+	act, err := NewActivation(map[string]any{"a": items})
+	if err != nil {
+		t.Fatalf("NewActivation() failed: %v", err)
+	}
+	folder, err := NewConstantFoldingOptimizer(FoldKnownValues(act))
+	if err != nil {
+		t.Fatalf("NewConstantFoldingOptimizer() failed: %v", err)
+	}
+	opt, err := NewStaticOptimizer(folder)
+	if err != nil {
+		t.Fatalf("NewStaticOptimizer() failed: %v", err)
+	}
+	optimized, iss := opt.Optimize(env, checked)
+	if iss.Err() != nil {
+		t.Fatalf("Optimize() failed: %v", iss.Err())
+	}
+	// A balanced binary tree of 100 comparisons has depth ceil(log2(100)) + 1 = 8,
+	// well under a bound of 15 (whereas a linear chain would have depth > 100).
+	if ast.ExceedsDepth(optimized.NativeRep(), 15) {
+		t.Errorf("ast.ExceedsDepth(optimized, 15) = true, want balanced tree depth <= 15")
+	}
+	prg, err := env.Program(optimized)
+	if err != nil {
+		t.Fatalf("env.Program() failed: %v", err)
+	}
+	out, _, err := prg.Eval(map[string]any{"target_id": int64(99)})
+	if err != nil || out != types.True {
+		t.Errorf("prg.Eval(target_id=99) = %v, %v; want true, nil", out, err)
+	}
+	out, _, err = prg.Eval(map[string]any{"target_id": int64(101)})
+	if err != nil || out != types.False {
+		t.Errorf("prg.Eval(target_id=101) = %v, %v; want false, nil", out, err)
+	}
+}
+
+func TestConstantFolding_ComprehensionUnrollASTEdgeCases(t *testing.T) {
+	env, err := NewEnv(
+		EnableMacroCallTracking(),
+		Variable("target_id", IntType),
+	)
+	if err != nil {
+		t.Fatalf("NewEnv() failed: %v", err)
+	}
+
+	// 1. Two-variable comprehension (IterVar2 != "") must not be unrolled.
+	t.Run("two_var_comprehension_not_unrolled", func(t *testing.T) {
+		fac := ast.NewExprFactory()
+		comp := fac.NewComprehensionTwoVar(
+			1,
+			fac.NewList(2, []ast.Expr{
+				fac.NewLiteral(3, types.Int(10)),
+				fac.NewLiteral(4, types.Int(20)),
+			}, []int32{}),
+			"i",
+			"v",
+			"@result",
+			fac.NewLiteral(5, types.False),
+			fac.NewCall(6, operators.NotStrictlyFalse,
+				fac.NewCall(7, operators.LogicalNot, fac.NewIdent(8, "@result")),
+			),
+			fac.NewCall(9, operators.LogicalOr,
+				fac.NewIdent(10, "@result"),
+				fac.NewCall(11, operators.Equals,
+					fac.NewIdent(12, "v"),
+					fac.NewIdent(13, "target_id"),
+				),
+			),
+			fac.NewIdent(14, "@result"),
+		)
+		checked := ast.NewCheckedAST(
+			ast.NewAST(comp, ast.NewSourceInfo(nil)),
+			map[int64]*types.Type{11: types.BoolType},
+			map[int64]*ast.ReferenceInfo{},
+		)
+		folder := &constantFoldingOptimizer{
+			maxFoldIterations: defaultMaxConstantFoldIterations,
+			maxUnrollSize:     defaultMaxComprehensionUnrollSize,
+		}
+		ctx := &OptimizerContext{
+			Env: env,
+			optimizerExprFactory: &optimizerExprFactory{
+				idGenerator: newIDGenerator(20),
+				fac:         fac,
+				sourceInfo:  checked.SourceInfo(),
+			},
+		}
+		if folder.tryUnrollComprehension(ctx, checked, ast.NavigateAST(checked)) {
+			t.Errorf("expected two-variable comprehension (IterVar2 != \"\") not to be unrolled")
+		}
+	})
+
+	// 2. Predicate referencing AccuVar (@result) directly must not be unrolled.
+	t.Run("predicate_referencing_accu_var_not_unrolled", func(t *testing.T) {
+		fac := ast.NewExprFactory()
+		comp := fac.NewComprehension(
+			1,
+			fac.NewList(2, []ast.Expr{
+				fac.NewLiteral(3, types.Int(10)),
+			}, []int32{}),
+			"x",
+			"@result",
+			fac.NewLiteral(4, types.False),
+			fac.NewCall(5, operators.NotStrictlyFalse,
+				fac.NewCall(6, operators.LogicalNot, fac.NewIdent(7, "@result")),
+			),
+			fac.NewCall(8, operators.LogicalOr,
+				fac.NewIdent(9, "@result"),
+				fac.NewCall(10, operators.LogicalAnd,
+					fac.NewIdent(11, "@result"),
+					fac.NewCall(12, operators.Equals,
+						fac.NewIdent(13, "x"),
+						fac.NewIdent(14, "target_id"),
+					),
+				),
+			),
+			fac.NewIdent(15, "@result"),
+		)
+		checked := ast.NewCheckedAST(
+			ast.NewAST(comp, ast.NewSourceInfo(nil)),
+			map[int64]*types.Type{10: types.BoolType},
+			map[int64]*ast.ReferenceInfo{},
+		)
+		folder := &constantFoldingOptimizer{
+			maxFoldIterations: defaultMaxConstantFoldIterations,
+			maxUnrollSize:     defaultMaxComprehensionUnrollSize,
+		}
+		ctx := &OptimizerContext{
+			Env: env,
+			optimizerExprFactory: &optimizerExprFactory{
+				idGenerator: newIDGenerator(20),
+				fac:         fac,
+				sourceInfo:  checked.SourceInfo(),
+			},
+		}
+		if folder.tryUnrollComprehension(ctx, checked, ast.NavigateAST(checked)) {
+			t.Errorf("expected comprehension with free AccuVar reference in predicate not to be unrolled")
+		}
+	})
+
+	// 3. Commuted LoopStep (predTemplate || @result instead of @result || predTemplate) unrolls cleanly.
+	t.Run("commuted_loop_step_unrolled", func(t *testing.T) {
+		fac := ast.NewExprFactory()
+		comp := fac.NewComprehension(
+			1,
+			fac.NewList(2, []ast.Expr{
+				fac.NewLiteral(3, types.Int(10)),
+				fac.NewLiteral(4, types.Int(20)),
+			}, []int32{}),
+			"x",
+			"@result",
+			fac.NewLiteral(5, types.False),
+			fac.NewCall(6, operators.NotStrictlyFalse,
+				fac.NewCall(7, operators.LogicalNot, fac.NewIdent(8, "@result")),
+			),
+			fac.NewCall(9, operators.LogicalOr,
+				fac.NewCall(10, operators.Equals,
+					fac.NewIdent(11, "x"),
+					fac.NewIdent(12, "target_id"),
+				),
+				fac.NewIdent(13, "@result"),
+			),
+			fac.NewIdent(14, "@result"),
+		)
+		checked := ast.NewCheckedAST(
+			ast.NewAST(comp, ast.NewSourceInfo(nil)),
+			map[int64]*types.Type{10: types.BoolType},
+			map[int64]*ast.ReferenceInfo{},
+		)
+		folder := &constantFoldingOptimizer{
+			maxFoldIterations: defaultMaxConstantFoldIterations,
+			maxUnrollSize:     defaultMaxComprehensionUnrollSize,
+		}
+		ctx := &OptimizerContext{
+			Env: env,
+			optimizerExprFactory: &optimizerExprFactory{
+				idGenerator: newIDGenerator(20),
+				fac:         fac,
+				sourceInfo:  checked.SourceInfo(),
+			},
+		}
+		if !folder.tryUnrollComprehension(ctx, checked, ast.NavigateAST(checked)) {
+			t.Fatalf("expected comprehension with commuted LoopStep to be unrolled")
+		}
+		got, err := AstToString(&Ast{impl: checked})
+		if err != nil {
+			t.Fatalf("AstToString() failed: %v", err)
+		}
+		if got != "10 == target_id || 20 == target_id" {
+			t.Errorf("AstToString() = %q, want %q", got, "10 == target_id || 20 == target_id")
+		}
+	})
+
+	// 4. Inner cel.bind shadowing AccuVar (x) vs substituting x in AccuInit (varInit).
+	t.Run("cel_bind_shadowing_and_accu_init_substitution", func(t *testing.T) {
+		fac := ast.NewExprFactory()
+		info := ast.NewSourceInfo(nil)
+		ctx := &OptimizerContext{
+			Env: env,
+			optimizerExprFactory: &optimizerExprFactory{
+				idGenerator: newIDGenerator(100),
+				fac:         fac,
+				sourceInfo:  info,
+			},
+		}
+		// Inner bind: cel.bind(x, x + 10, x == target_id)
+		varInit := fac.NewCall(10, operators.Add, fac.NewIdent(11, "x"), fac.NewLiteral(12, types.Int(10)))
+		body := fac.NewCall(13, operators.Equals, fac.NewIdent(14, "x"), fac.NewIdent(15, "target_id"))
+		bindExpr, _ := ctx.NewBindMacro(20, "x", varInit, body)
+
+		comp := fac.NewComprehension(
+			1,
+			fac.NewList(2, []ast.Expr{
+				fac.NewLiteral(3, types.Int(1)),
+				fac.NewLiteral(4, types.Int(2)),
+			}, []int32{}),
+			"x",
+			"@result",
+			fac.NewLiteral(5, types.False),
+			fac.NewCall(6, operators.NotStrictlyFalse,
+				fac.NewCall(7, operators.LogicalNot, fac.NewIdent(8, "@result")),
+			),
+			fac.NewCall(9, operators.LogicalOr,
+				fac.NewIdent(16, "@result"),
+				bindExpr,
+			),
+			fac.NewIdent(17, "@result"),
+		)
+		checked := ast.NewCheckedAST(
+			ast.NewAST(comp, info),
+			map[int64]*types.Type{20: types.BoolType, 13: types.BoolType},
+			map[int64]*ast.ReferenceInfo{},
+		)
+		folder := &constantFoldingOptimizer{
+			maxFoldIterations: defaultMaxConstantFoldIterations,
+			maxUnrollSize:     defaultMaxComprehensionUnrollSize,
+		}
+		if !folder.tryUnrollComprehension(ctx, checked, ast.NavigateAST(checked)) {
+			t.Fatalf("expected comprehension with inner cel.bind to be unrolled")
+		}
+		// Verify that in both unrolled branches, the inner bind's AccuInit had x substituted
+		// (1 + 10 and 2 + 10), while the inner bind's Result kept Ident("x") shadowed.
+		topCall := checked.Expr().AsCall()
+		leftBind := topCall.Args()[0].AsComprehension()
+		rightBind := topCall.Args()[1].AsComprehension()
+		if leftBind.AccuInit().AsCall().Args()[0].AsLiteral() != types.Int(1) {
+			t.Errorf("left bind AccuInit arg[0] = %v, want 1", leftBind.AccuInit().AsCall().Args()[0])
+		}
+		if rightBind.AccuInit().AsCall().Args()[0].AsLiteral() != types.Int(2) {
+			t.Errorf("right bind AccuInit arg[0] = %v, want 2", rightBind.AccuInit().AsCall().Args()[0])
+		}
+		if leftBind.Result().AsCall().Args()[0].Kind() != ast.IdentKind || leftBind.Result().AsCall().Args()[0].AsIdent() != "x" {
+			t.Errorf("left bind Result arg[0] = %v, want shadowed Ident(\"x\")", leftBind.Result().AsCall().Args()[0])
+		}
+	})
+}
+
+func makeBenchmarkAttestations(n int) []map[string]any {
+	blob := strings.Repeat("attestation_payload_", 50) // ~1 KB payload per element
+	items := make([]map[string]any, n)
+	for i := 0; i < n; i++ {
+		envName := "dev"
+		if i == n-1 {
+			envName = "prod"
+		}
+		items[i] = map[string]any{
+			"name":      fmt.Sprintf("service-%d", i),
+			"env":       envName,
+			"huge_blob": blob,
+			"predicate": map[string]any{
+				"builder": map[string]any{
+					"id": fmt.Sprintf("https://builder.example.com/v%d", i),
+				},
+				"metadata": map[string]any{
+					"invocation_id": fmt.Sprintf("inv-%d", i),
+				},
+			},
+		}
+	}
+	return items
+}
+
+func BenchmarkConstantFolding_ComprehensionUnroll(b *testing.B) {
+	sizes := []int{2, 10, 50, 100}
+	env, err := NewEnv(
+		EnableMacroCallTracking(),
+		Variable("a", ListType(MapType(StringType, DynType))),
+		Variable("baz", MapType(StringType, DynType)),
+	)
+	if err != nil {
+		b.Fatalf("NewEnv() failed: %v", err)
+	}
+	const exprText = `a.exists(x, x.name == baz.name && x.predicate.builder.id == baz.expected_builder)`
+	checked, iss := env.Compile(exprText)
+	if iss.Err() != nil {
+		b.Fatalf("Compile() failed: %v", iss.Err())
+	}
+	const pruneExprText = `a.exists(x, x.env == "prod" && x.name == baz.name && x.predicate.builder.id == baz.expected_builder)`
+	checkedPrune, iss := env.Compile(pruneExprText)
+	if iss.Err() != nil {
+		b.Fatalf("Compile(pruneExprText) failed: %v", iss.Err())
+	}
+
+	for _, n := range sizes {
+		items := makeBenchmarkAttestations(n)
+		act, err := NewActivation(map[string]any{"a": items})
+		if err != nil {
+			b.Fatalf("NewActivation() failed: %v", err)
+		}
+
+		b.Run(fmt.Sprintf("CompileAndOptimize/N=%d", n), func(b *testing.B) {
+			folder, err := NewConstantFoldingOptimizer(FoldKnownValues(act))
+			if err != nil {
+				b.Fatalf("NewConstantFoldingOptimizer() failed: %v", err)
+			}
+			opt, err := NewStaticOptimizer(folder)
+			if err != nil {
+				b.Fatalf("NewStaticOptimizer() failed: %v", err)
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			var optimized *Ast
+			for i := 0; i < b.N; i++ {
+				var optIss *Issues
+				optimized, optIss = opt.Optimize(env, checked)
+				if optIss.Err() != nil {
+					b.Fatalf("Optimize() failed: %v", optIss.Err())
+				}
+			}
+			b.StopTimer()
+			pb, err := AstToCheckedExpr(optimized)
+			if err != nil {
+				b.Fatalf("AstToCheckedExpr() failed: %v", err)
+			}
+			wire, err := proto.Marshal(pb)
+			if err != nil {
+				b.Fatalf("proto.Marshal() failed: %v", err)
+			}
+			b.ReportMetric(float64(len(wire)), "proto_bytes")
+		})
+
+		evalInput := map[string]any{
+			"baz": map[string]any{
+				"name":             fmt.Sprintf("service-%d", n-1),
+				"expected_builder": fmt.Sprintf("https://builder.example.com/v%d", n-1),
+			},
+		}
+
+		b.Run(fmt.Sprintf("RuntimeEval_Baseline_Ununrolled/N=%d", n), func(b *testing.B) {
+			folder, err := NewConstantFoldingOptimizer(
+				FoldKnownValues(act),
+				MaxComprehensionUnrollSize(0),
+			)
+			if err != nil {
+				b.Fatalf("NewConstantFoldingOptimizer() failed: %v", err)
+			}
+			opt, err := NewStaticOptimizer(folder)
+			if err != nil {
+				b.Fatalf("NewStaticOptimizer() failed: %v", err)
+			}
+			baselineAST, optIss := opt.Optimize(env, checked)
+			if optIss.Err() != nil {
+				b.Fatalf("Optimize() failed: %v", optIss.Err())
+			}
+			pb, err := AstToCheckedExpr(baselineAST)
+			if err != nil {
+				b.Fatalf("AstToCheckedExpr() failed: %v", err)
+			}
+			wire, err := proto.Marshal(pb)
+			if err != nil {
+				b.Fatalf("proto.Marshal() failed: %v", err)
+			}
+			prg, err := env.Program(baselineAST)
+			if err != nil {
+				b.Fatalf("Program() failed: %v", err)
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				out, _, err := prg.Eval(evalInput)
+				if err != nil || out != types.True {
+					b.Fatalf("Eval() = %v, %v; want true, nil", out, err)
+				}
+			}
+			b.ReportMetric(float64(len(wire)), "proto_bytes")
+		})
+
+		b.Run(fmt.Sprintf("RuntimeEval_Unrolled_ScalarFolded/N=%d", n), func(b *testing.B) {
+			folder, err := NewConstantFoldingOptimizer(FoldKnownValues(act))
+			if err != nil {
+				b.Fatalf("NewConstantFoldingOptimizer() failed: %v", err)
+			}
+			opt, err := NewStaticOptimizer(folder)
+			if err != nil {
+				b.Fatalf("NewStaticOptimizer() failed: %v", err)
+			}
+			unrolledAST, optIss := opt.Optimize(env, checked)
+			if optIss.Err() != nil {
+				b.Fatalf("Optimize() failed: %v", optIss.Err())
+			}
+			pb, err := AstToCheckedExpr(unrolledAST)
+			if err != nil {
+				b.Fatalf("AstToCheckedExpr() failed: %v", err)
+			}
+			wire, err := proto.Marshal(pb)
+			if err != nil {
+				b.Fatalf("proto.Marshal() failed: %v", err)
+			}
+			prg, err := env.Program(unrolledAST)
+			if err != nil {
+				b.Fatalf("Program() failed: %v", err)
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				out, _, err := prg.Eval(evalInput)
+				if err != nil || out != types.True {
+					b.Fatalf("Eval() = %v, %v; want true, nil", out, err)
+				}
+			}
+			b.ReportMetric(float64(len(wire)), "proto_bytes")
+		})
+
+		b.Run(fmt.Sprintf("RuntimeEval_Unrolled_BranchPruned/N=%d", n), func(b *testing.B) {
+			folder, err := NewConstantFoldingOptimizer(FoldKnownValues(act))
+			if err != nil {
+				b.Fatalf("NewConstantFoldingOptimizer() failed: %v", err)
+			}
+			opt, err := NewStaticOptimizer(folder)
+			if err != nil {
+				b.Fatalf("NewStaticOptimizer() failed: %v", err)
+			}
+			prunedAST, optIss := opt.Optimize(env, checkedPrune)
+			if optIss.Err() != nil {
+				b.Fatalf("Optimize() failed: %v", optIss.Err())
+			}
+			pb, err := AstToCheckedExpr(prunedAST)
+			if err != nil {
+				b.Fatalf("AstToCheckedExpr() failed: %v", err)
+			}
+			wire, err := proto.Marshal(pb)
+			if err != nil {
+				b.Fatalf("proto.Marshal() failed: %v", err)
+			}
+			prg, err := env.Program(prunedAST)
+			if err != nil {
+				b.Fatalf("Program() failed: %v", err)
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				out, _, err := prg.Eval(evalInput)
+				if err != nil || out != types.True {
+					b.Fatalf("Eval() = %v, %v; want true, nil", out, err)
+				}
+			}
+			b.ReportMetric(float64(len(wire)), "proto_bytes")
+		})
 	}
 }
