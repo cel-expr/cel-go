@@ -53,6 +53,7 @@ func TestStaticOptimizerUpdateExpr(t *testing.T) {
 	if iss.Err() != nil {
 		t.Fatalf("Optimize() generated an invalid AST: %v", iss.Err())
 	}
+	cel.AssertNormalizedIDs(t, optAST)
 	optString, err := cel.AstToString(optAST)
 	if err != nil {
 		t.Fatalf("cel.AstToString() failed: %v", err)
@@ -186,6 +187,7 @@ func TestStaticOptimizerNewAST(t *testing.T) {
 			if iss.Err() != nil {
 				t.Fatalf("Optimize() generated an invalid AST: %v", iss.Err())
 			}
+			cel.AssertNormalizedIDs(t, optAST)
 			optString, err := cel.AstToString(optAST)
 			if err != nil {
 				t.Fatalf("cel.AstToString() failed: %v", err)
@@ -221,6 +223,7 @@ func TestOptimizeWithSource(t *testing.T) {
 	if iss.Err() != nil {
 		t.Fatalf("Optimize() returned an error: %v", iss.Err())
 	}
+	cel.AssertNormalizedIDs(t, optAST)
 
 	if optAST.Source().Content() != replacement {
 		t.Errorf("got source content %q, wanted %q", optAST.Source().Content(), replacement)
@@ -431,6 +434,7 @@ func TestConstantFoldingOptimizerTwoVar(t *testing.T) {
 			if iss.Err() != nil {
 				t.Fatalf("Optimize() generated an invalid AST: %v", iss.Err())
 			}
+			cel.AssertNormalizedIDs(t, optimized)
 			folded, err := cel.AstToString(optimized)
 			if err != nil {
 				t.Fatalf("AstToString() failed: %v", err)

@@ -549,6 +549,41 @@ func TestNavigableStructExpr(t *testing.T) {
 	}
 }
 
+func TestNavigableEntryRenumberIDs(t *testing.T) {
+	tests := []string{
+		`{'hello': [1, 2]}`,
+		`google.expr.proto3.test.TestAllTypes{single_int32: 1, repeated_int32: [1, 2]}`,
+	}
+	for _, tst := range tests {
+		tc := tst
+		t.Run(tc, func(t *testing.T) {
+			checked := mustTypeCheck(t, tc)
+			expr := ast.NavigateAST(checked)
+			var entries []ast.EntryExpr
+			if expr.Kind() == ast.MapKind {
+				entries = expr.AsMap().Entries()
+			} else {
+				entries = expr.AsStruct().Fields()
+			}
+			for _, e := range entries {
+				e.RenumberIDs(func(id int64) int64 { return id + 100 })
+			}
+			// Every descendant beneath the root must now have a renumbered id, including the
+			// keys and values reachable only through the navigable entries.
+			ids := map[int64]struct{}{}
+			ast.PostOrderVisit(checked.Expr(), ast.NewExprVisitor(func(e ast.Expr) {
+				ids[e.ID()] = struct{}{}
+				if e.ID() != checked.Expr().ID() && e.ID() <= 100 {
+					t.Errorf("expr %v id %d was not renumbered", e, e.ID())
+				}
+			}))
+			if len(ids) < 4 {
+				t.Errorf("visited ids %v, wanted at least 4 distinct expressions", ids)
+			}
+		})
+	}
+}
+
 func TestNavigableComprehensionExpr(t *testing.T) {
 	checked := mustTypeCheck(t, `[true].exists(i, i)`)
 	expr := ast.NavigateAST(checked)
