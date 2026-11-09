@@ -56,7 +56,7 @@ func (b Bytes) Compare(other ref.Val) ref.Val {
 	if !ok {
 		return ValOrErr(other, "no such overload")
 	}
-	return Int(bytes.Compare(b, otherBytes))
+	return compareResult(Int(bytes.Compare(b, otherBytes)))
 }
 
 // ConvertToNative implements the ref.Val interface method.

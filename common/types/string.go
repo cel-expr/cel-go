@@ -59,7 +59,7 @@ func (s String) Compare(other ref.Val) ref.Val {
 	if !ok {
 		return MaybeNoSuchOverloadErr(other)
 	}
-	return Int(strings.Compare(string(s), string(otherString)))
+	return compareResult(Int(strings.Compare(string(s), string(otherString))))
 }
 
 // ConvertToNative implements ref.Val.ConvertToNative.
