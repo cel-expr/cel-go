@@ -68,11 +68,11 @@ func (i Int) Compare(other ref.Val) ref.Val {
 		if math.IsNaN(float64(ov)) {
 			return NewErr("NaN values cannot be ordered")
 		}
-		return compareIntDouble(i, ov)
+		return compareResult(compareIntDouble(i, ov))
 	case Int:
 		return compareInt(i, ov)
 	case Uint:
-		return compareIntUint(i, ov)
+		return compareResult(compareIntUint(i, ov))
 	default:
 		return MaybeNoSuchOverloadErr(other)
 	}

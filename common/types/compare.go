@@ -20,6 +20,21 @@ import (
 	"cel.dev/cel-go/common/types/ref"
 )
 
+// compareResult returns the result of a comparison as a ref.Val without allocating.
+//
+// Converting an Int computed at run time to ref.Val boxes it, and Go keeps preallocated boxes only for small
+// non-negative values, so a result of -1 allocated on every less-than comparison. The three results are
+// constants here, and a constant converts to an interface without allocating.
+func compareResult(c Int) ref.Val {
+	switch {
+	case c < 0:
+		return IntNegOne
+	case c > 0:
+		return IntOne
+	}
+	return IntZero
+}
+
 func compareDoubleInt(d Double, i Int) Int {
 	if d < math.MinInt64 {
 		return IntNegOne
