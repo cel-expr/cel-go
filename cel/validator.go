@@ -365,7 +365,7 @@ func (v homogeneousAggregateLiteralValidator) Validate(_ *Env, c ValidatorConfig
 		for i, e := range elements {
 			et := a.GetType(e.ID())
 			if isOptionalIndex(i, optIndices) {
-				et = et.Parameters()[0]
+				et = maybeUnwrapOptional(et)
 			}
 			if elemType == nil {
 				elemType = et
@@ -390,7 +390,7 @@ func (v homogeneousAggregateLiteralValidator) Validate(_ *Env, c ValidatorConfig
 			key, val := mapEntry.Key(), mapEntry.Value()
 			kt, vt := a.GetType(key.ID()), a.GetType(val.ID())
 			if mapEntry.IsOptional() {
-				vt = vt.Parameters()[0]
+				vt = maybeUnwrapOptional(vt)
 			}
 			if keyType == nil && valType == nil {
 				keyType, valType = kt, vt
@@ -427,6 +427,16 @@ func isOptionalIndex(i int, optIndices []int32) bool {
 		}
 	}
 	return false
+}
+
+// maybeUnwrapOptional returns the wrapped element type when t is optional_type(T), or t unchanged
+// otherwise (for example, when the type-checker accepts dyn or google.protobuf.Any at an optional
+// aggregate index or entry without wrapping it in optional_type).
+func maybeUnwrapOptional(t *Type) *Type {
+	if t.Kind() == types.OpaqueKind && t.TypeName() == "optional_type" && len(t.Parameters()) == 1 {
+		return t.Parameters()[0]
+	}
+	return t
 }
 
 func (homogeneousAggregateLiteralValidator) typeMismatch(iss *Issues, id int64, expected, actual *Type) {

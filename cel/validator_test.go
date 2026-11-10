@@ -19,6 +19,8 @@ import (
 	"reflect"
 	"testing"
 
+	"cel.dev/cel-go/common"
+	"cel.dev/cel-go/common/ast"
 	celenv "cel.dev/cel-go/common/env"
 	"cel.dev/cel-go/common/operators"
 	"cel.dev/cel-go/common/overloads"
@@ -360,6 +362,193 @@ func TestValidateHomogeneousAggregateLiterals(t *testing.T) {
 				t.Fatalf("e.Compile(%v) failed: %v", tc.expr, iss.Err())
 			}
 		})
+	}
+}
+
+func TestValidateHomogeneousAggregateLiteralsOptionalDyn(t *testing.T) {
+	env, err := NewEnv(
+		Variable("any_val", AnyType),
+		OptionalTypes(),
+		HomogeneousAggregateLiterals(),
+	)
+	if err != nil {
+		t.Fatalf("NewEnv() failed: %v", err)
+	}
+
+	tests := []struct {
+		expr string
+		iss  string
+	}{
+		{
+			expr: `[?dyn(1)]`,
+		},
+		{
+			expr: `[?dyn(1), ?dyn('hello')]`,
+		},
+		{
+			expr: `[?dyn(1), dyn('hello')]`,
+		},
+		{
+			expr: `[dyn('hello'), ?dyn(1)]`,
+		},
+		{
+			expr: `{?'k': dyn(1)}`,
+		},
+		{
+			expr: `{?'k1': dyn(1), ?'k2': dyn('hello')}`,
+		},
+		{
+			expr: `{?'k1': dyn(1), 'k2': dyn('hello')}`,
+		},
+		{
+			expr: `{'k1': dyn('hello'), ?'k2': dyn(1)}`,
+		},
+		{
+			expr: `[?any_val]`,
+		},
+		{
+			expr: `{?'k': any_val}`,
+		},
+		{
+			expr: `[?dyn(1), 2]`,
+			iss: `
+			ERROR: <input>:1:11: expected type 'dyn' but found 'int'
+             | [?dyn(1), 2]
+             | ..........^`,
+		},
+		{
+			expr: `[1, ?dyn(2)]`,
+			iss: `
+			ERROR: <input>:1:9: expected type 'int' but found 'dyn'
+             | [1, ?dyn(2)]
+             | ........^`,
+		},
+		{
+			expr: `[?optional.of(1), ?dyn(2)]`,
+			iss: `
+			ERROR: <input>:1:23: expected type 'int' but found 'dyn'
+             | [?optional.of(1), ?dyn(2)]
+             | ......................^`,
+		},
+		{
+			expr: `{?'k1': dyn(1), 'k2': 2}`,
+			iss: `
+			ERROR: <input>:1:23: expected type 'dyn' but found 'int'
+             | {?'k1': dyn(1), 'k2': 2}
+             | ......................^`,
+		},
+		{
+			expr: `{'k1': 1, ?'k2': dyn(2)}`,
+			iss: `
+			ERROR: <input>:1:21: expected type 'int' but found 'dyn'
+             | {'k1': 1, ?'k2': dyn(2)}
+             | ....................^`,
+		},
+		{
+			expr: `{?'k1': optional.of(1), ?'k2': dyn(2)}`,
+			iss: `
+			ERROR: <input>:1:35: expected type 'int' but found 'dyn'
+             | {?'k1': optional.of(1), ?'k2': dyn(2)}
+             | ..................................^`,
+		},
+		{
+			expr: `[?any_val, 1]`,
+			iss: `
+			ERROR: <input>:1:12: expected type 'any' but found 'int'
+             | [?any_val, 1]
+             | ...........^`,
+		},
+		{
+			expr: `{?'k1': any_val, 'k2': 1}`,
+			iss: `
+			ERROR: <input>:1:24: expected type 'any' but found 'int'
+             | {?'k1': any_val, 'k2': 1}
+             | .......................^`,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.expr, func(t *testing.T) {
+			_, iss := env.Compile(tc.expr)
+			if tc.iss != "" {
+				if iss.Err() == nil {
+					t.Fatalf("env.Compile(%q) returned ast, expected error: %v", tc.expr, tc.iss)
+				}
+				if !test.Compare(iss.Err().Error(), tc.iss) {
+					t.Fatalf("env.Compile(%q) returned %v, expected error: %v", tc.expr, iss.Err(), tc.iss)
+				}
+				return
+			}
+			if iss.Err() != nil {
+				t.Fatalf("env.Compile(%q) failed: %v", tc.expr, iss.Err())
+			}
+		})
+	}
+}
+
+func TestValidateHomogeneousAggregateLiteralsNonOptionalASTTypes(t *testing.T) {
+	env, err := NewEnv(OptionalTypes())
+	if err != nil {
+		t.Fatalf("NewEnv() failed: %v", err)
+	}
+	validator := ValidateHomogeneousAggregateLiterals()
+	cfg := newValidatorConfig()
+
+	// Unchecked AST has an empty TypeMap (all GetType calls return dyn) and should not panic.
+	parsed, iss := env.Parse(`[?1, ?'a'] == [{?'k': 1}]`)
+	if iss.Err() != nil {
+		t.Fatalf("env.Parse() failed: %v", iss.Err())
+	}
+	valIss := NewIssuesWithSourceInfo(common.NewErrors(parsed.Source()), parsed.NativeRep().SourceInfo())
+	validator.Validate(env, cfg, parsed.NativeRep(), valIss)
+	if valIss.Err() != nil {
+		t.Fatalf("Validate() on unchecked AST failed: %v", valIss.Err())
+	}
+
+	// Non-optional parameterized types at an optional index or map entry in a constructed AST
+	// should not be unwrapped as if they were optional_type(T).
+	parsedList, iss := env.Parse(`[1, ?[1]]`)
+	if iss.Err() != nil {
+		t.Fatalf("env.Parse() failed: %v", iss.Err())
+	}
+	elems := parsedList.NativeRep().Expr().AsList().Elements()
+	checkedList := ast.NewCheckedAST(parsedList.NativeRep(), map[int64]*Type{
+		elems[0].ID(): IntType,
+		elems[1].ID(): ListType(IntType),
+	}, map[int64]*ast.ReferenceInfo{})
+	valIss = NewIssuesWithSourceInfo(common.NewErrors(parsedList.Source()), checkedList.SourceInfo())
+	validator.Validate(env, cfg, checkedList, valIss)
+	if valIss.Err() == nil {
+		t.Fatal("Validate() on [1, ?[1]] with list(int) at optional index succeeded, wanted type mismatch error")
+	}
+
+	parsedMap, iss := env.Parse(`{'a': 1, ?'b': [1]}`)
+	if iss.Err() != nil {
+		t.Fatalf("env.Parse() failed: %v", iss.Err())
+	}
+	entries := parsedMap.NativeRep().Expr().AsMap().Entries()
+	entry0, entry1 := entries[0].AsMapEntry(), entries[1].AsMapEntry()
+	checkedMap := ast.NewCheckedAST(parsedMap.NativeRep(), map[int64]*Type{
+		entry0.Key().ID():   StringType,
+		entry0.Value().ID(): IntType,
+		entry1.Key().ID():   StringType,
+		entry1.Value().ID(): ListType(IntType),
+	}, map[int64]*ast.ReferenceInfo{})
+	valIss = NewIssuesWithSourceInfo(common.NewErrors(parsedMap.Source()), checkedMap.SourceInfo())
+	validator.Validate(env, cfg, checkedMap, valIss)
+	if valIss.Err() == nil {
+		t.Fatal("Validate() on {'a': 1, ?'b': [1]} with list(int) at optional entry succeeded, wanted type mismatch error")
+	}
+
+	// An unparameterized optional_type in a constructed AST should not panic.
+	bareOptType := OpaqueType("optional_type")
+	checkedBareOpt := ast.NewCheckedAST(parsedList.NativeRep(), map[int64]*Type{
+		elems[0].ID(): bareOptType,
+		elems[1].ID(): bareOptType,
+	}, map[int64]*ast.ReferenceInfo{})
+	valIss = NewIssuesWithSourceInfo(common.NewErrors(parsedList.Source()), checkedBareOpt.SourceInfo())
+	validator.Validate(env, cfg, checkedBareOpt, valIss)
+	if valIss.Err() != nil {
+		t.Fatalf("Validate() on unparameterized optional_type failed: %v", valIss.Err())
 	}
 }
 
