@@ -17,10 +17,12 @@ package cel
 import (
 	"context"
 	"errors"
+	"fmt"
 	"maps"
 	"math"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 
 	"google.golang.org/protobuf/encoding/prototext"
@@ -2073,12 +2075,243 @@ func TestNewConstantFoldingOptimizer_Options(t *testing.T) {
 		t.Errorf("expected error, got nil")
 	}
 
-	folder, err := NewConstantFoldingOptimizer(FoldKnownValues(nil), MaxConstantFoldIterations(10))
+	folder, err := NewConstantFoldingOptimizer(FoldKnownValues(nil), MaxConstantFoldIterations(10), ConstantFoldCostLimit(1000))
 	if err != nil {
 		t.Fatalf("NewConstantFoldingOptimizer() failed: %v", err)
 	}
 	if folder == nil {
 		t.Errorf("expected non-nil folder")
+	}
+}
+
+func TestConstantFoldingOptimizer_CostLimit(t *testing.T) {
+	// 8-deep nested map comprehension (~10^8 iterations if fully evaluated).
+	nestedMapExpr := `[0,0,0,0,0,0,0,0,0,0].map(a,` +
+		`[0,0,0,0,0,0,0,0,0,0].map(b,` +
+		`[0,0,0,0,0,0,0,0,0,0].map(c,` +
+		`[0,0,0,0,0,0,0,0,0,0].map(d,` +
+		`[0,0,0,0,0,0,0,0,0,0].map(e,` +
+		`[0,0,0,0,0,0,0,0,0,0].map(f,` +
+		`[0,0,0,0,0,0,0,0,0,0].map(g,` +
+		`[0,0,0,0,0,0,0,0,0,0].map(h, 0))))))))`
+
+	// Exponential list doubling via O(1) AddList (low runtime cost, huge expanded size).
+	var listDoubleExpr strings.Builder
+	listDoubleExpr.WriteString(`[[0,1,2,3,4,5,6,7,8,9]].map(v0, `)
+	for i := 1; i <= 25; i++ {
+		fmt.Fprintf(&listDoubleExpr, `[v%d + v%d].map(v%d, `, i-1, i-1, i)
+	}
+	listDoubleExpr.WriteString(`v25`)
+	for i := 0; i < 25; i++ {
+		listDoubleExpr.WriteString(`)[0]`)
+	}
+	listDoubleExpr.WriteString(`)[0]`)
+
+	// Exponential nested list construction via [v, v] (low runtime cost, huge node tree).
+	var listNestExpr strings.Builder
+	listNestExpr.WriteString(`[[0]].map(v0, `)
+	for i := 1; i <= 25; i++ {
+		fmt.Fprintf(&listNestExpr, `[[v%d, v%d]].map(v%d, `, i-1, i-1, i)
+	}
+	listNestExpr.WriteString(`v25`)
+	for i := 0; i < 25; i++ {
+		listNestExpr.WriteString(`)[0]`)
+	}
+	listNestExpr.WriteString(`)[0]`)
+
+	env, err := NewEnv(EnableMacroCallTracking(), Variable("x", BoolType))
+	if err != nil {
+		t.Fatalf("NewEnv() failed: %v", err)
+	}
+
+	t.Run("default_cost_limit_bounds_nested_comprehension", func(t *testing.T) {
+		checked, iss := env.Compile(nestedMapExpr)
+		if iss.Err() != nil {
+			t.Fatalf("Compile() failed: %v", iss.Err())
+		}
+		folder, err := NewConstantFoldingOptimizer()
+		if err != nil {
+			t.Fatalf("NewConstantFoldingOptimizer() failed: %v", err)
+		}
+		opt, err := NewStaticOptimizer(folder)
+		if err != nil {
+			t.Fatalf("NewStaticOptimizer() failed: %v", err)
+		}
+		optimized, iss := opt.Optimize(env, checked)
+		if iss.Err() != nil {
+			t.Fatalf("Optimize() failed: %v", iss.Err())
+		}
+		assertNormalizedIDs(t, optimized)
+
+		// The comprehension remains unfolded, so runtime CostLimit still catches it.
+		prg, err := env.Program(optimized, CostLimit(1000))
+		if err != nil {
+			t.Fatalf("Program() failed: %v", err)
+		}
+		_, _, err = prg.Eval(NoVars())
+		var cancelErr interpreter.EvalCancelledError
+		if !errors.As(err, &cancelErr) || cancelErr.Cause != interpreter.CostLimitExceeded {
+			t.Fatalf("prg.Eval() got err %v, wanted CostLimitExceeded", err)
+		}
+	})
+
+	t.Run("short_circuit_with_expensive_subexpr", func(t *testing.T) {
+		expr := `x || (` + nestedMapExpr + `.size() > 0)`
+		checked, iss := env.Compile(expr)
+		if iss.Err() != nil {
+			t.Fatalf("Compile() failed: %v", iss.Err())
+		}
+		folder, err := NewConstantFoldingOptimizer()
+		if err != nil {
+			t.Fatalf("NewConstantFoldingOptimizer() failed: %v", err)
+		}
+		opt, err := NewStaticOptimizer(folder)
+		if err != nil {
+			t.Fatalf("NewStaticOptimizer() failed: %v", err)
+		}
+		optimized, iss := opt.Optimize(env, checked)
+		if iss.Err() != nil {
+			t.Fatalf("Optimize() failed: %v", iss.Err())
+		}
+		prg, err := env.Program(optimized, CostLimit(1000))
+		if err != nil {
+			t.Fatalf("Program() failed: %v", err)
+		}
+		out, _, err := prg.Eval(map[string]any{"x": true})
+		if err != nil || out != types.True {
+			t.Fatalf("prg.Eval(x=true) got (%v, %v), wanted (true, nil)", out, err)
+		}
+	})
+
+	t.Run("exponential_list_concat_and_nesting_stay_unfolded", func(t *testing.T) {
+		for _, tc := range []struct {
+			name string
+			expr string
+		}{
+			{name: "add_list_doubling", expr: listDoubleExpr.String()},
+			{name: "nested_list_doubling", expr: listNestExpr.String()},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				checked, iss := env.Compile(tc.expr)
+				if iss.Err() != nil {
+					t.Fatalf("Compile() failed: %v", iss.Err())
+				}
+				folder, err := NewConstantFoldingOptimizer()
+				if err != nil {
+					t.Fatalf("NewConstantFoldingOptimizer() failed: %v", err)
+				}
+				opt, err := NewStaticOptimizer(folder)
+				if err != nil {
+					t.Fatalf("NewStaticOptimizer() failed: %v", err)
+				}
+				optimized, iss := opt.Optimize(env, checked)
+				if iss.Err() != nil {
+					t.Fatalf("Optimize() failed: %v", iss.Err())
+				}
+				assertNormalizedIDs(t, optimized)
+				if optimized.NativeRep().Expr().Kind() == ast.LiteralKind {
+					t.Fatalf("expected huge literal result not to be folded into AST")
+				}
+			})
+		}
+	})
+
+	t.Run("custom_cost_limit", func(t *testing.T) {
+		tests := []struct {
+			name      string
+			expr      string
+			costLimit uint64
+			wantFold  string
+		}{
+			{
+				name:      "zero_cost_limit_skips_eval_allows_pruning",
+				expr:      `true ? (1 + 2) : 4`,
+				costLimit: 0,
+				wantFold:  `1 + 2`,
+			},
+			{
+				name:      "low_cost_limit_skips_comprehension_folds_simple_sibling",
+				expr:      `[1, 2, 3, 4, 5].map(i, i * 2).size() + (1 + 2)`,
+				costLimit: 5,
+				wantFold:  `[1, 2, 3, 4, 5].map(i, i * 2).size() + 3`,
+			},
+			{
+				name:      "sufficient_cost_limit_folds_comprehension",
+				expr:      `[1, 2, 3, 4, 5].map(i, i * 2).size() + (1 + 2)`,
+				costLimit: 1000,
+				wantFold:  `8`,
+			},
+		}
+		for _, tc := range tests {
+			t.Run(tc.name, func(t *testing.T) {
+				checked, iss := env.Compile(tc.expr)
+				if iss.Err() != nil {
+					t.Fatalf("Compile() failed: %v", iss.Err())
+				}
+				folder, err := NewConstantFoldingOptimizer(ConstantFoldCostLimit(tc.costLimit))
+				if err != nil {
+					t.Fatalf("NewConstantFoldingOptimizer() failed: %v", err)
+				}
+				opt, err := NewStaticOptimizer(folder)
+				if err != nil {
+					t.Fatalf("NewStaticOptimizer() failed: %v", err)
+				}
+				optimized, iss := opt.Optimize(env, checked)
+				if iss.Err() != nil {
+					t.Fatalf("Optimize() failed: %v", iss.Err())
+				}
+				assertNormalizedIDs(t, optimized)
+				got, err := AstToString(optimized)
+				if err != nil {
+					t.Fatalf("AstToString() failed: %v", err)
+				}
+				if got != tc.wantFold {
+					t.Errorf("got %q, wanted %q", got, tc.wantFold)
+				}
+			})
+		}
+	})
+}
+
+func TestConstantFoldingOptimizer_UnfoldableEvaluatedOnce(t *testing.T) {
+	var callCount int
+	env, err := NewEnv(
+		Function("fail_eval",
+			Overload("fail_eval_int", []*Type{IntType}, IntType,
+				UnaryBinding(func(arg ref.Val) ref.Val {
+					callCount++
+					return types.NewErr("boom")
+				}),
+			),
+		),
+	)
+	if err != nil {
+		t.Fatalf("NewEnv() failed: %v", err)
+	}
+	folder, err := NewConstantFoldingOptimizer(MaxConstantFoldIterations(100))
+	if err != nil {
+		t.Fatalf("NewConstantFoldingOptimizer() failed: %v", err)
+	}
+	opt, err := NewStaticOptimizer(folder)
+	if err != nil {
+		t.Fatalf("NewStaticOptimizer() failed: %v", err)
+	}
+
+	for _, expr := range []string{`fail_eval(1) + (2 + 3)`, `[1].map(i, fail_eval(i))`} {
+		t.Run(expr, func(t *testing.T) {
+			callCount = 0
+			checked, iss := env.Compile(expr)
+			if iss.Err() != nil {
+				t.Fatalf("Compile() failed: %v", iss.Err())
+			}
+			_, iss = opt.Optimize(env, checked)
+			if iss.Err() != nil {
+				t.Fatalf("Optimize() failed: %v", iss.Err())
+			}
+			if callCount != 1 {
+				t.Errorf("fail_eval invoked %d times during Optimize, wanted 1", callCount)
+			}
+		})
 	}
 }
 
@@ -2212,6 +2445,18 @@ func TestAdaptLiteral(t *testing.T) {
 	nonCelType := &unadaptableVal{valType: nil}
 	if _, err := adaptLiteral(optCtx, nonCelType); err == nil {
 		t.Errorf("expected error adapting non-CEL type, got nil")
+	}
+
+	// Error branch: Node budget exceeded for list
+	smallBudget := 2
+	if _, err := adaptLiteralWithBudget(optCtx, listVal, &smallBudget); err == nil {
+		t.Errorf("expected error adapting list exceeding node budget, got nil")
+	}
+
+	// Error branch: Node budget exceeded for map
+	smallMapBudget := 2
+	if _, err := adaptLiteralWithBudget(optCtx, mapVal, &smallMapBudget); err == nil {
+		t.Errorf("expected error adapting map exceeding node budget, got nil")
 	}
 }
 
