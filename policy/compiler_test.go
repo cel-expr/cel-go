@@ -991,5 +991,10 @@ func TestCompileRuleValidation(t *testing.T) {
 		if iss.Err() == nil {
 			t.Fatalf("Compile() succeeded, wanted error")
 		}
+		for _, want := range []string{"variable cannot be nil", "match cannot be nil", "rule must specify at least one match"} {
+			if !strings.Contains(iss.Err().Error(), want) {
+				t.Errorf("Compile() got %v, wanted error containing %q", iss.Err(), want)
+			}
+		}
 	})
 }

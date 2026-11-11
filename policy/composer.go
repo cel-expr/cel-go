@@ -120,9 +120,12 @@ func (c *RuleComposer) Compose(r *CompiledRule) (*cel.Ast, *cel.Issues) {
 func recoverOriginalSource(r *CompiledRule) cel.Source {
 	if src := findRuleSource(r); src != nil {
 		if rel, ok := src.(*RelativeSource); ok {
-			return rel.Source
+			if rel.Source != nil {
+				return rel.Source
+			}
+		} else {
+			return src
 		}
-		return src
 	}
 	return common.NewTextSource("")
 }
