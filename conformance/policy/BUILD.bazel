@@ -9,7 +9,7 @@ package(
 proto_descriptor_set(
     name = "test_all_types_fds",
     deps = [
-        "@dev_cel_expr//proto/cel/expr/conformance/proto3:test_all_types_proto",
+        "@cel_conformance//proto/cel/expr/conformance/proto3:test_all_types_proto",
     ],
 )
 
@@ -38,4 +38,3 @@ cel_policy_conformance_test_go(
     file_descriptor_set = ":test_all_types_fds",
     testdata = "@cel_policy//conformance:testdata",
 )
-

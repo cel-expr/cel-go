@@ -291,7 +291,7 @@ func TestConformance(t *testing.T) {
 	var files []*testpb.SimpleTestFile
 	for _, path := range tests {
 		path = strings.TrimPrefix(path, "external/")
-		f, err := runfiles.RlocationFrom(path, "com_google_cel_spec")
+		f, err := runfiles.RlocationFrom(path, "cel_conformance")
 		if err != nil {
 			log.Fatalf("failed to find runfile %q: %v", path, err)
 		}

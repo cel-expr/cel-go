@@ -46,5 +46,5 @@ source_info_proto_descriptor_set(
 
 source_info_proto_descriptor_set(
     name = "test_all_types_fds",
-    proto_libs = ["@dev_cel_expr//proto/cel/expr/conformance/proto3:test_all_types_proto"],
+    proto_libs = ["@cel_conformance//proto/cel/expr/conformance/proto3:test_all_types_proto"],
 )
