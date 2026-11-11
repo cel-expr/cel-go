@@ -1,0 +1,29 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+package(
+    default_visibility = ["//visibility:public"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+go_library(
+    name = "go_default_library",
+    srcs = [
+        "bitset.go",
+        "dictionary.go",
+        "signals.go",
+    ],
+    importpath = "cel.dev/cel-go/ext/classify/common",
+)
+
+go_test(
+    name = "go_default_test",
+    size = "small",
+    srcs = [
+        "bitset_test.go",
+        "dictionary_test.go",
+        "signals_test.go",
+    ],
+    embed = [
+        ":go_default_library",
+    ],
+)
