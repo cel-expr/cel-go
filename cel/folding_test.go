@@ -21,6 +21,7 @@ import (
 	"math"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 
 	"google.golang.org/protobuf/encoding/prototext"
@@ -2073,12 +2074,80 @@ func TestNewConstantFoldingOptimizer_Options(t *testing.T) {
 		t.Errorf("expected error, got nil")
 	}
 
-	folder, err := NewConstantFoldingOptimizer(FoldKnownValues(nil), MaxConstantFoldIterations(10))
+	folder, err := NewConstantFoldingOptimizer(FoldKnownValues(nil), MaxConstantFoldIterations(10), ConstantFoldCostLimit(1000))
 	if err != nil {
 		t.Fatalf("NewConstantFoldingOptimizer() failed: %v", err)
 	}
 	if folder == nil {
 		t.Errorf("expected non-nil folder")
+	}
+}
+
+func TestConstantFoldingOptimizer_CostLimit(t *testing.T) {
+	// 8-deep nested map comprehension (~10^8 iterations if fully evaluated).
+	nestedMapExpr := `[0,0,0,0,0,0,0,0,0,0].map(a,` +
+		`[0,0,0,0,0,0,0,0,0,0].map(b,` +
+		`[0,0,0,0,0,0,0,0,0,0].map(c,` +
+		`[0,0,0,0,0,0,0,0,0,0].map(d,` +
+		`[0,0,0,0,0,0,0,0,0,0].map(e,` +
+		`[0,0,0,0,0,0,0,0,0,0].map(f,` +
+		`[0,0,0,0,0,0,0,0,0,0].map(g,` +
+		`[0,0,0,0,0,0,0,0,0,0].map(h, 0))))))))`
+
+	env, err := NewEnv(EnableMacroCallTracking())
+	if err != nil {
+		t.Fatalf("NewEnv() failed: %v", err)
+	}
+	tests := []struct {
+		name     string
+		expr     string
+		opts     []ConstantFoldingOption
+		wantFold string
+	}{
+		{
+			name:     "default_cost_limit_skips_expensive_comprehension",
+			expr:     nestedMapExpr + `.size() + (1 + 2)`,
+			wantFold: nestedMapExpr + `.size() + 3`,
+		},
+		{
+			name:     "low_cost_limit_skips_comprehension",
+			expr:     `[1, 2, 3, 4, 5].map(i, i * 2).size() + (1 + 2)`,
+			opts:     []ConstantFoldingOption{ConstantFoldCostLimit(5)},
+			wantFold: `[1, 2, 3, 4, 5].map(i, i * 2).size() + 3`,
+		},
+		{
+			name:     "sufficient_cost_limit_folds_comprehension",
+			expr:     `[1, 2, 3, 4, 5].map(i, i * 2).size() + (1 + 2)`,
+			opts:     []ConstantFoldingOption{ConstantFoldCostLimit(1000)},
+			wantFold: `8`,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			checked, iss := env.Compile(tc.expr)
+			if iss.Err() != nil {
+				t.Fatalf("Compile() failed: %v", iss.Err())
+			}
+			folder, err := NewConstantFoldingOptimizer(tc.opts...)
+			if err != nil {
+				t.Fatalf("NewConstantFoldingOptimizer() failed: %v", err)
+			}
+			opt, err := NewStaticOptimizer(folder)
+			if err != nil {
+				t.Fatalf("NewStaticOptimizer() failed: %v", err)
+			}
+			optimized, iss := opt.Optimize(env, checked)
+			if iss.Err() != nil {
+				t.Fatalf("Optimize() failed: %v", iss.Err())
+			}
+			got, err := AstToString(optimized)
+			if err != nil {
+				t.Fatalf("AstToString() failed: %v", err)
+			}
+			if got != tc.wantFold {
+				t.Errorf("got %q, wanted %q", got, tc.wantFold)
+			}
+		})
 	}
 }
 
