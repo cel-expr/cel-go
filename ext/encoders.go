@@ -25,6 +25,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"cel.dev/cel-go/cel"
 	"cel.dev/cel-go/common/cost"
@@ -38,8 +39,9 @@ import (
 )
 
 const (
-	maxJSONSize = 10 * 1024 * 1024 // 10MB maximum allowed JSON string size
-	maxYAMLSize = 10 * 1024 * 1024 // 10MB maximum allowed YAML string size
+	maxParseSize = 10 * 1024 * 1024 // 10MB default maximum allowed parse input size
+	maxJSONSize  = maxParseSize     // 10MB maximum allowed JSON string size
+	maxYAMLSize  = maxParseSize     // 10MB maximum allowed YAML string size
 )
 
 // Encoders returns a cel.EnvOption to configure extended functions for string, byte, and object
@@ -116,17 +118,39 @@ const (
 //
 // # JSON.Parse
 //
-// Introduced at version: 2
+// Introduced at version: 2 (`<bytes>` overloads introduced at version: 3)
 //
-// Parses a JSON string to a CEL value or a specific type.
+// Parses a JSON string or bytes value to a CEL value or a specific type.
 //
 //	json.parse(<string>) -> <optional_type(dyn)>
 //	json.parse(<string>, <type(T)>) -> <optional_type(T)>
+//	json.parse(<bytes>) -> <optional_type(dyn)>
+//	json.parse(<bytes>, <type(T)>) -> <optional_type(T)>
 //
 // Examples:
 //
 //	json.parse('{"hello":"world"}') // return optional.of({'hello': 'world'})
 //	json.parse('123', int) // return optional.of(123)
+//	json.parse(b'{"hello":"world"}') // return optional.of({'hello': 'world'})
+//
+// # JSON.ParseStrict
+//
+// Introduced at version: 3
+//
+// Parses a JSON string or bytes value in strict RFC 8259 mode. In addition to standard JSON
+// syntax, strict mode requires valid UTF-8, rejects duplicate object member names at every
+// nesting level, rejects unknown struct fields, and requires case-sensitive struct field
+// matching.
+//
+//	json.parseStrict(<string>) -> <optional_type(dyn)>
+//	json.parseStrict(<string>, <type(T)>) -> <optional_type(T)>
+//	json.parseStrict(<bytes>) -> <optional_type(dyn)>
+//	json.parseStrict(<bytes>, <type(T)>) -> <optional_type(T)>
+//
+// Examples:
+//
+//	json.parseStrict('{"a": 1, "b": 2}') // return optional.of({'a': 1, 'b': 2})
+//	json.parseStrict('{"a": 1, "a": 2}') // return optional.none()
 //
 // # YAML.Encode
 //
@@ -142,17 +166,20 @@ const (
 //
 // # YAML.Parse
 //
-// Introduced at version: 2
+// Introduced at version: 2 (`<bytes>` overloads introduced at version: 3)
 //
-// Parses a YAML string to a CEL value or a specific type.
+// Parses a YAML string or bytes value to a CEL value or a specific type.
 //
 //	yaml.parse(<string>) -> <optional_type(dyn)>
 //	yaml.parse(<string>, <type(T)>) -> <optional_type(T)>
+//	yaml.parse(<bytes>) -> <optional_type(dyn)>
+//	yaml.parse(<bytes>, <type(T)>) -> <optional_type(T)>
 //
 // Examples:
 //
 //	yaml.parse('hello: world') // return optional.of({'hello': 'world'})
 //	yaml.parse('123', int) // return optional.of(123)
+//	yaml.parse(b'hello: world') // return optional.of({'hello': 'world'})
 func Encoders(options ...EncodersOption) cel.EnvOption {
 	l := &encoderLib{version: math.MaxUint32}
 	for _, o := range options {
@@ -181,6 +208,12 @@ func (*encoderLib) LibraryName() string {
 }
 
 func (lib *encoderLib) CompileOptions() []cel.EnvOption {
+	adapt := func() types.Adapter {
+		return types.DefaultTypeAdapter
+	}
+	prov := func() types.Provider {
+		return nil
+	}
 	opts := []cel.EnvOption{
 		cel.Function("base64.decode",
 			cel.Overload("base64_decode_string", []*cel.Type{cel.StringType}, cel.BytesType,
@@ -210,8 +243,6 @@ func (lib *encoderLib) CompileOptions() []cel.EnvOption {
 		)
 	}
 	if lib.version >= 2 {
-		var adapt types.Adapter = types.DefaultTypeAdapter
-		var prov types.Provider
 		opts = append(opts,
 			cel.CostModel(
 				base64DecodeCostModel("base64_decode_url_string"),
@@ -223,8 +254,8 @@ func (lib *encoderLib) CompileOptions() []cel.EnvOption {
 				unboundedCostModel("yaml_parse_string_type"),
 			),
 			func(e *cel.Env) (*cel.Env, error) {
-				adapt = e.CELTypeAdapter()
-				prov = e.CELTypeProvider()
+				adapt = e.CELTypeAdapter
+				prov = e.CELTypeProvider
 				return e, nil
 			},
 			cel.Function("base64.decodeUrl",
@@ -245,7 +276,7 @@ func (lib *encoderLib) CompileOptions() []cel.EnvOption {
 					cel.OptionalType(cel.DynType),
 					cel.UnaryBinding(func(val ref.Val) ref.Val {
 						str := val.(types.String)
-						return jsonParseString(adapt, string(str))
+						return jsonParseString(adapt(), string(str))
 					}),
 				),
 				cel.Overload("json_parse_string_type",
@@ -254,7 +285,7 @@ func (lib *encoderLib) CompileOptions() []cel.EnvOption {
 					cel.BinaryBinding(func(strVal, typeVal ref.Val) ref.Val {
 						str := strVal.(types.String)
 						targetType := typeVal.(ref.Type)
-						return jsonParseWithType(adapt, prov, string(str), targetType)
+						return jsonParseWithType(adapt(), prov(), string(str), targetType)
 					}),
 				),
 			),
@@ -269,7 +300,7 @@ func (lib *encoderLib) CompileOptions() []cel.EnvOption {
 					cel.OptionalType(cel.DynType),
 					cel.UnaryBinding(func(val ref.Val) ref.Val {
 						str := val.(types.String)
-						return yamlParseString(adapt, string(str))
+						return yamlParseString(adapt(), string(str))
 					}),
 				),
 				cel.Overload("yaml_parse_string_type",
@@ -278,7 +309,121 @@ func (lib *encoderLib) CompileOptions() []cel.EnvOption {
 					cel.BinaryBinding(func(strVal, typeVal ref.Val) ref.Val {
 						str := strVal.(types.String)
 						targetType := typeVal.(ref.Type)
-						return yamlParseWithType(adapt, prov, string(str), targetType)
+						return yamlParseWithType(adapt(), prov(), string(str), targetType)
+					}),
+				),
+			),
+		)
+	}
+	if lib.version >= 3 {
+		opts = append(opts,
+			cel.CostModel(
+				unboundedCostModel("json_parse_bytes"),
+				unboundedCostModel("json_parse_bytes_type"),
+				unboundedCostModel("json_parse_strict_string"),
+				unboundedCostModel("json_parse_strict_string_type"),
+				unboundedCostModel("json_parse_strict_bytes"),
+				unboundedCostModel("json_parse_strict_bytes_type"),
+				unboundedCostModel("yaml_parse_bytes"),
+				unboundedCostModel("yaml_parse_bytes_type"),
+			),
+			cel.Function("json.parse",
+				cel.Overload("json_parse_bytes",
+					[]*cel.Type{cel.BytesType},
+					cel.OptionalType(cel.DynType),
+					cel.UnaryBinding(func(val ref.Val) ref.Val {
+						strVal := val.ConvertToType(types.StringType)
+						if types.IsError(strVal) {
+							return types.OptionalNone
+						}
+						return jsonParseString(adapt(), string(strVal.(types.String)))
+					}),
+				),
+				cel.Overload("json_parse_bytes_type",
+					[]*cel.Type{cel.BytesType, types.NewTypeTypeWithParam(cel.TypeParamType("T"))},
+					cel.OptionalType(cel.TypeParamType("T")),
+					cel.BinaryBinding(func(bytesVal, typeVal ref.Val) ref.Val {
+						strVal := bytesVal.ConvertToType(types.StringType)
+						if types.IsError(strVal) {
+							return types.OptionalNone
+						}
+						targetType := typeVal.(ref.Type)
+						return jsonParseWithType(adapt(), prov(), string(strVal.(types.String)), targetType)
+					}),
+				),
+			),
+			cel.Function("json.parseStrict",
+				cel.Overload("json_parse_strict_string",
+					[]*cel.Type{cel.StringType},
+					cel.OptionalType(cel.DynType),
+					cel.UnaryBinding(func(val ref.Val) ref.Val {
+						str := val.(types.String)
+						return jsonParseStrictString(adapt(), string(str))
+					}),
+				),
+				cel.Overload("json_parse_strict_string_type",
+					[]*cel.Type{cel.StringType, types.NewTypeTypeWithParam(cel.TypeParamType("T"))},
+					cel.OptionalType(cel.TypeParamType("T")),
+					cel.BinaryBinding(func(strVal, typeVal ref.Val) ref.Val {
+						str := strVal.(types.String)
+						targetType := typeVal.(ref.Type)
+						return jsonParseStrictWithType(adapt(), prov(), string(str), targetType)
+					}),
+				),
+				cel.Overload("json_parse_strict_bytes",
+					[]*cel.Type{cel.BytesType},
+					cel.OptionalType(cel.DynType),
+					cel.UnaryBinding(func(val ref.Val) ref.Val {
+						b := []byte(val.(types.Bytes))
+						if len(b) > maxJSONSize {
+							return types.NewErr("json parse error: string size exceeds maximum allowed limit of %d bytes", maxJSONSize)
+						}
+						strVal := val.ConvertToType(types.StringType)
+						if types.IsError(strVal) {
+							return types.OptionalNone
+						}
+						return jsonParseStrictString(adapt(), string(strVal.(types.String)))
+					}),
+				),
+				cel.Overload("json_parse_strict_bytes_type",
+					[]*cel.Type{cel.BytesType, types.NewTypeTypeWithParam(cel.TypeParamType("T"))},
+					cel.OptionalType(cel.TypeParamType("T")),
+					cel.BinaryBinding(func(bytesVal, typeVal ref.Val) ref.Val {
+						b := []byte(bytesVal.(types.Bytes))
+						if len(b) > maxJSONSize {
+							return types.NewErr("json parse error: string size exceeds maximum allowed limit of %d bytes", maxJSONSize)
+						}
+						strVal := bytesVal.ConvertToType(types.StringType)
+						if types.IsError(strVal) {
+							return types.OptionalNone
+						}
+						targetType := typeVal.(ref.Type)
+						return jsonParseStrictWithType(adapt(), prov(), string(strVal.(types.String)), targetType)
+					}),
+				),
+			),
+			cel.Function("yaml.parse",
+				cel.Overload("yaml_parse_bytes",
+					[]*cel.Type{cel.BytesType},
+					cel.OptionalType(cel.DynType),
+					cel.UnaryBinding(func(val ref.Val) ref.Val {
+						strVal := val.ConvertToType(types.StringType)
+						if types.IsError(strVal) {
+							return types.OptionalNone
+						}
+						return yamlParseString(adapt(), string(strVal.(types.String)))
+					}),
+				),
+				cel.Overload("yaml_parse_bytes_type",
+					[]*cel.Type{cel.BytesType, types.NewTypeTypeWithParam(cel.TypeParamType("T"))},
+					cel.OptionalType(cel.TypeParamType("T")),
+					cel.BinaryBinding(func(bytesVal, typeVal ref.Val) ref.Val {
+						strVal := bytesVal.ConvertToType(types.StringType)
+						if types.IsError(strVal) {
+							return types.OptionalNone
+						}
+						targetType := typeVal.(ref.Type)
+						return yamlParseWithType(adapt(), prov(), string(strVal.(types.String)), targetType)
 					}),
 				),
 			),
@@ -287,8 +432,8 @@ func (lib *encoderLib) CompileOptions() []cel.EnvOption {
 	return opts
 }
 
-func (lib *encoderLib) ProgramOptions() []cel.ProgramOption {
-	return nil
+func (*encoderLib) ProgramOptions() []cel.ProgramOption {
+	return []cel.ProgramOption{}
 }
 
 // YAMLEncode encodes a CEL ref.Val to its YAML string representation.
@@ -328,7 +473,11 @@ func YAMLParseWithType(adapter types.Adapter, provider types.Provider, str strin
 	if !ok {
 		return nil, fmt.Errorf("yaml parse error: failed to parse YAML to type %v", targetType)
 	}
-	return JSONParseWithType(adapter, provider, jsonStr, targetType)
+	val, err := JSONParseWithType(adapter, provider, jsonStr, targetType)
+	if err != nil {
+		return nil, fmt.Errorf("yaml parse error: failed to parse YAML to type %v", targetType)
+	}
+	return val, nil
 }
 
 // JSONEncode encodes a CEL ref.Val to its JSON string representation.
@@ -367,6 +516,44 @@ func JSONParseWithType(adapter types.Adapter, provider types.Provider, str strin
 	val, ok := jsonParseValue(adapter, provider, str, targetType)
 	if !ok {
 		return nil, fmt.Errorf("json parse error: failed to parse JSON to type %v", targetType)
+	}
+	return adapter.NativeToValue(val), nil
+}
+
+// JSONParseStrict parses a JSON string in strict RFC 8259 mode into a dynamic CEL ref.Val.
+// Strict mode requires valid UTF-8 and rejects duplicate object member names at every nesting level.
+func JSONParseStrict(adapter types.Adapter, str string) (ref.Val, error) {
+	if adapter == nil {
+		adapter = types.DefaultTypeAdapter
+	}
+	if len(str) > maxJSONSize {
+		return nil, fmt.Errorf("json parse error: string size exceeds maximum allowed limit of %d bytes", maxJSONSize)
+	}
+	if !jsonValidateStrictRFC8259(str) {
+		return nil, fmt.Errorf("json parse error: invalid strict RFC 8259 JSON input")
+	}
+	return JSONParse(adapter, str)
+}
+
+// JSONParseStrictWithType parses a JSON string in strict RFC 8259 mode into a typed CEL ref.Val
+// conforming to targetType. In addition to valid UTF-8 and unique object member names, struct
+// unmarshaling rejects unknown fields and requires exact case-sensitive field names.
+func JSONParseStrictWithType(adapter types.Adapter, provider types.Provider, str string, targetType ref.Type) (ref.Val, error) {
+	if adapter == nil {
+		adapter = types.DefaultTypeAdapter
+	}
+	if provAdapter, ok := provider.(types.Adapter); ok && provAdapter != nil {
+		adapter = provAdapter
+	}
+	if len(str) > maxJSONSize {
+		return nil, fmt.Errorf("json parse error: string size exceeds maximum allowed limit of %d bytes", maxJSONSize)
+	}
+	if !jsonValidateStrictRFC8259(str) {
+		return nil, fmt.Errorf("json parse error: failed to parse strict RFC 8259 JSON to type %v", targetType)
+	}
+	val, ok := jsonParseValueMode(adapter, provider, str, targetType, true)
+	if !ok {
+		return nil, fmt.Errorf("json parse error: failed to parse strict RFC 8259 JSON to type %v", targetType)
 	}
 	return adapter.NativeToValue(val), nil
 }
@@ -695,6 +882,20 @@ func jsonParseString(adapter types.Adapter, str string) ref.Val {
 	return types.OptionalOf(adapter.NativeToValue(obj))
 }
 
+func jsonParseStrictString(adapter types.Adapter, str string) ref.Val {
+	if len(str) > maxJSONSize {
+		return types.NewErr("json parse error: string size exceeds maximum allowed limit of %d bytes", maxJSONSize)
+	}
+	if !jsonValidateStrictRFC8259(str) {
+		return types.OptionalNone
+	}
+	obj, ok := jsonParseDynamic(str)
+	if !ok {
+		return types.OptionalNone
+	}
+	return types.OptionalOf(adapter.NativeToValue(obj))
+}
+
 func jsonParseWithType(adapter types.Adapter, provider types.Provider, str string, targetType ref.Type) ref.Val {
 	if adapter == nil {
 		adapter = types.DefaultTypeAdapter
@@ -712,7 +913,142 @@ func jsonParseWithType(adapter types.Adapter, provider types.Provider, str strin
 	return types.OptionalOf(adapter.NativeToValue(val))
 }
 
+func jsonParseStrictWithType(adapter types.Adapter, provider types.Provider, str string, targetType ref.Type) ref.Val {
+	if adapter == nil {
+		adapter = types.DefaultTypeAdapter
+	}
+	if provAdapter, ok := provider.(types.Adapter); ok && provAdapter != nil {
+		adapter = provAdapter
+	}
+	if len(str) > maxJSONSize {
+		return types.NewErr("json parse error: string size exceeds maximum allowed limit of %d bytes", maxJSONSize)
+	}
+	if !jsonValidateStrictRFC8259(str) {
+		return types.OptionalNone
+	}
+	val, ok := jsonParseValueMode(adapter, provider, str, targetType, true)
+	if !ok {
+		return types.OptionalNone
+	}
+	return types.OptionalOf(adapter.NativeToValue(val))
+}
+
+// jsonValidateStrictRFC8259 validates that str is a single RFC 8259 JSON value encoded in valid
+// UTF-8 with no unpaired UTF-16 surrogates (\uD800..\uDFFF) and no duplicate object member names
+// at any nesting level.
+func jsonValidateStrictRFC8259(str string) bool {
+	if !utf8.ValidString(str) || !json.Valid([]byte(str)) || hasUnpairedJSONSurrogate(str) {
+		return false
+	}
+	dec := json.NewDecoder(strings.NewReader(str))
+	dec.UseNumber()
+	if !jsonCheckUniqueKeysValue(dec) {
+		return false
+	}
+	_, err := dec.Token()
+	return err == io.EOF
+}
+
+// hasUnpairedJSONSurrogate scans JSON string literals for \uD800..\uDFFF escape sequences that
+// are not a valid high+low surrogate pair (\uD800..\uDBFF followed immediately by \uDC00..\uDFFF).
+func hasUnpairedJSONSurrogate(str string) bool {
+	inString := false
+	for i := 0; i < len(str); i++ {
+		c := str[i]
+		if !inString {
+			if c == '"' {
+				inString = true
+			}
+			continue
+		}
+		if c == '"' {
+			inString = false
+			continue
+		}
+		if c != '\\' {
+			continue
+		}
+		i++
+		if i >= len(str) {
+			return true
+		}
+		if str[i] != 'u' {
+			continue
+		}
+		if i+4 >= len(str) {
+			return true
+		}
+		u1, err := strconv.ParseUint(str[i+1:i+5], 16, 16)
+		if err != nil {
+			return true
+		}
+		i += 4
+		if u1 >= 0xDC00 && u1 <= 0xDFFF {
+			return true
+		}
+		if u1 >= 0xD800 && u1 <= 0xDBFF {
+			if i+6 >= len(str) || str[i+1] != '\\' || str[i+2] != 'u' {
+				return true
+			}
+			u2, err := strconv.ParseUint(str[i+3:i+7], 16, 16)
+			if err != nil || u2 < 0xDC00 || u2 > 0xDFFF {
+				return true
+			}
+			i += 6
+		}
+	}
+	return false
+}
+
+func jsonCheckUniqueKeysValue(dec *json.Decoder) bool {
+	tok, err := dec.Token()
+	if err != nil {
+		return false
+	}
+	d, isDelim := tok.(json.Delim)
+	if !isDelim {
+		return true
+	}
+	switch d {
+	case '{':
+		seen := make(map[string]struct{})
+		for dec.More() {
+			kTok, err := dec.Token()
+			if err != nil {
+				return false
+			}
+			key, ok := kTok.(string)
+			if !ok {
+				return false
+			}
+			if _, dup := seen[key]; dup {
+				return false
+			}
+			seen[key] = struct{}{}
+			if !jsonCheckUniqueKeysValue(dec) {
+				return false
+			}
+		}
+		endTok, err := dec.Token()
+		return err == nil && endTok == json.Delim('}')
+	case '[':
+		for dec.More() {
+			if !jsonCheckUniqueKeysValue(dec) {
+				return false
+			}
+		}
+		endTok, err := dec.Token()
+		return err == nil && endTok == json.Delim(']')
+	default:
+		return false
+	}
+}
+
 func jsonParseValue(adapter types.Adapter, provider types.Provider, str string, targetType ref.Type) (any, bool) {
+	return jsonParseValueMode(adapter, provider, str, targetType, false)
+}
+
+func jsonParseValueMode(adapter types.Adapter, provider types.Provider, str string, targetType ref.Type, strict bool) (any, bool) {
 	switch t := targetType.(type) {
 	case *types.Type:
 		switch t.Kind() {
@@ -791,28 +1127,32 @@ func jsonParseValue(adapter types.Adapter, provider types.Provider, str string, 
 			if len(t.Parameters()) > 0 {
 				elemType = t.Parameters()[0]
 			}
-			return jsonParseTypedList(adapter, provider, str, elemType)
+			return jsonParseTypedListMode(adapter, provider, str, elemType, strict)
 		case types.MapKind:
 			elemType := types.DynType
 			if len(t.Parameters()) >= 2 {
 				elemType = t.Parameters()[1]
 			}
-			return jsonParseTypedMap(adapter, provider, str, elemType)
+			return jsonParseTypedMapMode(adapter, provider, str, elemType, strict)
 		case types.StructKind:
-			return jsonParseStructNative(provider, str, t.TypeName())
+			return jsonParseStructNativeMode(provider, str, t.TypeName(), strict)
 		}
 	default:
 		if st, ok := targetType.(types.StructTypeDescriptor); ok {
 			if rt := st.ReflectType(); rt != nil {
-				return jsonUnmarshalNative(str, rt)
+				return jsonUnmarshalNativeMode(str, rt, strict)
 			}
 		}
-		return jsonParseStructNative(provider, str, targetType.TypeName())
+		return jsonParseStructNativeMode(provider, str, targetType.TypeName(), strict)
 	}
 	return nil, false
 }
 
 func jsonParseTypedList(adapter types.Adapter, provider types.Provider, str string, elemType *types.Type) (any, bool) {
+	return jsonParseTypedListMode(adapter, provider, str, elemType, false)
+}
+
+func jsonParseTypedListMode(adapter types.Adapter, provider types.Provider, str string, elemType *types.Type, strict bool) (any, bool) {
 	switch elemType.Kind() {
 	case types.StringKind:
 		var l []string
@@ -857,7 +1197,7 @@ func jsonParseTypedList(adapter types.Adapter, provider types.Provider, str stri
 	}
 	elements := make([]any, len(rawList))
 	for i, rawElem := range rawList {
-		elem, ok := jsonParseValue(adapter, provider, string(rawElem), elemType)
+		elem, ok := jsonParseValueMode(adapter, provider, string(rawElem), elemType, strict)
 		if !ok {
 			return nil, false
 		}
@@ -867,6 +1207,10 @@ func jsonParseTypedList(adapter types.Adapter, provider types.Provider, str stri
 }
 
 func jsonParseTypedMap(adapter types.Adapter, provider types.Provider, str string, valType *types.Type) (any, bool) {
+	return jsonParseTypedMapMode(adapter, provider, str, valType, false)
+}
+
+func jsonParseTypedMapMode(adapter types.Adapter, provider types.Provider, str string, valType *types.Type, strict bool) (any, bool) {
 	switch valType.Kind() {
 	case types.StringKind:
 		var m map[string]string
@@ -911,7 +1255,7 @@ func jsonParseTypedMap(adapter types.Adapter, provider types.Provider, str strin
 	}
 	entries := make(map[string]any, len(rawMap))
 	for k, rawVal := range rawMap {
-		val, ok := jsonParseValue(adapter, provider, string(rawVal), valType)
+		val, ok := jsonParseValueMode(adapter, provider, string(rawVal), valType, strict)
 		if !ok {
 			return nil, false
 		}
@@ -921,17 +1265,83 @@ func jsonParseTypedMap(adapter types.Adapter, provider types.Provider, str strin
 }
 
 func jsonUnmarshalNative(str string, rt reflect.Type) (any, bool) {
+	return jsonUnmarshalNativeMode(str, rt, false)
+}
+
+func jsonUnmarshalNativeMode(str string, rt reflect.Type, strict bool) (any, bool) {
 	if rt.Kind() == reflect.Pointer {
 		rt = rt.Elem()
 	}
 	if rt.Kind() == reflect.Struct {
+		if strict && !jsonVerifyStrictStructKeys(str, rt) {
+			return nil, false
+		}
 		ptr := reflect.New(rt)
-		if jsonUnmarshalExact(str, ptr.Interface()) != nil {
+		dec := json.NewDecoder(strings.NewReader(str))
+		if strict {
+			dec.DisallowUnknownFields()
+		}
+		if err := dec.Decode(ptr.Interface()); err != nil {
+			return nil, false
+		}
+		if _, err := dec.Token(); err != io.EOF {
 			return nil, false
 		}
 		return ptr.Interface(), true
 	}
 	return nil, false
+}
+
+// jsonVerifyStrictStructKeys verifies that every JSON object member name in str matches an
+// exported field of rt (or its nested struct fields) using exact case-sensitive matching.
+func jsonVerifyStrictStructKeys(str string, rt reflect.Type) bool {
+	if rt.Kind() == reflect.Pointer {
+		rt = rt.Elem()
+	}
+	if rt.Kind() != reflect.Struct {
+		return true
+	}
+	var raw map[string]json.RawMessage
+	if jsonUnmarshalExact(str, &raw) != nil {
+		return false
+	}
+	allowed := strictStructFields(rt)
+	for k, v := range raw {
+		ft, ok := allowed[k]
+		if !ok {
+			return false
+		}
+		if ft.Kind() == reflect.Pointer {
+			ft = ft.Elem()
+		}
+		if ft.Kind() == reflect.Struct {
+			trimmed := strings.TrimSpace(string(v))
+			if trimmed != "null" && !jsonVerifyStrictStructKeys(trimmed, ft) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func strictStructFields(rt reflect.Type) map[string]reflect.Type {
+	fields := make(map[string]reflect.Type, rt.NumField())
+	for i := 0; i < rt.NumField(); i++ {
+		f := rt.Field(i)
+		if !f.IsExported() {
+			continue
+		}
+		tag := f.Tag.Get("json")
+		if tag == "-" {
+			continue
+		}
+		name, _, _ := strings.Cut(tag, ",")
+		if name == "" {
+			name = f.Name
+		}
+		fields[name] = f.Type
+	}
+	return fields
 }
 
 func jsonUnmarshalProto(str string, template proto.Message) (proto.Message, bool) {
@@ -952,6 +1362,10 @@ var (
 )
 
 func jsonParseStructNative(provider types.Provider, str string, typeName string) (any, bool) {
+	return jsonParseStructNativeMode(provider, str, typeName, false)
+}
+
+func jsonParseStructNativeMode(provider types.Provider, str string, typeName string, strict bool) (any, bool) {
 	switch typeName {
 	case "google.protobuf.Value":
 		return jsonUnmarshalProto(str, &structpb.Value{})
@@ -966,7 +1380,7 @@ func jsonParseStructNative(provider types.Provider, str string, typeName string)
 			return jsonUnmarshalProto(str, p.protoMsg)
 		}
 		if p.refType != nil {
-			return jsonUnmarshalNative(str, p.refType)
+			return jsonUnmarshalNativeMode(str, p.refType, strict)
 		}
 	}
 	if provider != nil {
@@ -987,7 +1401,7 @@ func jsonParseStructNative(provider types.Provider, str string, typeName string)
 			rt = rt.Elem()
 		}
 		structPrototypeCache.Store(typeName, structPrototype{refType: rt})
-		return jsonUnmarshalNative(str, rt)
+		return jsonUnmarshalNativeMode(str, rt, strict)
 	}
 	return nil, false
 }
@@ -1148,3 +1562,4 @@ func unboundedCostModel(id string) cost.OverloadModel {
 	unbounded := cost.AtMost(cost.Const(math.MaxUint64))
 	return cost.Overload(id, cost.EvalCost(unbounded), cost.ResultSize(unbounded))
 }
+
