@@ -30,6 +30,11 @@ bazel_dep(
     version = "0.59.0",
     repo_name = "io_bazel_rules_go",
 )
+single_version_override(
+    module_name = "rules_go",
+    version = "0.59.0",
+)
+
 bazel_dep(
     name = "rules_proto",
     version = "7.0.2",
@@ -50,6 +55,17 @@ git_override(
     module_name = "cel-spec",
     commit = "ba58ae5007845f3a1279b488cdeb79645ce958bb",
     remote = "https://github.com/cel-expr/cel-spec",
+)
+
+bazel_dep(
+    name = "cel-conformance",
+    version = "0.1.0",
+    repo_name = "cel_conformance",
+)
+git_override(
+    module_name = "cel-conformance",
+    commit = "0e0ce3eec8cbf69b582cb1b138d99c292cd16272",
+    remote = "https://github.com/cel-expr/cel-conformance",
 )
 
 go_sdk = use_extension("@io_bazel_rules_go//go:extensions.bzl", "go_sdk")
