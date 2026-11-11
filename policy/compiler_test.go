@@ -857,3 +857,139 @@ rule:
 		t.Errorf("Compile() got %v, wanted 'Condition is always false'", iss.Err())
 	}
 }
+
+func TestCompileYAMLPolicy_MissingOrEmptyRuleOrMatches(t *testing.T) {
+	tests := []struct {
+		name    string
+		policy  string
+		wantErr string
+	}{
+		{
+			name:    "missing_rule",
+			policy:  "name: x\n",
+			wantErr: "policy must specify a rule",
+		},
+		{
+			name: "rule_without_match",
+			policy: `name: x
+rule:
+  id: r
+`,
+			wantErr: "rule must specify at least one match",
+		},
+		{
+			name: "rule_empty_match",
+			policy: `name: x
+rule:
+  match: []
+`,
+			wantErr: "rule must specify at least one match",
+		},
+		{
+			name: "rule_empty_aggregate",
+			policy: `name: x
+rule:
+  aggregate: []
+`,
+			wantErr: "rule must specify at least one match",
+		},
+		{
+			name: "nested_rule_without_match",
+			policy: `name: x
+rule:
+  match:
+    - condition: "true"
+      rule:
+        id: nested
+`,
+			wantErr: "rule must specify at least one match",
+		},
+		{
+			name: "nested_rule_empty_match",
+			policy: `name: x
+rule:
+  match:
+    - condition: "true"
+      rule:
+        match: []
+`,
+			wantErr: "rule must specify at least one match",
+		},
+		{
+			name: "nested_rule_under_aggregate_without_match",
+			policy: `name: x
+rule:
+  aggregate:
+    - condition: "true"
+      rule:
+        id: nested
+`,
+			wantErr: "rule must specify at least one match",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, iss := parseAndCompilePolicy(t, tc.name+".yaml", tc.policy, nil, nil)
+			if iss.Err() == nil {
+				t.Fatalf("Compile() succeeded, wanted error containing %q", tc.wantErr)
+			}
+			if !strings.Contains(iss.Err().Error(), tc.wantErr) {
+				t.Errorf("Compile() got %v, wanted error containing %q", iss.Err(), tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestCompileRuleValidation(t *testing.T) {
+	env, err := cel.NewEnv()
+	if err != nil {
+		t.Fatalf("cel.NewEnv() failed: %v", err)
+	}
+
+	t.Run("nil_policy", func(t *testing.T) {
+		_, iss := Compile(env, nil)
+		if iss.Err() == nil || !strings.Contains(iss.Err().Error(), "policy cannot be nil") {
+			t.Errorf("Compile(env, nil) got %v, wanted 'policy cannot be nil'", iss.Err())
+		}
+	})
+
+	t.Run("nil_env", func(t *testing.T) {
+		_, iss := Compile(nil, NewPolicy(nil, nil))
+		if iss.Err() == nil || !strings.Contains(iss.Err().Error(), "environment cannot be nil") {
+			t.Errorf("Compile(nil, p) got %v, wanted 'environment cannot be nil'", iss.Err())
+		}
+	})
+
+	t.Run("policy_without_source_or_rule", func(t *testing.T) {
+		_, iss := Compile(env, NewPolicy(nil, nil))
+		if iss.Err() == nil || !strings.Contains(iss.Err().Error(), "policy must specify a rule") {
+			t.Errorf("Compile(env, empty) got %v, wanted 'policy must specify a rule'", iss.Err())
+		}
+	})
+
+	t.Run("match_without_output_or_rule", func(t *testing.T) {
+		p := NewPolicy(nil, nil)
+		r := NewRule(1)
+		m := NewMatch(2)
+		m.SetCondition(ValueString{ID: 3, Value: "true"})
+		r.AddMatch(m)
+		p.SetRule(r)
+		_, iss := Compile(env, p)
+		if iss.Err() == nil || !strings.Contains(iss.Err().Error(), "match does not specify a rule or output") {
+			t.Errorf("Compile() got %v, wanted 'match does not specify a rule or output'", iss.Err())
+		}
+	})
+
+	t.Run("nil_variable_and_nil_match", func(t *testing.T) {
+		p := NewPolicy(nil, nil)
+		r := NewRule(1)
+		r.AddVariable(nil)
+		r.AddMatch(nil)
+		p.SetRule(r)
+		_, iss := Compile(env, p)
+		if iss.Err() == nil {
+			t.Fatalf("Compile() succeeded, wanted error")
+		}
+	})
+}

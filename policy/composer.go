@@ -49,6 +49,9 @@ func ExpressionUnnestHeight(height int) ComposerOption {
 // NewRuleComposer creates a rule composer which stitches together rules within a policy into
 // a single CEL expression.
 func NewRuleComposer(env *cel.Env, opts ...ComposerOption) (*RuleComposer, error) {
+	if env == nil {
+		return nil, fmt.Errorf("environment cannot be nil")
+	}
 	composer := &RuleComposer{
 		env: env,
 		// set the default nesting height to something reasonable.
@@ -76,6 +79,11 @@ type RuleComposer struct {
 
 // Compose stitches together a set of expressions within a CompiledRule into a single CEL ast.
 func (c *RuleComposer) Compose(r *CompiledRule) (*cel.Ast, *cel.Issues) {
+	if r == nil {
+		errs := common.NewErrors(common.NewTextSource(""))
+		errs.ReportErrorString(common.NoLocation, "compiled rule cannot be nil")
+		return nil, cel.NewIssues(errs)
+	}
 	ruleRoot, _ := c.env.Compile("true")
 	composer := &ruleComposerImpl{
 		rule:       r,
@@ -110,17 +118,41 @@ func (c *RuleComposer) Compose(r *CompiledRule) (*cel.Ast, *cel.Issues) {
 }
 
 func recoverOriginalSource(r *CompiledRule) cel.Source {
-	match := r.Matches()[0]
-	var source cel.Source
-	if match.Output() != nil {
-		source = match.Output().Expr().Source()
-	} else {
-		source = match.Condition().Source()
+	if src := findRuleSource(r); src != nil {
+		if rel, ok := src.(*RelativeSource); ok {
+			return rel.Source
+		}
+		return src
 	}
-	if rel, ok := source.(*RelativeSource); ok {
-		source = rel.Source
+	return common.NewTextSource("")
+}
+
+func findRuleSource(r *CompiledRule) cel.Source {
+	if r == nil {
+		return nil
 	}
-	return source
+	for _, match := range r.Matches() {
+		if match == nil {
+			continue
+		}
+		if match.Output() != nil && match.Output().Expr() != nil {
+			return match.Output().Expr().Source()
+		}
+		if match.Condition() != nil {
+			return match.Condition().Source()
+		}
+		if match.NestedRule() != nil {
+			if src := findRuleSource(match.NestedRule()); src != nil {
+				return src
+			}
+		}
+	}
+	for _, v := range r.Variables() {
+		if v != nil && v.Expr() != nil {
+			return v.Expr().Source()
+		}
+	}
+	return nil
 }
 
 type varIndex struct {
@@ -164,6 +196,9 @@ func (opt *ruleComposerImpl) Optimize(ctx *cel.OptimizerContext, a *ast.AST) *as
 	// The input to optimize is a dummy expression which is completely replaced according
 	// to the configuration of the rule composition graph.
 	ruleExpr := opt.optimizeRule(ctx, opt.rule, false)
+	if ruleExpr == nil || ctx.Issues.Err() != nil {
+		return a
+	}
 
 	// If there were no variables, return the expression.
 	if len(opt.varIndices) == 0 {
@@ -186,6 +221,10 @@ func (opt *ruleComposerImpl) Optimize(ctx *cel.OptimizerContext, a *ast.AST) *as
 }
 
 func (opt *ruleComposerImpl) optimizeRule(ctx *cel.OptimizerContext, r *CompiledRule, asList bool) ast.Expr {
+	if r == nil {
+		ctx.ReportErrorAtID(0, "compiled rule cannot be nil")
+		return nil
+	}
 	// Visitor to rewrite variables-prefixed identifiers with index names.
 	opt.enterScope()
 	defer opt.exitScope()
@@ -204,10 +243,18 @@ func (opt *ruleComposerImpl) optimizeRule(ctx *cel.OptimizerContext, r *Compiled
 	// Build the rule subgraph.
 	for i := matchCount - 1; i >= 0; i-- {
 		m := matches[i]
+		if m == nil || m.Condition() == nil {
+			ctx.ReportErrorAtID(0, "match condition cannot be nil")
+			return nil
+		}
 		cond := ctx.CopyASTAndMetadata(m.Condition().NativeRep())
 
 		var currentStep compositionStep
 		if m.Output() != nil {
+			if m.Output().Expr() == nil {
+				ctx.ReportErrorAtID(cond.ID(), "match output expression cannot be nil: %v", m.SourceID())
+				return nil
+			}
 			// If the output is non-nil, then it is considered a non-optional output since
 			// it is explicitly stated. If the rule itself is optional, then the base case value
 			// of output being optional.none() will convert the non-optional value to an optional
@@ -231,6 +278,9 @@ func (opt *ruleComposerImpl) optimizeRule(ctx *cel.OptimizerContext, r *Compiled
 			//   though it may be wrapped into optional.of(...) if the outer rule produces optional output.
 			child := m.NestedRule()
 			nestedRule := opt.optimizeRule(ctx, child, returnList)
+			if nestedRule == nil {
+				return nil
+			}
 			if child.HasOptionalOutput() {
 				currentStep = newOptionalCompositionStep(ctx, cond, nestedRule)
 			} else {
@@ -247,6 +297,11 @@ func (opt *ruleComposerImpl) optimizeRule(ctx *cel.OptimizerContext, r *Compiled
 		} else {
 			output = currentStep.combine(output)
 		}
+	}
+
+	if output == nil {
+		ctx.ReportErrorAtID(0, "rule must specify at least one match")
+		return nil
 	}
 
 	matchExpr := output.expr()
@@ -302,6 +357,10 @@ func (opt *ruleComposerImpl) rewriteVariableName(ctx *cel.OptimizerContext) ast.
 // registerVariable creates an entry for a variable name within the cel.@block used to enumerate
 // variables within composed policy expression.
 func (opt *ruleComposerImpl) registerVariable(ctx *cel.OptimizerContext, v *CompiledVariable) {
+	if v == nil || v.Expr() == nil || v.Declaration() == nil {
+		ctx.ReportErrorAtID(0, "compiled variable cannot be nil")
+		return
+	}
 	varName := fmt.Sprintf("variables.%s", v.Name())
 	indexVar := fmt.Sprintf("@index%d", opt.nextVarIndex)
 	varExpr := ctx.CopyASTAndMetadata(v.Expr().NativeRep())

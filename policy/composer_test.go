@@ -163,6 +163,9 @@ func TestNonOptionalCompositionStep_UnconditionalCombine(t *testing.T) {
 }
 
 func TestRuleComposerError(t *testing.T) {
+	if _, err := NewRuleComposer(nil); err == nil || !strings.Contains(err.Error(), "environment cannot be nil") {
+		t.Errorf("NewRuleComposer(nil) got %v, wanted 'environment cannot be nil'", err)
+	}
 	env, err := cel.NewEnv()
 	if err != nil {
 		t.Fatalf("NewEnv() failed: %v", err)
@@ -170,6 +173,40 @@ func TestRuleComposerError(t *testing.T) {
 	_, err = NewRuleComposer(env, ExpressionUnnestHeight(-1))
 	if err == nil || !strings.Contains(err.Error(), "invalid unnest") {
 		t.Errorf("NewRuleComposer() got %v, wanted 'invalid unnest'", err)
+	}
+	rc, err := NewRuleComposer(env)
+	if err != nil {
+		t.Fatalf("NewRuleComposer() failed: %v", err)
+	}
+
+	if _, iss := rc.Compose(nil); iss.Err() == nil || !strings.Contains(iss.Err().Error(), "compiled rule cannot be nil") {
+		t.Errorf("Compose(nil) got %v, wanted 'compiled rule cannot be nil'", iss.Err())
+	}
+	if _, iss := rc.Compose(&CompiledRule{}); iss.Err() == nil || !strings.Contains(iss.Err().Error(), "rule must specify at least one match") {
+		t.Errorf("Compose(empty) got %v, wanted 'rule must specify at least one match'", iss.Err())
+	}
+	condAST, _ := env.Compile("true")
+	nestedEmpty := &CompiledRule{
+		matches: []*CompiledMatch{
+			{
+				cond:       condAST,
+				nestedRule: &CompiledRule{},
+			},
+		},
+	}
+	if _, iss := rc.Compose(nestedEmpty); iss.Err() == nil || !strings.Contains(iss.Err().Error(), "rule must specify at least one match") {
+		t.Errorf("Compose(nestedEmpty) got %v, wanted 'rule must specify at least one match'", iss.Err())
+	}
+	emptyAggAST, iss := rc.Compose(&CompiledRule{semantic: aggregate})
+	if iss.Err() != nil {
+		t.Fatalf("Compose(empty aggregate) failed: %v", iss.Err())
+	}
+	unparsed, err := cel.AstToString(emptyAggAST)
+	if err != nil {
+		t.Fatalf("cel.AstToString() failed: %v", err)
+	}
+	if unparsed != "[]" {
+		t.Errorf("Compose(empty aggregate) got %q, wanted \"[]\"", unparsed)
 	}
 }
 

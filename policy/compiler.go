@@ -151,6 +151,9 @@ func (m *CompiledMatch) Condition() *cel.Ast {
 
 // ConditionIsLiteral indicates whether the condition for the match is a literal with a given value.
 func (m *CompiledMatch) ConditionIsLiteral(val ref.Val) bool {
+	if m == nil || m.cond == nil {
+		return false
+	}
 	c := m.cond.NativeRep().Expr()
 	return c.Kind() == ast.LiteralKind && c.AsLiteral().Equal(val) == types.True
 }
@@ -167,6 +170,9 @@ func (m *CompiledMatch) NestedRule() *CompiledRule {
 
 // OutputType returns the cel.Type associated with output expression.
 func (m *CompiledMatch) OutputType() *cel.Type {
+	if m == nil {
+		return cel.DynType
+	}
 	if m.output != nil {
 		return m.output.Expr().OutputType()
 	}
@@ -269,16 +275,33 @@ func Compile(env *cel.Env, p *Policy, opts ...CompilerOption) (*cel.Ast, *cel.Is
 // match statements. The compiled rule defines an expression graph, which can be composed into a single
 // expression via the RuleComposer.Compose method.
 func CompileRule(env *cel.Env, p *Policy, opts ...CompilerOption) (*CompiledRule, *cel.Issues) {
+	if p == nil {
+		errs := common.NewErrors(common.NewTextSource(""))
+		errs.ReportErrorString(common.NoLocation, "policy cannot be nil")
+		return nil, cel.NewIssues(errs)
+	}
+	src := p.Source()
+	if src == nil {
+		src = StringSource("", "")
+	}
+	info := p.SourceInfo()
+	if info == nil {
+		info = ast.NewSourceInfo(src)
+	}
 	c := &compiler{
 		env:                  env,
-		info:                 p.SourceInfo(),
-		src:                  p.Source(),
+		info:                 info,
+		src:                  src,
 		compileMatchOutput:   defaultCompileMatchOutput,
 		maxNestedExpressions: defaultMaxNestedExpressions,
 	}
 	var err error
 	errs := common.NewErrors(c.src)
 	iss := cel.NewIssuesWithSourceInfo(errs, c.info)
+	if c.env == nil {
+		iss.ReportErrorAtID(p.Name().ID, "environment cannot be nil")
+		return nil, iss
+	}
 	for _, o := range opts {
 		if err = o(c); err != nil {
 			iss.ReportErrorAtID(p.Name().ID, "error configuring compiler option: %s", err)
@@ -311,6 +334,10 @@ func CompileRule(env *cel.Env, p *Policy, opts ...CompilerOption) (*CompiledRule
 			c.env = env
 		}
 	}
+	if p.Rule() == nil {
+		iss.ReportErrorAtID(p.Name().ID, "policy must specify a rule")
+		return nil, iss
+	}
 	return c.compileRule(p.Rule(), p, c.env, iss, false)
 }
 
@@ -325,11 +352,19 @@ type compiler struct {
 }
 
 func (c *compiler) compileRule(r *Rule, p *Policy, ruleEnv *cel.Env, iss *cel.Issues, hasAggregateAncestor bool) (*CompiledRule, *cel.Issues) {
+	if r == nil {
+		iss.ReportErrorAtID(p.Name().ID, "rule cannot be nil")
+		return nil, iss
+	}
 	if hasAggregateAncestor && r.semantic == aggregate {
 		iss.ReportErrorAtID(r.SourceID(), "nested aggregate rules are not allowed")
 	}
-	compiledVars := make([]*CompiledVariable, len(r.Variables()))
-	for i, v := range r.Variables() {
+	compiledVars := make([]*CompiledVariable, 0, len(r.Variables()))
+	for _, v := range r.Variables() {
+		if v == nil {
+			iss.ReportErrorAtID(r.SourceID(), "variable cannot be nil")
+			continue
+		}
 		exprSrc := c.relSource(v.Expression())
 		varAST, exprIss := ruleEnv.CompileSource(exprSrc)
 		varName := v.Name().Value
@@ -359,7 +394,7 @@ func (c *compiler) compileRule(r *Rule, p *Policy, ruleEnv *cel.Env, iss *cel.Is
 			expr:    varAST,
 			varDecl: varDecl,
 		}
-		compiledVars[i] = compiledVar
+		compiledVars = append(compiledVars, compiledVar)
 
 		// Increment the nesting count post-compile.
 		c.nestedCount++
@@ -371,6 +406,10 @@ func (c *compiler) compileRule(r *Rule, p *Policy, ruleEnv *cel.Env, iss *cel.Is
 	// Compile the set of match conditions under the rule.
 	compiledMatches := []*CompiledMatch{}
 	for _, m := range r.Matches() {
+		if m == nil {
+			iss.ReportErrorAtID(r.SourceID(), "match cannot be nil")
+			continue
+		}
 		condSrc := c.relSource(m.Condition())
 		condAST, condIss := ruleEnv.CompileSource(condSrc)
 		iss = iss.Append(condIss)
@@ -379,6 +418,10 @@ func (c *compiler) compileRule(r *Rule, p *Policy, ruleEnv *cel.Env, iss *cel.Is
 		// TODO: Test this case once there's an alternative method of constructing Policy objects
 		if m.HasOutput() && m.HasRule() {
 			iss.ReportErrorAtID(m.Condition().ID, "either output or rule may be set but not both")
+			continue
+		}
+		if !m.HasOutput() && !m.HasRule() {
+			iss.ReportErrorAtID(m.SourceID(), "match does not specify a rule or output")
 			continue
 		}
 		if m.HasOutput() {
@@ -407,10 +450,13 @@ func (c *compiler) compileRule(r *Rule, p *Policy, ruleEnv *cel.Env, iss *cel.Is
 
 			// Increment the nesting count post-compile.
 			c.nestedCount++
-			if c.nestedCount == c.maxNestedExpressions+1 {
+			if c.nestedCount == c.maxNestedExpressions+1 && nestedRule != nil {
 				iss.ReportErrorAtID(nestedRule.SourceID(), "rule exceeds nested expression limit")
 			}
 		}
+	}
+	if len(compiledMatches) == 0 && (!hasAggregateAncestor || r.semantic == unspecified) {
+		iss.ReportErrorAtID(r.exprID, "rule must specify at least one match")
 	}
 
 	// Validate that all branches in the rule are reachable
