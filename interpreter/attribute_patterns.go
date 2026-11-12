@@ -256,9 +256,6 @@ func (fac *partialAttributeFactory) matchesUnknownPatterns(
 	patterns := partial.UnknownAttributePatterns()
 	candidateIndices := map[int]struct{}{}
 	for _, variable := range variableNames {
-		if holder, ok := vars.(localVariableHolder); ok && holder.IsLocalVariable(variable) {
-			continue
-		}
 		for i, pat := range patterns {
 			if pat.VariableMatches(variable) {
 				if len(qualifiers) == 0 {

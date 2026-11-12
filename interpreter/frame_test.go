@@ -121,6 +121,7 @@ func TestFrameResolveName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewActivation(y) failed: %v", err)
 	}
+	hierAct := NewHierarchicalActivation(baseAct, childAct)
 
 	tests := []struct {
 		name      string
@@ -150,8 +151,7 @@ func TestFrameResolveName(t *testing.T) {
 		{
 			name: "resolve in child activation",
 			setup: func() *ExecutionFrame {
-				f := mustNewExecutionFrame(t, baseAct)
-				return f.Push(childAct)
+				return mustNewExecutionFrame(t, hierAct)
 			},
 			varName:   "y",
 			wantVal:   2,
@@ -160,8 +160,7 @@ func TestFrameResolveName(t *testing.T) {
 		{
 			name: "resolve in parent activation from child",
 			setup: func() *ExecutionFrame {
-				f := mustNewExecutionFrame(t, baseAct)
-				return f.Push(childAct)
+				return mustNewExecutionFrame(t, hierAct)
 			},
 			varName:   "x",
 			wantVal:   1,
@@ -170,8 +169,7 @@ func TestFrameResolveName(t *testing.T) {
 		{
 			name: "missing in hierarchical activation",
 			setup: func() *ExecutionFrame {
-				f := mustNewExecutionFrame(t, baseAct)
-				return f.Push(childAct)
+				return mustNewExecutionFrame(t, hierAct)
 			},
 			varName:   "z",
 			wantVal:   nil,
@@ -182,13 +180,7 @@ func TestFrameResolveName(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			frame := tc.setup()
-			defer func() {
-				curr := frame
-				for curr.parent != nil {
-					curr = curr.Pop()
-				}
-				curr.Close()
-			}()
+			defer frame.Close()
 
 			gotVal, gotFound := frame.ResolveName(tc.varName)
 			if gotFound != tc.wantFound || gotVal != tc.wantVal {
@@ -222,14 +214,10 @@ func TestFrameParent(t *testing.T) {
 			want: nil,
 		},
 		{
-			name: "pushed frame returns parent activation",
+			name: "hierarchical scope frame returns parent activation",
 			setup: func() (*ExecutionFrame, func()) {
-				f := mustNewExecutionFrame(t, baseAct)
-				child := f.Push(childAct)
-				return child, func() {
-					child.Pop()
-					f.Close()
-				}
+				f := mustNewExecutionFrame(t, NewHierarchicalActivation(baseAct, childAct))
+				return f, func() { f.Close() }
 			},
 			want: baseAct,
 		},
@@ -257,17 +245,6 @@ func TestFrameUnwrap(t *testing.T) {
 
 	if got := frame.Unwrap(); got != baseAct {
 		t.Errorf("Unwrap() got %v, want %v", got, baseAct)
-	}
-
-	childAct, err := NewActivation(map[string]any{"y": 2})
-	if err != nil {
-		t.Fatalf("NewActivation(y) failed: %v", err)
-	}
-	childFrame := frame.Push(childAct)
-	defer childFrame.Pop()
-
-	if got := childFrame.Unwrap(); got != childFrame.Scope() {
-		t.Errorf("Unwrap() got %v, want %v", got, childFrame.Scope())
 	}
 }
 
@@ -303,8 +280,7 @@ func TestFrameAsPartialActivation(t *testing.T) {
 		{
 			name: "hierarchical activation wrapping partial activation returns true",
 			setup: func() *ExecutionFrame {
-				f := mustNewExecutionFrame(t, partAct)
-				return f.Push(baseAct)
+				return mustNewExecutionFrame(t, NewHierarchicalActivation(partAct, baseAct))
 			},
 			wantFound: true,
 		},
@@ -313,13 +289,7 @@ func TestFrameAsPartialActivation(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			frame := tc.setup()
-			defer func() {
-				curr := frame
-				for curr.parent != nil {
-					curr = curr.Pop()
-				}
-				curr.Close()
-			}()
+			defer frame.Close()
 
 			gotAct, gotFound := frame.AsPartialActivation()
 			if gotFound != tc.wantFound {
@@ -329,33 +299,6 @@ func TestFrameAsPartialActivation(t *testing.T) {
 				t.Errorf("AsPartialActivation() returned nil for found partial activation")
 			}
 		})
-	}
-}
-
-func TestFramePushPop(t *testing.T) {
-	baseAct, err := NewActivation(map[string]any{"x": 1})
-	if err != nil {
-		t.Fatalf("NewActivation(x) failed: %v", err)
-	}
-	childAct, err := NewActivation(map[string]any{"y": 2})
-	if err != nil {
-		t.Fatalf("NewActivation(y) failed: %v", err)
-	}
-
-	frame := mustNewExecutionFrame(t, baseAct)
-	defer frame.Close()
-
-	childFrame := frame.Push(childAct)
-	if childFrame == nil {
-		t.Fatal("push() returned nil")
-	}
-	if childFrame.parent != frame {
-		t.Errorf("push() parent got %v, want %v", childFrame.parent, frame)
-	}
-
-	popped := childFrame.Pop()
-	if popped != frame {
-		t.Errorf("pop() got %v, want %v", popped, frame)
 	}
 }
 
@@ -462,19 +405,6 @@ func TestFrameSetContextTwiceError(t *testing.T) {
 
 	if err := f.SetContext(ctx, 1); err == nil {
 		t.Error("expected SetContext to return an error when called twice, got nil")
-	}
-}
-
-func TestFrameSetContextChildError(t *testing.T) {
-	ctx := context.Background()
-	f := mustNewExecutionFrame(t, EmptyActivation())
-	defer f.Close()
-
-	child := f.Push(EmptyActivation())
-	defer child.Pop()
-
-	if err := child.SetContext(ctx, 1); err == nil {
-		t.Error("expected SetContext on a child frame to return an error, got nil")
 	}
 }
 
@@ -606,16 +536,6 @@ func TestNewExecutionFrameGlobalsPreservesMapInput(t *testing.T) {
 	}
 	if _, isFunc := input["x"].(func() ref.Val); !isFunc {
 		t.Errorf("lazy binding was overwritten in the caller's map with %v", input["x"])
-	}
-}
-
-func TestFramePopBaseFrame(t *testing.T) {
-	f := mustNewExecutionFrame(t, EmptyActivation())
-	defer f.Close()
-
-	popped := f.Pop()
-	if popped != f {
-		t.Errorf("pop() on base frame got %v, want %v", popped, f)
 	}
 }
 

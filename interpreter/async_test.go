@@ -758,52 +758,6 @@ func TestAsyncCallStateMatches(t *testing.T) {
 	})
 }
 
-func TestExecutionFrameChildSharesAsyncContext(t *testing.T) {
-	ctx := t.Context()
-	frame, closeFrame := newTestFrame(t, ctx)
-	defer closeFrame()
-
-	completions := make(chan int64, 1)
-	if err := frame.SetCompletions(completions); err != nil {
-		t.Fatalf("SetCompletions() failed: %v", err)
-	}
-
-	// Counts are taken relative to a baseline, since ExecutionFrame draws its tracker from a
-	// process-global pool whose starting pending count is not guaranteed to be zero.
-	base := frame.ActiveAsyncCalls()
-
-	child := frame.Push(EmptyActivation())
-	if got := child.ActiveAsyncCalls(); got != base {
-		t.Errorf("child ActiveAsyncCalls() = %d, wanted %d (shared parent ctx)", got, base)
-	}
-
-	// A call launched from the child frame must be visible through the shared parent tracker.
-	resChild := child.ComputeResult(1, "fn", "fn_int", asyncReturning(types.Int(5), nil), []ref.Val{types.Int(1)})
-	if unk, ok := resChild.(*types.Unknown); ok {
-		child.DispatchPendingAsyncCalls(unk.IDs())
-	}
-	if got := child.ActiveAsyncCalls(); got != base+1 {
-		t.Errorf("child ActiveAsyncCalls() after launch = %d, wanted %d", got, base+1)
-	}
-
-	parent := child.Pop()
-	if parent != frame {
-		t.Fatalf("Pop() did not return the parent frame")
-	}
-	if got := frame.ActiveAsyncCalls(); got != base+1 {
-		t.Errorf("parent ActiveAsyncCalls() after Pop = %d, wanted %d", got, base+1)
-	}
-	// The launched call is retrievable via the parent frame's AsyncCall accessor.
-	select {
-	case callID := <-completions:
-		if call := frame.AsyncCall(callID); call == nil {
-			t.Errorf("AsyncCall(%d) = nil, wanted a call record from the shared tracker", callID)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for child call completion")
-	}
-}
-
 type recordingObserver struct {
 	started  atomic.Int32
 	finished atomic.Int32

@@ -27,9 +27,6 @@ import (
 )
 
 // evalContext contains the stateful information needed for a single evaluation.
-//
-// This state is shared across all frames within a single evaluation, including
-// child frames created for comprehension blocks.
 type evalContext struct {
 	// interrupt exposes a callback channel for cancellation.
 	interrupt <-chan struct{}
@@ -73,15 +70,11 @@ type evalContext struct {
 // The execution frame must not be stored in any fashion as its lifecycle is completely
 // controlled by the CEL evaluation process.
 type ExecutionFrame struct {
-	// parent provides the context for parent scopes (used for comprehension iterators and nested blocks).
-	parent *ExecutionFrame
-
-	// scope provides the local activation for this frame (e.g. comprehension folder, block slots, or input Activation).
+	// scope provides the input Activation for this frame when not backed by a map.
 	scope Activation
 
 	// functions supplies the late-bound function implementations for the evaluation, resolved
-	// once from the input activation. Scopes introduced during evaluation never supply function
-	// bindings, so a child frame inherits this value from its parent rather than resolving again.
+	// once from the input activation.
 	functions FunctionActivation
 
 	// vars holds map-based input variables directly on the frame to eliminate pool allocations.
@@ -90,21 +83,32 @@ type ExecutionFrame struct {
 	// lazyVars caches evaluations of lazy variables (func() any / func() ref.Val) in vars.
 	lazyVars map[string]any
 
-	// ctx provides the shared evaluation state across frames.
+	// ctx provides the evaluation state for this frame.
 	ctx *evalContext
 
 	// costTracker provides direct access to the active CostTracker for this evaluation pass.
 	costTracker *CostTracker
+
+	// localSlots holds fixed local variable slots (such as comprehension iterators, accumulators, and block bindings).
+	localSlots []any
 }
 
-// Scope returns the local activation scope for this frame, if present.
-func (f *ExecutionFrame) Scope() Activation {
-	return f.scope
-}
+// maxPooledSlots bounds the slot capacity retained when returning an ExecutionFrame to frameStack.
+const maxPooledSlots = 64
 
-// SetScope sets the local activation scope for this frame.
-func (f *ExecutionFrame) SetScope(scope Activation) {
-	f.scope = scope
+// EnsureSlots ensures that the execution frame has at least n local slots available.
+func (f *ExecutionFrame) EnsureSlots(n int) []any {
+	if n <= 0 || len(f.localSlots) >= n {
+		return f.localSlots
+	}
+	if cap(f.localSlots) >= n {
+		f.localSlots = f.localSlots[:n]
+	} else {
+		newSlots := make([]any, n)
+		copy(newSlots, f.localSlots)
+		f.localSlots = newSlots
+	}
+	return f.localSlots
 }
 
 // SetDefaultVars sets the default variables activation for the frame, composing it
@@ -156,9 +160,6 @@ func NewExecutionFrame(input any) (*ExecutionFrame, error) {
 
 // SetContext sets the context for the execution frame.
 func (f *ExecutionFrame) SetContext(ctx context.Context, interruptCheckFrequency uint) error {
-	if f.parent != nil {
-		return errors.New("SetContext() called on child frame")
-	}
 	if f.ctx != nil {
 		return errors.New("SetContext() called more than once")
 	}
@@ -175,7 +176,7 @@ func (f *ExecutionFrame) SetContext(ctx context.Context, interruptCheckFrequency
 
 // Close releases the resources held by the execution frame and returns it to the pool.
 func (f *ExecutionFrame) Close() {
-	if f.parent == nil && f.ctx != nil {
+	if f.ctx != nil {
 		if f.ctx.cancel != nil {
 			f.ctx.cancel()
 			f.ctx.cancel = nil
@@ -195,50 +196,20 @@ func (f *ExecutionFrame) Close() {
 		evalContextPool.Put(f.ctx)
 	}
 	f.ctx = nil
-	f.parent = nil
 	f.costTracker = nil
 	f.functions = nil
 	if f.vars != nil {
 		f.vars = nil
 		clear(f.lazyVars)
 	}
+	if cap(f.localSlots) > maxPooledSlots {
+		f.localSlots = nil
+	} else if len(f.localSlots) > 0 {
+		clear(f.localSlots)
+		f.localSlots = f.localSlots[:0]
+	}
 	f.scope = nil
 	frameStack.Put(f)
-}
-
-// Push pushes the given activation onto the activation stack and returns the new frame.
-//
-// This operation is internal to the interpreter and is used to handle comprehension
-// and block scoping. The child frame inherits the shared evalContext from the parent.
-func (f *ExecutionFrame) Push(activation Activation) *ExecutionFrame {
-	child := frameStack.Get().(*ExecutionFrame)
-	child.parent = f
-	child.ctx = f.ctx
-	child.costTracker = f.costTracker
-	child.scope = activation
-	// Scopes pushed during evaluation never supply late-bound functions, so the child inherits
-	// the bindings resolved for the evaluation rather than searching its own hierarchy.
-	child.functions = f.functions
-	return child
-}
-
-// Pop returns the parent frame, releasing the current frame back to the pool.
-func (f *ExecutionFrame) Pop() *ExecutionFrame {
-	if f.parent == nil {
-		return f
-	}
-	parent := f.parent
-	f.scope = nil
-	f.parent = nil
-	f.functions = nil
-	f.ctx = nil
-	f.costTracker = nil
-	if f.vars != nil {
-		f.vars = nil
-		clear(f.lazyVars)
-	}
-	frameStack.Put(f)
-	return parent
 }
 
 // ResolveName implements the Activation interface by proxying to the internal activation.
@@ -272,20 +243,11 @@ func (f *ExecutionFrame) ResolveName(name string) (any, bool) {
 			return val, true
 		}
 	}
-	if f.parent != nil {
-		return f.parent.ResolveName(name)
-	}
 	return nil, false
 }
 
-// Parent implements the Activation interface by proxying to the parent frame or scope.
+// Parent implements the Activation interface by proxying to the underlying scope.
 func (f *ExecutionFrame) Parent() Activation {
-	if f.parent != nil {
-		if f.parent.scope != nil {
-			return f.parent.scope
-		}
-		return f.parent
-	}
 	if f.scope != nil {
 		return f.scope.Parent()
 	}
@@ -307,14 +269,11 @@ func (f *ExecutionFrame) findPartialActivation() (PartialActivation, bool) {
 			return pa, true
 		}
 	}
-	if f.parent != nil {
-		return f.parent.findPartialActivation()
-	}
 	return nil, false
 }
 
 // AsPartialActivation implements the PartialActivation interface, returning the ExecutionFrame
-// itself when an underlying scope or parent is partial so frame slots and local scopes remain accessible.
+// itself when an underlying scope is partial so frame slots remain accessible.
 func (f *ExecutionFrame) AsPartialActivation() (PartialActivation, bool) {
 	if _, ok := f.findPartialActivation(); ok {
 		return f, true
@@ -331,29 +290,9 @@ func (f *ExecutionFrame) UnknownAttributePatterns() []*AttributePattern {
 	return []*AttributePattern{}
 }
 
-// Unwrap returns the local activation scope if present, or the parent frame.
+// Unwrap returns the local activation scope if present.
 func (f *ExecutionFrame) Unwrap() Activation {
-	if f.scope != nil {
-		return f.scope
-	}
-	if f.parent != nil {
-		return f.parent
-	}
-	return nil
-}
-
-// IsLocalVariable reports whether the variable name is locally bound in the frame.
-func (f *ExecutionFrame) IsLocalVariable(name string) bool {
-	if holder, ok := f.scope.(localVariableHolder); ok {
-		if holder.IsLocalVariable(name) {
-			return true
-		}
-	}
-	// Search parent scopes
-	if f.parent != nil {
-		return f.parent.IsLocalVariable(name)
-	}
-	return false
+	return f.scope
 }
 
 // CheckInterrupt returns whether the evaluation has been interrupted.
