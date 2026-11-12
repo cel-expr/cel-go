@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//      http://www.apache.org/licenses/LICENSE-2.0
+//      https://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package parser
+package strings
 
 import (
+	"bytes"
 	"errors"
 	"strings"
 	"testing"
@@ -34,6 +35,10 @@ func TestUnescape(t *testing.T) {
 		{in: `"\\"`, out: `\`},
 		{in: `'''x''x'''`, out: `x''x`},
 		{in: `"""x""x"""`, out: `x""x`},
+		{in: "'''a\r\nb\rc\nd'''", out: "a\nb\nc\nd"},
+		{in: "r'''a\r\nb\rc'''", out: "a\nb\nc"},
+		{in: `"hello\nÿ☺"`, out: "hello\nÿ☺"},
+		{in: "\"\\n\xff\"", out: "\n\ufffd"},
 		{in: `"\303\277"`, out: `Ã¿`},
 		{in: `"\377"`, out: `ÿ`},
 		{in: `"\u263A\u263A"`, out: `☺☺`},
@@ -62,21 +67,64 @@ func TestUnescape(t *testing.T) {
 		{in: `r"""hello"`, out: errors.New("unable to unescape string")},
 	}
 
-	for _, tst := range tests {
-		tc := tst
+	for _, tc := range tests {
 		t.Run(tc.in, func(t *testing.T) {
-			got, err := unescape(tc.in, tc.isBytes)
+			got, err := Unescape(tc.in, tc.isBytes)
 			if err != nil {
 				expect, isErr := tc.out.(error)
 				if isErr {
 					if !strings.Contains(err.Error(), expect.Error()) {
-						t.Errorf("unescape(%s, %v) errored with %v, wanted %v", tc.in, tc.isBytes, err, expect)
+						t.Errorf("Unescape(%s, %v) errored with %v, wanted %v", tc.in, tc.isBytes, err, expect)
 					}
 				} else {
-					t.Fatalf("unescape(%s, %v) failed: %v", tc.in, tc.isBytes, err)
+					t.Fatalf("Unescape(%s, %v) failed: %v", tc.in, tc.isBytes, err)
 				}
 			} else if got != tc.out {
-				t.Errorf("unescape(%s, %v) got %v, wanted %v", tc.in, tc.isBytes, got, tc.out)
+				t.Errorf("Unescape(%s, %v) got %v, wanted %v", tc.in, tc.isBytes, got, tc.out)
+			}
+		})
+	}
+}
+
+func TestParseBytesLiteral(t *testing.T) {
+	tests := []struct {
+		in      string
+		want    []byte
+		wantErr bool
+	}{
+		{in: `b"abc"`, want: []byte("abc")},
+		{in: `B'hello\n'`, want: []byte("hello\n")},
+		{in: `b"\x00\xff"`, want: []byte{0x00, 0xff}},
+		{in: `b"\377"`, want: []byte{0xff}},
+		{in: "b\"\\`\"", want: []byte("`")},
+		{in: `b"a\"b"`, want: []byte(`a"b`)},
+		{in: `b"""x""x"""`, want: []byte(`x""x`)},
+		{in: `b'''x''x'''`, want: []byte(`x''x`)},
+		{in: `rb"\x41"`, want: []byte(`\x41`)},
+		{in: `br'\n'`, want: []byte(`\n`)},
+		{in: `RB"abc"`, want: []byte("abc")},
+		{in: `"abc"`, wantErr: true},
+		{in: `b""`, want: []byte{}},
+		{in: `b"\0"`, wantErr: true},
+		{in: `b"a"b"`, wantErr: true},
+		{in: `rb"\"`, wantErr: true},
+		{in: `b"\u0041"`, wantErr: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.in, func(t *testing.T) {
+			got, err := ParseBytesLiteral(tc.in)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("ParseBytesLiteral(%q) succeeded (%q), want error", tc.in, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ParseBytesLiteral(%q) failed: %v", tc.in, err)
+			}
+			if !bytes.Equal(got, tc.want) {
+				t.Errorf("ParseBytesLiteral(%q) = %v, want %v", tc.in, got, tc.want)
 			}
 		})
 	}
