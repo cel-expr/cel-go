@@ -36,41 +36,6 @@ import (
 	exprpb "google.golang.org/genproto/googleapis/api/expr/v1alpha1"
 )
 
-func TestConstantFoldingNonFiniteDouble(t *testing.T) {
-	// CEL has no literal for a non-finite double, so the unparser writes the
-	// value as the conversion of its text. The text has to parse back, or the
-	// folded program cannot be compiled again.
-	env, err := NewEnv()
-	if err != nil {
-		t.Fatalf("NewEnv() failed: %v", err)
-	}
-	folder, err := NewConstantFoldingOptimizer()
-	if err != nil {
-		t.Fatalf("NewConstantFoldingOptimizer() failed: %v", err)
-	}
-	opt, err := NewStaticOptimizer(folder)
-	if err != nil {
-		t.Fatalf("NewStaticOptimizer() failed: %v", err)
-	}
-	for _, src := range []string{"0.0 / 0.0", "1.0 / 0.0", "-1.0 / 0.0"} {
-		parsed, iss := env.Compile(src)
-		if iss.Err() != nil {
-			t.Fatalf("Compile(%q) failed: %v", src, iss.Err())
-		}
-		folded, iss := opt.Optimize(env, parsed)
-		if iss.Err() != nil {
-			t.Fatalf("Optimize(%q) failed: %v", src, iss.Err())
-		}
-		text, err := AstToString(folded)
-		if err != nil {
-			t.Fatalf("AstToString(%q) failed: %v", src, err)
-		}
-		if _, iss := env.Compile(text); iss.Err() != nil {
-			t.Errorf("%q folds to %q, which does not parse: %v", src, text, iss.Err())
-		}
-	}
-}
-
 func TestConstantFoldingOptimizer(t *testing.T) {
 	tests := []struct {
 		expr        string

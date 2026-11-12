@@ -16,12 +16,14 @@ package parser
 
 import (
 	"errors"
+	"math"
 	"strings"
 	"testing"
 
 	"cel.dev/cel-go/common"
 	"cel.dev/cel-go/common/ast"
 	"cel.dev/cel-go/common/operators"
+	"cel.dev/cel-go/common/types"
 
 	"google.golang.org/protobuf/proto"
 
@@ -697,6 +699,42 @@ func TestUnparseEscapedCalls(t *testing.T) {
 			}
 			if !proto.Equal(before, after) {
 				t.Errorf("Roundtrip Parse() differs from original. Got '%v', wanted '%v'", before, after)
+			}
+		})
+	}
+}
+
+func TestUnparseNonFiniteDouble(t *testing.T) {
+	// CEL has no literal for a non-finite double, so the unparser writes
+	// the value as the conversion of its text. The text has to parse back,
+	// or the unparse of a constant-folded expression cannot be compiled
+	// again.
+	tests := []struct {
+		name string
+		val  types.Double
+		out  string
+	}{
+		{name: "nan", val: types.Double(math.NaN()), out: `double("NaN")`},
+		{name: "inf", val: types.Double(math.Inf(1)), out: `double("+Inf")`},
+		{name: "neg_inf", val: types.Double(math.Inf(-1)), out: `double("-Inf")`},
+	}
+	for _, tst := range tests {
+		tc := tst
+		t.Run(tc.name, func(t *testing.T) {
+			expr := ast.NewExprFactory().NewLiteral(1, tc.val)
+			out, err := Unparse(expr, ast.NewSourceInfo(nil))
+			if err != nil {
+				t.Fatalf("Unparse(%v) failed: %v", tc.val, err)
+			}
+			if out != tc.out {
+				t.Errorf("Unparse() got '%s', wanted '%s'", out, tc.out)
+			}
+			prsr, err := NewParser()
+			if err != nil {
+				t.Fatalf("NewParser() failed: %v", err)
+			}
+			if _, iss := prsr.Parse(common.NewTextSource(out)); len(iss.GetErrors()) > 0 {
+				t.Errorf("the unparsed text does not parse: %v", iss.ToDisplayString())
 			}
 		})
 	}
