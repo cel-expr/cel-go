@@ -157,7 +157,7 @@ func TestTypeErrorsCheckUndeclared(t *testing.T) {
 	errs := &typeErrors{errs: common.NewErrors(src)}
 
 	// nil env checks
-	if errs.checkUndeclaredIdent(nil, 1, common.NoLocation, "a", "b") {
+	if errs.checkUndeclaredIdent(nil, 1, common.NoLocation, nil, "a", "b") {
 		t.Errorf("checkUndeclaredIdent(nil, ...) = true, want false")
 	}
 	if errs.checkUndeclaredFunction(nil, 1, common.NoLocation, "a", "b") {
@@ -172,7 +172,7 @@ func TestTypeErrorsCheckUndeclared(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEnv() failed: %v", err)
 	}
-	if errs.checkUndeclaredIdent(noCatEnv, 1, common.NoLocation, "a", "b") {
+	if errs.checkUndeclaredIdent(noCatEnv, 1, common.NoLocation, nil, "a", "b") {
 		t.Errorf("checkUndeclaredIdent(noCatEnv, ...) = true, want false")
 	}
 	if errs.checkUndeclaredFunction(noCatEnv, 1, common.NoLocation, "a", "b") {
@@ -192,7 +192,7 @@ func TestTypeErrorsCheckUndeclared(t *testing.T) {
 	catEnv.AddIdents(decls.NewVariable("a", types.IntType))
 
 	// "a" is declared, so "a.b" has declared prefix "a"
-	if errs.checkUndeclaredIdent(catEnv, 1, common.NoLocation, "a", "b") {
+	if errs.checkUndeclaredIdent(catEnv, 1, common.NoLocation, nil, "a", "b") {
 		t.Errorf("checkUndeclaredIdent(catEnv with 'a' declared, ...) = true, want false")
 	}
 	if errs.checkUndeclaredFunction(catEnv, 1, common.NoLocation, "a", "b") {
@@ -200,7 +200,7 @@ func TestTypeErrorsCheckUndeclared(t *testing.T) {
 	}
 
 	// single qualifier
-	if errs.checkUndeclaredIdent(catEnv, 1, common.NoLocation, "single") {
+	if errs.checkUndeclaredIdent(catEnv, 1, common.NoLocation, nil, "single") {
 		t.Errorf("checkUndeclaredIdent with single qualifier = true, want false")
 	}
 }

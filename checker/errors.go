@@ -104,23 +104,36 @@ func (e *typeErrors) undeclaredReference(id int64, l common.Location, container 
 	if cat := e.getCatalog(); cat != nil {
 		syms = cat.Find(name)
 	}
-	e.undeclaredReferenceWithSymbols(id, l, container, name, syms)
+	e.undeclaredReferenceWithSymbols(id, l, container, name, syms, nil)
 }
 
-func (e *typeErrors) undeclaredReferenceWithSymbols(id int64, l common.Location, container string, name string, syms []*env.CatalogSymbol) {
+// undeclaredIdent reports an undeclared reference for an identifier or type name.
+//
+// The candidates are the names attempted during resolution, and are listed in the error when
+// resolution candidates are enabled on the checker Env.
+func (e *typeErrors) undeclaredIdent(id int64, l common.Location, container string, name string, candidates []string) {
+	var syms []*env.CatalogSymbol
+	if cat := e.getCatalog(); cat != nil {
+		syms = cat.Find(name)
+	}
+	e.undeclaredReferenceWithSymbols(id, l, container, name, syms, reportedCandidates(e.env, candidates))
+}
+
+func (e *typeErrors) undeclaredReferenceWithSymbols(id int64, l common.Location, container string, name string, syms []*env.CatalogSymbol, candidates []string) {
 	containerSuffix := ""
 	if container != "" {
 		containerSuffix = fmt.Sprintf(" (in container '%s')", container)
 	}
 	suggestion := formatSuggestionSuffix(name, syms)
-	e.errs.ReportErrorAtID(id, l, "undeclared reference to '%s'%s%s", name, containerSuffix, suggestion)
+	tried := formatCandidatesSuffix(name, candidates)
+	e.errs.ReportErrorAtID(id, l, "undeclared reference to '%s'%s%s%s", name, containerSuffix, suggestion, tried)
 }
 
-func (e *typeErrors) checkUndeclaredIdent(env *Env, id int64, l common.Location, qualifiers ...string) bool {
+func (e *typeErrors) checkUndeclaredIdent(env *Env, id int64, l common.Location, candidates []string, qualifiers ...string) bool {
 	if len(qualifiers) <= 1 || e.hasDeclaredPrefix(env, qualifiers[:len(qualifiers)-1]...) {
 		return false
 	}
-	return e.checkUndeclaredReference(env, id, l, strings.Join(qualifiers, "."))
+	return e.checkUndeclaredReference(env, id, l, strings.Join(qualifiers, "."), candidates)
 }
 
 func (e *typeErrors) checkUndeclaredFunction(env *Env, id int64, l common.Location, qualifiedPrefix, fnName string) bool {
@@ -128,10 +141,10 @@ func (e *typeErrors) checkUndeclaredFunction(env *Env, id int64, l common.Locati
 	if e.hasDeclaredPrefix(env, prefixParts...) {
 		return false
 	}
-	return e.checkUndeclaredReference(env, id, l, qualifiedPrefix+"."+fnName)
+	return e.checkUndeclaredReference(env, id, l, qualifiedPrefix+"."+fnName, nil)
 }
 
-func (e *typeErrors) checkUndeclaredReference(env *Env, id int64, l common.Location, qualifiedName string) bool {
+func (e *typeErrors) checkUndeclaredReference(env *Env, id int64, l common.Location, qualifiedName string, candidates []string) bool {
 	if env == nil {
 		return false
 	}
@@ -147,7 +160,7 @@ func (e *typeErrors) checkUndeclaredReference(env *Env, id int64, l common.Locat
 	if env.container != nil {
 		container = env.container.Name()
 	}
-	e.undeclaredReferenceWithSymbols(id, l, container, qualifiedName, syms)
+	e.undeclaredReferenceWithSymbols(id, l, container, qualifiedName, syms, reportedCandidates(env, candidates))
 	return true
 }
 
@@ -156,11 +169,37 @@ func (e *typeErrors) hasDeclaredPrefix(env *Env, qualifierPrefixes ...string) bo
 		return false
 	}
 	for i := 1; i <= len(qualifierPrefixes); i++ {
-		if env.resolveQualifiedIdent(qualifierPrefixes[:i]...) != nil {
+		if ident, _ := env.resolveQualifiedIdent(qualifierPrefixes[:i]...); ident != nil {
 			return true
 		}
 	}
 	return false
+}
+
+// reportedCandidates returns the candidate names attempted during resolution if listing resolution
+// candidates is enabled, or nil otherwise.
+func reportedCandidates(env *Env, candidates []string) []string {
+	if env == nil || !env.resolutionCandidates {
+		return nil
+	}
+	return candidates
+}
+
+// formatCandidatesSuffix formats the names attempted during resolution.
+//
+// The suffix is omitted when the only candidate is the name as written.
+func formatCandidatesSuffix(name string, candidates []string) string {
+	if len(candidates) == 0 {
+		return ""
+	}
+	if len(candidates) == 1 && candidates[0] == strings.TrimPrefix(name, ".") {
+		return ""
+	}
+	quoted := make([]string, len(candidates))
+	for i, c := range candidates {
+		quoted[i] = "'" + c + "'"
+	}
+	return fmt.Sprintf(" (tried %s)", strings.Join(quoted, ", "))
 }
 
 func formatSuggestionSuffix(name string, syms []*env.CatalogSymbol) string {

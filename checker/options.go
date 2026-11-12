@@ -26,6 +26,7 @@ type options struct {
 	validatedDeclarations        *Scopes
 	jsonFieldNames               bool
 	catalogSupplier              CatalogSupplier
+	resolutionCandidates         bool
 }
 
 // Option is a functional option for configuring the type-checker
@@ -35,6 +36,17 @@ type Option func(*options) error
 func Catalog(cat CatalogSupplier) Option {
 	return func(opts *options) error {
 		opts.catalogSupplier = cat
+		return nil
+	}
+}
+
+// ResolutionCandidates enables listing the fully-qualified names attempted during identifier and
+// type name resolution in undeclared reference errors.
+//
+// Disabled by default.
+func ResolutionCandidates(enabled bool) Option {
+	return func(opts *options) error {
+		opts.resolutionCandidates = enabled
 		return nil
 	}
 }

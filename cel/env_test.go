@@ -1815,3 +1815,123 @@ func TestCatalogSuggestions(t *testing.T) {
 		})
 	}
 }
+
+func TestResolutionCandidates(t *testing.T) {
+	checkErr := func(t *testing.T, e *Env, expr string) string {
+		t.Helper()
+		pAst, iss := e.Parse(expr)
+		if iss.Err() != nil {
+			t.Fatalf("Parse(%q) failed: %v", expr, iss.Err())
+		}
+		_, iss = e.Check(pAst)
+		if iss.Err() == nil {
+			t.Fatalf("Check(%q) succeeded, wanted error", expr)
+		}
+		return iss.Err().Error()
+	}
+
+	t.Run("disabled by default", func(t *testing.T) {
+		e, err := NewEnv(Container("my.app"))
+		if err != nil {
+			t.Fatalf("NewEnv() failed: %v", err)
+		}
+		got := checkErr(t, e, "foo")
+		if !strings.Contains(got, "undeclared reference to 'foo' (in container 'my.app')") {
+			t.Errorf("Check() error = %q, want undeclared reference", got)
+		}
+		if strings.Contains(got, "(tried ") {
+			t.Errorf("Check() error unexpectedly listed resolution candidates: %q", got)
+		}
+	})
+
+	t.Run("enabled", func(t *testing.T) {
+		e, err := NewEnv(Container("my.app"), ResolutionCandidates(true))
+		if err != nil {
+			t.Fatalf("NewEnv() failed: %v", err)
+		}
+		tests := []struct {
+			expr string
+			want string
+		}{
+			{
+				expr: "foo",
+				want: "undeclared reference to 'foo' (in container 'my.app') (tried 'my.app.foo', 'my.foo', 'foo')",
+			},
+			{
+				expr: "Msg{}",
+				want: "undeclared reference to 'Msg' (in container 'my.app') (tried 'my.app.Msg', 'my.Msg', 'Msg')",
+			},
+			{
+				expr: "[1].exists(x, x == foo)",
+				want: "undeclared reference to 'foo' (in container 'my.app') (tried 'my.app.foo', 'my.foo', 'foo')",
+			},
+		}
+		for _, tc := range tests {
+			if got := checkErr(t, e, tc.expr); !strings.Contains(got, tc.want) {
+				t.Errorf("Check(%q) error = %q, want %q", tc.expr, got, tc.want)
+			}
+		}
+		// Function references do not list candidates.
+		if got := checkErr(t, e, "foo()"); strings.Contains(got, "(tried ") {
+			t.Errorf("Check(%q) error unexpectedly listed resolution candidates: %q", "foo()", got)
+		}
+	})
+
+	t.Run("with catalog suggestion", func(t *testing.T) {
+		e, err := NewEnv(Container("my.app"), Variable("user_name", StringType), ResolutionCandidates(true))
+		if err != nil {
+			t.Fatalf("NewEnv() failed: %v", err)
+		}
+		want := "undeclared reference to 'user_nam' (in container 'my.app') (did you mean 'user_name'?) " +
+			"(tried 'my.app.user_nam', 'my.user_nam', 'user_nam')"
+		if got := checkErr(t, e, "user_nam"); !strings.Contains(got, want) {
+			t.Errorf("Check() error = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("no container", func(t *testing.T) {
+		e, err := NewEnv(ResolutionCandidates(true))
+		if err != nil {
+			t.Fatalf("NewEnv() failed: %v", err)
+		}
+		if got := checkErr(t, e, "foo"); strings.Contains(got, "(tried ") {
+			t.Errorf("Check() error unexpectedly listed resolution candidates: %q", got)
+		}
+	})
+
+	t.Run("extend", func(t *testing.T) {
+		base, err := NewEnv(Container("my.app"), ResolutionCandidates(true))
+		if err != nil {
+			t.Fatalf("NewEnv() failed: %v", err)
+		}
+		e, err := base.Extend(Variable("bar", IntType))
+		if err != nil {
+			t.Fatalf("Extend() failed: %v", err)
+		}
+		want := "(tried 'my.app.foo', 'my.foo', 'foo')"
+		if got := checkErr(t, e, "foo"); !strings.Contains(got, want) {
+			t.Errorf("Check() error = %q, want %q", got, want)
+		}
+		disabled, err := base.Extend(ResolutionCandidates(false))
+		if err != nil {
+			t.Fatalf("Extend() failed: %v", err)
+		}
+		if got := checkErr(t, disabled, "foo"); strings.Contains(got, "(tried ") {
+			t.Errorf("Check() error unexpectedly listed resolution candidates: %q", got)
+		}
+	})
+
+	t.Run("not exported to config", func(t *testing.T) {
+		e, err := NewEnv(Container("my.app"), ResolutionCandidates(true))
+		if err != nil {
+			t.Fatalf("NewEnv() failed: %v", err)
+		}
+		conf, err := e.ToConfig("test")
+		if err != nil {
+			t.Fatalf("ToConfig() failed: %v", err)
+		}
+		if len(conf.Features) != 0 {
+			t.Errorf("ToConfig() got features %v, wanted none", conf.Features)
+		}
+	})
+}

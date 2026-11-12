@@ -80,6 +80,10 @@ type Env struct {
 	catalogSupplier     CatalogSupplier
 	catalogOnce         sync.Once
 	catalog             *env.Catalog
+
+	// resolutionCandidates indicates whether undeclared reference errors list the names attempted
+	// during resolution.
+	resolutionCandidates bool
 }
 
 // NewEnv returns a new *Env with the given parameters.
@@ -108,6 +112,8 @@ func NewEnv(container *containers.Container, provider types.Provider, opts ...Op
 		filteredOverloadIDs: map[string]struct{}{},
 		jsonFieldNames:      envOptions.jsonFieldNames,
 		catalogSupplier:     envOptions.catalogSupplier,
+
+		resolutionCandidates: envOptions.resolutionCandidates,
 	}, nil
 }
 
@@ -164,58 +170,69 @@ type attributeResolution struct {
 }
 
 // resolveSimpleIdent determines the resolved attribute for a single identifier.
-func (e *Env) resolveSimpleIdent(name string) *attributeResolution {
+//
+// If the identifier does not resolve, the candidate names which were attempted are returned.
+func (e *Env) resolveSimpleIdent(name string) (*attributeResolution, []string) {
 	local := e.lookupLocalIdent(name)
 	if local != nil && !strings.HasPrefix(name, ".") {
-		return newAttrResolution(local, false)
+		return newAttrResolution(local, false), nil
 	}
-	for _, candidate := range e.container.ResolveCandidateNames(name) {
+	candidates := e.container.ResolveCandidateNames(name)
+	for _, candidate := range candidates {
 		if ident := e.lookupGlobalIdent(candidate); ident != nil {
-			return newAttrResolution(ident, local != nil)
+			return newAttrResolution(ident, local != nil), nil
 		}
 	}
-	return nil
+	return nil, candidates
 }
 
 // resolveQualifiedIdent determines the resolved attribute for a qualified identifier.
-func (e *Env) resolveQualifiedIdent(qualifiers ...string) *attributeResolution {
+//
+// If the identifier does not resolve, the candidate names which were attempted are returned. No
+// candidates are returned when the leading qualifier is a local variable, as global names are not
+// considered in this case.
+func (e *Env) resolveQualifiedIdent(qualifiers ...string) (*attributeResolution, []string) {
 	if len(qualifiers) == 1 {
 		return e.resolveSimpleIdent(qualifiers[0])
 	}
 	local := e.lookupLocalIdent(qualifiers[0])
 	if local != nil && !strings.HasPrefix(qualifiers[0], ".") {
 		// this should resolve through a field selection rather than a qualified identifier
-		return nil
+		return nil, nil
 	}
 	// The qualifiers are concatenated together to indicate the qualified name to search
 	// for as a global identifier. Since select expressions are resolved from leaf to root
 	// if the fully concatenated string doesn't match a global identifier, indicate that
 	// no variable was found to continue the traversal up to the next simpler name.
 	varName := strings.Join(qualifiers, ".")
-	for _, candidate := range e.container.ResolveCandidateNames(varName) {
+	candidates := e.container.ResolveCandidateNames(varName)
+	for _, candidate := range candidates {
 		if ident := e.lookupGlobalIdent(candidate); ident != nil {
-			return newAttrResolution(ident, local != nil)
+			return newAttrResolution(ident, local != nil), nil
 		}
 	}
-	return nil
+	return nil, candidates
 }
 
 // resolveTypeIdent returns a Decl proto for typeName as an identifier in the Env.
-// Returns nil if no such identifier is found in the Env.
-func (e *Env) resolveTypeIdent(name string) *decls.VariableDecl {
-	for _, candidate := range e.container.ResolveCandidateNames(name) {
+//
+// Returns nil and the candidate names which were attempted if no such identifier is found in the
+// Env.
+func (e *Env) resolveTypeIdent(name string) (*decls.VariableDecl, []string) {
+	candidates := e.container.ResolveCandidateNames(name)
+	for _, candidate := range candidates {
 		// Try to import the name as a reference to a message type.
 		if i, found := e.provider.FindIdent(candidate); found {
 			if t, ok := i.(*types.Type); ok {
-				return decls.NewVariable(candidate, types.NewTypeTypeWithParam(t))
+				return decls.NewVariable(candidate, types.NewTypeTypeWithParam(t)), nil
 			}
 		}
 		// Next, try to find the struct type.
 		if t, found := e.provider.FindStructType(candidate); found {
-			return decls.NewVariable(candidate, t)
+			return decls.NewVariable(candidate, t), nil
 		}
 	}
-	return nil
+	return nil, candidates
 }
 
 // lookupLocalIdent finds the variable candidate in a local scope, returning nil if
@@ -346,6 +363,8 @@ func (e *Env) cloneWithDecls(decls *Scopes) *Env {
 		jsonFieldNames:      e.jsonFieldNames,
 		catalogSupplier:     e.catalogSupplier,
 		catalog:             e.catalog,
+
+		resolutionCandidates: e.resolutionCandidates,
 	}
 }
 

@@ -3169,3 +3169,248 @@ func TestCatalogSuggestionsInChecker(t *testing.T) {
 		t.Errorf("got error %q, did not want enable suggestion for unrelated symbol", iss.ToDisplayString())
 	}
 }
+
+func TestFormatCandidatesSuffix(t *testing.T) {
+	tests := []struct {
+		name       string
+		ident      string
+		candidates []string
+		want       string
+	}{
+		{
+			name:  "no candidates",
+			ident: "foo",
+			want:  "",
+		},
+		{
+			name:       "single candidate matches name",
+			ident:      "foo",
+			candidates: []string{"foo"},
+			want:       "",
+		},
+		{
+			name:       "single candidate matches name with leading dot",
+			ident:      ".foo",
+			candidates: []string{"foo"},
+			want:       "",
+		},
+		{
+			name:       "single candidate from alias",
+			ident:      "foo",
+			candidates: []string{"my.alias.foo"},
+			want:       " (tried 'my.alias.foo')",
+		},
+		{
+			name:       "container candidates",
+			ident:      "foo",
+			candidates: []string{"my.app.foo", "my.foo", "foo"},
+			want:       " (tried 'my.app.foo', 'my.foo', 'foo')",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := formatCandidatesSuffix(tc.ident, tc.candidates)
+			if got != tc.want {
+				t.Errorf("formatCandidatesSuffix(%q, %v) = %q, want %q", tc.ident, tc.candidates, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestResolutionCandidates(t *testing.T) {
+	inContainer := []containers.ContainerOption{containers.Name("my.app")}
+	cat := env.NewCatalog(
+		&env.CatalogSymbol{Name: "food", Kind: env.VariableKind},
+		&env.CatalogSymbol{Name: "math.pi", Kind: env.VariableKind, Option: "cel.Math()"},
+		&env.CatalogSymbol{Name: "math.abs", Kind: env.FunctionKind, Option: "cel.Math()"},
+	)
+	tests := []struct {
+		name        string
+		container   []containers.ContainerOption
+		catalog     bool
+		disabled    bool
+		idents      []*decls.VariableDecl
+		expr        string
+		want        string
+		wantNoTried bool
+	}{
+		{
+			name:      "simple ident",
+			container: inContainer,
+			expr:      "foo",
+			want:      "undeclared reference to 'foo' (in container 'my.app') (tried 'my.app.foo', 'my.foo', 'foo')",
+		},
+		{
+			name:      "struct type name",
+			container: inContainer,
+			expr:      "Msg{}",
+			want:      "undeclared reference to 'Msg' (in container 'my.app') (tried 'my.app.Msg', 'my.Msg', 'Msg')",
+		},
+		{
+			name:      "ident in comprehension scope",
+			container: inContainer,
+			expr:      "[1].exists(x, foo)",
+			want:      "undeclared reference to 'foo' (in container 'my.app') (tried 'my.app.foo', 'my.foo', 'foo')",
+		},
+		{
+			name:      "qualified ident lists qualified names",
+			container: inContainer,
+			expr:      "a.b.c",
+			want: "undeclared reference to 'a' (in container 'my.app') (tried " +
+				"'my.app.a.b.c', 'my.a.b.c', 'a.b.c', 'my.app.a.b', 'my.a.b', 'a.b', 'my.app.a', 'my.a', 'a')",
+		},
+		{
+			name: "qualified ident without container",
+			expr: "a.b",
+			want: "undeclared reference to 'a' (tried 'a.b', 'a')",
+		},
+		{
+			name:      "qualified ident in call argument",
+			container: inContainer,
+			expr:      "size(a.b)",
+			want: "undeclared reference to 'a' (in container 'my.app') (tried " +
+				"'my.app.a.b', 'my.a.b', 'a.b', 'my.app.a', 'my.a', 'a')",
+		},
+		{
+			name:      "qualified candidates dropped after undeclared select",
+			container: inContainer,
+			expr:      "a.b == foo",
+			want:      "undeclared reference to 'foo' (in container 'my.app') (tried 'my.app.foo', 'my.foo', 'foo')",
+		},
+		{
+			name:      "qualified candidates dropped after field selection",
+			container: inContainer,
+			idents:    []*decls.VariableDecl{decls.NewVariable("a", types.NewMapType(types.StringType, types.DynType))},
+			expr:      "a.b.c == foo",
+			want:      "undeclared reference to 'foo' (in container 'my.app') (tried 'my.app.foo', 'my.foo', 'foo')",
+		},
+		{
+			name:      "catalog qualified ident prefix",
+			container: inContainer,
+			catalog:   true,
+			expr:      "math.pi.something_else_entirely",
+			want: "undeclared reference to 'math.pi' (in container 'my.app') (enable with `cel.Math()`) (tried " +
+				"'my.app.math.pi.something_else_entirely', 'my.math.pi.something_else_entirely', " +
+				"'math.pi.something_else_entirely', 'my.app.math.pi', 'my.math.pi', 'math.pi')",
+		},
+		{
+			name:      "abbreviated ident",
+			container: []containers.ContainerOption{containers.Name("my.app"), containers.Abbrevs("other.pkg.Msg")},
+			expr:      "Msg",
+			want:      "undeclared reference to 'Msg' (in container 'my.app') (tried 'other.pkg.Msg')",
+		},
+		{
+			name:      "abbreviated struct type name",
+			container: []containers.ContainerOption{containers.Name("my.app"), containers.Abbrevs("other.pkg.Msg")},
+			expr:      "Msg{}",
+			want:      "undeclared reference to 'Msg' (in container 'my.app') (tried 'other.pkg.Msg')",
+		},
+		{
+			name:      "catalog suggestion precedes candidates",
+			container: inContainer,
+			catalog:   true,
+			expr:      "foo",
+			want:      "undeclared reference to 'foo' (in container 'my.app') (did you mean 'food'?) (tried 'my.app.foo', 'my.foo', 'foo')",
+		},
+		{
+			name:      "catalog qualified ident",
+			container: inContainer,
+			catalog:   true,
+			expr:      "math.pi",
+			want:      "undeclared reference to 'math.pi' (in container 'my.app') (enable with `cel.Math()`) (tried 'my.app.math.pi', 'my.math.pi', 'math.pi')",
+		},
+		{
+			name:        "leading dot ident",
+			container:   inContainer,
+			expr:        ".foo",
+			want:        "undeclared reference to '.foo' (in container 'my.app')",
+			wantNoTried: true,
+		},
+		{
+			name:        "no container",
+			expr:        "foo",
+			want:        "undeclared reference to 'foo'",
+			wantNoTried: true,
+		},
+		{
+			name:        "global function",
+			container:   inContainer,
+			expr:        "foo()",
+			want:        "undeclared reference to 'foo' (in container 'my.app')",
+			wantNoTried: true,
+		},
+		{
+			name:        "member function",
+			container:   inContainer,
+			expr:        "1.foo()",
+			want:        "undeclared reference to 'foo' (in container 'my.app')",
+			wantNoTried: true,
+		},
+		{
+			name:        "catalog qualified function",
+			container:   inContainer,
+			catalog:     true,
+			expr:        "math.abs(1)",
+			want:        "undeclared reference to 'math.abs' (in container 'my.app') (enable with `cel.Math()`)",
+			wantNoTried: true,
+		},
+		{
+			name:        "disabled",
+			container:   inContainer,
+			disabled:    true,
+			expr:        "foo",
+			want:        "undeclared reference to 'foo' (in container 'my.app')",
+			wantNoTried: true,
+		},
+		{
+			name:        "disabled struct type name",
+			container:   inContainer,
+			disabled:    true,
+			expr:        "Msg{}",
+			want:        "undeclared reference to 'Msg' (in container 'my.app')",
+			wantNoTried: true,
+		},
+	}
+	p, err := parser.NewParser(parser.Macros(parser.AllMacros...))
+	if err != nil {
+		t.Fatalf("NewParser() failed: %v", err)
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cont, err := containers.NewContainer(tc.container...)
+			if err != nil {
+				t.Fatalf("NewContainer() failed: %v", err)
+			}
+			opts := []Option{ResolutionCandidates(!tc.disabled)}
+			if tc.catalog {
+				opts = append(opts, Catalog(func() *env.Catalog { return cat }))
+			}
+			chkEnv, err := NewEnv(cont, newTestRegistry(t), opts...)
+			if err != nil {
+				t.Fatalf("NewEnv() failed: %v", err)
+			}
+			if err := chkEnv.AddFunctions(stdlib.Functions()...); err != nil {
+				t.Fatalf("AddFunctions() failed: %v", err)
+			}
+			if err := chkEnv.AddIdents(tc.idents...); err != nil {
+				t.Fatalf("AddIdents() failed: %v", err)
+			}
+			src := common.NewTextSource(tc.expr)
+			parsed, iss := p.Parse(src)
+			if len(iss.GetErrors()) > 0 {
+				t.Fatalf("Parse(%q) failed: %v", tc.expr, iss.ToDisplayString())
+			}
+			_, iss = Check(parsed, src, chkEnv)
+			if len(iss.GetErrors()) == 0 {
+				t.Fatalf("Check(%q) succeeded, want error containing %q", tc.expr, tc.want)
+			}
+			got := iss.ToDisplayString()
+			if !strings.Contains(got, tc.want) {
+				t.Errorf("Check(%q) error = %q, want %q", tc.expr, got, tc.want)
+			}
+			if tc.wantNoTried && strings.Contains(got, "(tried ") {
+				t.Errorf("Check(%q) error unexpectedly listed resolution candidates: %q", tc.expr, got)
+			}
+		})
+	}
+}

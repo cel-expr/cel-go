@@ -1075,7 +1075,8 @@ func (e *Env) initChecker() (*checker.Env, error) {
 		chkOpts := []checker.Option{}
 		chkOpts = append(chkOpts, e.chkOpts...)
 		chkOpts = append(chkOpts,
-			checker.JSONFieldNames(e.HasFeature(featureJSONFieldNames)))
+			checker.JSONFieldNames(e.HasFeature(featureJSONFieldNames)),
+			checker.ResolutionCandidates(e.HasFeature(featureResolutionCandidates)))
 
 		chkOpts = append(chkOpts, checker.Catalog(func() *env.Catalog {
 			conf, err := e.ToConfig("")
