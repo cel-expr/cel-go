@@ -220,6 +220,8 @@ func exercise5() {
 		cel.MapType(cel.StringType, cel.DynType))
 
 	program, _ := env.Program(ast)
+	// CEL timestamp bindings accept time.Time or *tpb.Timestamp.
+	// tpb.New preserves fractional seconds when converting a time.Time.
 	out, _, _ := eval(
 		program,
 		map[string]any{
