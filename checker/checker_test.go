@@ -3229,6 +3229,7 @@ func TestResolutionCandidates(t *testing.T) {
 		container   []containers.ContainerOption
 		catalog     bool
 		disabled    bool
+		idents      []*decls.VariableDecl
 		expr        string
 		want        string
 		wantNoTried bool
@@ -3252,10 +3253,45 @@ func TestResolutionCandidates(t *testing.T) {
 			want:      "undeclared reference to 'foo' (in container 'my.app') (tried 'my.app.foo', 'my.foo', 'foo')",
 		},
 		{
-			name:      "qualified ident reports leading identifier",
+			name:      "qualified ident lists qualified names",
 			container: inContainer,
 			expr:      "a.b.c",
-			want:      "undeclared reference to 'a' (in container 'my.app') (tried 'my.app.a', 'my.a', 'a')",
+			want: "undeclared reference to 'a' (in container 'my.app') (tried " +
+				"'my.app.a.b.c', 'my.a.b.c', 'a.b.c', 'my.app.a.b', 'my.a.b', 'a.b', 'my.app.a', 'my.a', 'a')",
+		},
+		{
+			name: "qualified ident without container",
+			expr: "a.b",
+			want: "undeclared reference to 'a' (tried 'a.b', 'a')",
+		},
+		{
+			name:      "qualified ident in call argument",
+			container: inContainer,
+			expr:      "size(a.b)",
+			want: "undeclared reference to 'a' (in container 'my.app') (tried " +
+				"'my.app.a.b', 'my.a.b', 'a.b', 'my.app.a', 'my.a', 'a')",
+		},
+		{
+			name:      "qualified candidates dropped after undeclared select",
+			container: inContainer,
+			expr:      "a.b == foo",
+			want:      "undeclared reference to 'foo' (in container 'my.app') (tried 'my.app.foo', 'my.foo', 'foo')",
+		},
+		{
+			name:      "qualified candidates dropped after field selection",
+			container: inContainer,
+			idents:    []*decls.VariableDecl{decls.NewVariable("a", types.NewMapType(types.StringType, types.DynType))},
+			expr:      "a.b.c == foo",
+			want:      "undeclared reference to 'foo' (in container 'my.app') (tried 'my.app.foo', 'my.foo', 'foo')",
+		},
+		{
+			name:      "catalog qualified ident prefix",
+			container: inContainer,
+			catalog:   true,
+			expr:      "math.pi.something_else_entirely",
+			want: "undeclared reference to 'math.pi' (in container 'my.app') (enable with `cel.Math()`) (tried " +
+				"'my.app.math.pi.something_else_entirely', 'my.math.pi.something_else_entirely', " +
+				"'math.pi.something_else_entirely', 'my.app.math.pi', 'my.math.pi', 'math.pi')",
 		},
 		{
 			name:      "abbreviated ident",
@@ -3355,6 +3391,9 @@ func TestResolutionCandidates(t *testing.T) {
 			}
 			if err := chkEnv.AddFunctions(stdlib.Functions()...); err != nil {
 				t.Fatalf("AddFunctions() failed: %v", err)
+			}
+			if err := chkEnv.AddIdents(tc.idents...); err != nil {
+				t.Fatalf("AddIdents() failed: %v", err)
 			}
 			src := common.NewTextSource(tc.expr)
 			parsed, iss := p.Parse(src)

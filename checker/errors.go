@@ -107,14 +107,16 @@ func (e *typeErrors) undeclaredReference(id int64, l common.Location, container 
 	e.undeclaredReferenceWithSymbols(id, l, container, name, syms, nil)
 }
 
-// undeclaredIdent reports an undeclared reference for an identifier or type name. When resolution
-// candidates are enabled on the checker Env, the error lists the names attempted during resolution.
-func (e *typeErrors) undeclaredIdent(id int64, l common.Location, container string, name string) {
+// undeclaredIdent reports an undeclared reference for an identifier or type name.
+//
+// The candidates are the names attempted during resolution, and are listed in the error when
+// resolution candidates are enabled on the checker Env.
+func (e *typeErrors) undeclaredIdent(id int64, l common.Location, container string, name string, candidates []string) {
 	var syms []*env.CatalogSymbol
 	if cat := e.getCatalog(); cat != nil {
 		syms = cat.Find(name)
 	}
-	e.undeclaredReferenceWithSymbols(id, l, container, name, syms, resolutionCandidates(e.env, name))
+	e.undeclaredReferenceWithSymbols(id, l, container, name, syms, reportedCandidates(e.env, candidates))
 }
 
 func (e *typeErrors) undeclaredReferenceWithSymbols(id int64, l common.Location, container string, name string, syms []*env.CatalogSymbol, candidates []string) {
@@ -127,11 +129,11 @@ func (e *typeErrors) undeclaredReferenceWithSymbols(id int64, l common.Location,
 	e.errs.ReportErrorAtID(id, l, "undeclared reference to '%s'%s%s%s", name, containerSuffix, suggestion, tried)
 }
 
-func (e *typeErrors) checkUndeclaredIdent(env *Env, id int64, l common.Location, qualifiers ...string) bool {
+func (e *typeErrors) checkUndeclaredIdent(env *Env, id int64, l common.Location, candidates []string, qualifiers ...string) bool {
 	if len(qualifiers) <= 1 || e.hasDeclaredPrefix(env, qualifiers[:len(qualifiers)-1]...) {
 		return false
 	}
-	return e.checkUndeclaredReference(env, id, l, strings.Join(qualifiers, "."), true)
+	return e.checkUndeclaredReference(env, id, l, strings.Join(qualifiers, "."), candidates)
 }
 
 func (e *typeErrors) checkUndeclaredFunction(env *Env, id int64, l common.Location, qualifiedPrefix, fnName string) bool {
@@ -139,10 +141,10 @@ func (e *typeErrors) checkUndeclaredFunction(env *Env, id int64, l common.Locati
 	if e.hasDeclaredPrefix(env, prefixParts...) {
 		return false
 	}
-	return e.checkUndeclaredReference(env, id, l, qualifiedPrefix+"."+fnName, false)
+	return e.checkUndeclaredReference(env, id, l, qualifiedPrefix+"."+fnName, nil)
 }
 
-func (e *typeErrors) checkUndeclaredReference(env *Env, id int64, l common.Location, qualifiedName string, isIdent bool) bool {
+func (e *typeErrors) checkUndeclaredReference(env *Env, id int64, l common.Location, qualifiedName string, candidates []string) bool {
 	if env == nil {
 		return false
 	}
@@ -158,11 +160,7 @@ func (e *typeErrors) checkUndeclaredReference(env *Env, id int64, l common.Locat
 	if env.container != nil {
 		container = env.container.Name()
 	}
-	var candidates []string
-	if isIdent {
-		candidates = resolutionCandidates(env, qualifiedName)
-	}
-	e.undeclaredReferenceWithSymbols(id, l, container, qualifiedName, syms, candidates)
+	e.undeclaredReferenceWithSymbols(id, l, container, qualifiedName, syms, reportedCandidates(env, candidates))
 	return true
 }
 
@@ -171,20 +169,20 @@ func (e *typeErrors) hasDeclaredPrefix(env *Env, qualifierPrefixes ...string) bo
 		return false
 	}
 	for i := 1; i <= len(qualifierPrefixes); i++ {
-		if env.resolveQualifiedIdent(qualifierPrefixes[:i]...) != nil {
+		if ident, _ := env.resolveQualifiedIdent(qualifierPrefixes[:i]...); ident != nil {
 			return true
 		}
 	}
 	return false
 }
 
-// resolutionCandidates returns the names attempted when resolving the identifier or type name,
-// or nil if listing resolution candidates is not enabled.
-func resolutionCandidates(env *Env, name string) []string {
+// reportedCandidates returns the candidate names attempted during resolution if listing resolution
+// candidates is enabled, or nil otherwise.
+func reportedCandidates(env *Env, candidates []string) []string {
 	if env == nil || !env.resolutionCandidates {
 		return nil
 	}
-	return env.container.ResolveCandidateNames(name)
+	return candidates
 }
 
 // formatCandidatesSuffix formats the names attempted during resolution.

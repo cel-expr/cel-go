@@ -38,6 +38,10 @@ type checker struct {
 	errors             *typeErrors
 	mappings           *mapping
 	freeTypeVarCounter int
+
+	// qualifiedCandidates holds the candidate names attempted while resolving the enclosing select
+	// expressions as qualified identifiers. Only populated when resolution candidates are enabled.
+	qualifiedCandidates []string
 }
 
 // Check performs type checking, giving a typed AST.
@@ -115,7 +119,8 @@ func (c *checker) check(e ast.Expr) {
 func (c *checker) checkIdent(e ast.Expr) {
 	identName := e.AsIdent()
 	// Check to see if the identifier is declared.
-	if ident := c.env.resolveSimpleIdent(identName); ident != nil {
+	ident, candidates := c.env.resolveSimpleIdent(identName)
+	if ident != nil {
 		name := strings.TrimPrefix(ident.Name(), ".")
 		if ident.requiresDisambiguation {
 			name = "." + name
@@ -128,7 +133,11 @@ func (c *checker) checkIdent(e ast.Expr) {
 	}
 
 	c.setType(e, types.ErrorType)
-	c.errors.undeclaredIdent(e.ID(), c.location(e), c.env.container.Name(), identName)
+	if len(c.qualifiedCandidates) > 0 {
+		// Include the longer qualified names attempted by the enclosing select expressions.
+		candidates = slices.Concat(c.qualifiedCandidates, candidates)
+	}
+	c.errors.undeclaredIdent(e.ID(), c.location(e), c.env.container.Name(), identName, candidates)
 }
 
 func (c *checker) checkSelect(e ast.Expr) {
@@ -136,7 +145,7 @@ func (c *checker) checkSelect(e ast.Expr) {
 	// Before traversing down the tree, try to interpret as qualified name.
 	qualifiers, found := c.computeQualifiers(e)
 	if found {
-		ident := c.env.resolveQualifiedIdent(qualifiers...)
+		ident, candidates := c.env.resolveQualifiedIdent(qualifiers...)
 		if ident != nil {
 			// We don't check for a TestOnly expression here since the `found` result is
 			// always going to be false for TestOnly expressions.
@@ -152,7 +161,15 @@ func (c *checker) checkSelect(e ast.Expr) {
 			e.SetKindCase(c.NewIdent(e.ID(), name))
 			return
 		}
-		if c.errors.checkUndeclaredIdent(c.env, e.ID(), c.location(e), qualifiers...) {
+		if c.env.resolutionCandidates {
+			// Track the names attempted for this qualified name so that they may be reported
+			// alongside the names attempted for the shorter qualified names of the operand.
+			c.qualifiedCandidates = append(c.qualifiedCandidates, candidates...)
+			candidates = c.qualifiedCandidates
+			// Ok to reset multiple times if we resolve inside the operand.
+			defer func() { c.qualifiedCandidates = nil }()
+		}
+		if c.errors.checkUndeclaredIdent(c.env, e.ID(), c.location(e), candidates, qualifiers...) {
 			c.setType(e, types.ErrorType)
 			return
 		}
@@ -491,10 +508,10 @@ func (c *checker) checkCreateStruct(e ast.Expr) {
 	msgVal := e.AsStruct()
 	// Determine the type of the message.
 	resultType := types.ErrorType
-	ident := c.env.resolveTypeIdent(msgVal.TypeName())
+	ident, candidates := c.env.resolveTypeIdent(msgVal.TypeName())
 	if ident == nil {
 		c.errors.undeclaredIdent(
-			e.ID(), c.location(e), c.env.container.Name(), msgVal.TypeName())
+			e.ID(), c.location(e), c.env.container.Name(), msgVal.TypeName(), candidates)
 		c.setType(e, types.ErrorType)
 		return
 	}
