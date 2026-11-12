@@ -40,6 +40,22 @@ func MaxConstantFoldIterations(limit int) ConstantFoldingOption {
 	}
 }
 
+// MaxComprehensionUnrollSize limits the maximum list literal size for unrolling .exists() and
+// .all() comprehensions whose predicates cannot be fully folded to a constant.
+//
+// Setting a limit less than or equal to 0 disables comprehension unrolling.
+// Defaults to 100 if not set.
+func MaxComprehensionUnrollSize(limit int) ConstantFoldingOption {
+	return func(opt *constantFoldingOptimizer) (*constantFoldingOptimizer, error) {
+		if limit <= 0 {
+			opt.maxUnrollSize = 0
+		} else {
+			opt.maxUnrollSize = limit
+		}
+		return opt, nil
+	}
+}
+
 // FoldKnownValues adds an Activation which provides known values for the folding evaluator
 //
 // Any values the activation provides will be used by the constant folder and turned into
@@ -62,6 +78,7 @@ func FoldKnownValues(knownValues Activation) ConstantFoldingOption {
 func NewConstantFoldingOptimizer(opts ...ConstantFoldingOption) (ASTOptimizer, error) {
 	folder := &constantFoldingOptimizer{
 		maxFoldIterations: defaultMaxConstantFoldIterations,
+		maxUnrollSize:     defaultMaxComprehensionUnrollSize,
 	}
 	var err error
 	for _, o := range opts {
@@ -75,6 +92,7 @@ func NewConstantFoldingOptimizer(opts ...ConstantFoldingOption) (ASTOptimizer, e
 
 type constantFoldingOptimizer struct {
 	maxFoldIterations int
+	maxUnrollSize     int
 	knownValues       Activation
 }
 
@@ -83,13 +101,65 @@ type constantFoldingOptimizer struct {
 //
 // Note: only values which can be represented as literals in CEL syntax are supported.
 func (opt *constantFoldingOptimizer) Optimize(ctx *OptimizerContext, a *ast.AST) *ast.AST {
-	root := ast.NavigateAST(a)
-
-	// Walk the list of foldable expression and continue to fold until there are no more folds left.
+	// Walk the list of foldable expressions and continue to fold until there are no more folds left.
 	// All of the fold candidates returned by the constantExprMatcher should succeed unless there's
 	// a logic bug with the selection of expressions.
+	if !opt.foldConstants(ctx, a) {
+		return a
+	}
+
+	// Prune resolved optional elements before attempting comprehension folding or unrolling so
+	// aggregate literals with resolved optionals are flattened first.
+	pruneOptionalElements(ctx, ast.NavigateAST(a))
+
+	// Once all of the constants have been folded, try to run through the remaining comprehensions.
+	// In this case, there's no guarantee they'll run, so we only update the target comprehension
+	// node with the literal value if the evaluation succeeds. When evaluation fails with
+	// errCannotFold, attempt to unroll eligible .exists() and .all() comprehensions over list
+	// literals and re-run constant folding on the unrolled branches.
+	for unrollIter := 0; ; unrollIter++ {
+		unrolled := false
+		root := ast.NavigateAST(a)
+		for _, compre := range ast.MatchDescendants(root, ast.KindMatcher(ast.ComprehensionKind)) {
+			if err := opt.tryFold(ctx, a, compre); err == nil {
+				continue
+			}
+			if unrollIter < opt.maxFoldIterations && opt.tryUnrollComprehension(ctx, a, compre) {
+				unrolled = true
+			}
+		}
+		if !unrolled {
+			break
+		}
+		if !opt.foldConstants(ctx, a) {
+			return a
+		}
+		pruneOptionalElements(ctx, ast.NavigateAST(a))
+	}
+
+	// Ensure that all intermediate values in the folded expression can be represented as valid
+	// CEL literals within the AST structure. Use `PostOrderVisit` rather than `MatchDescendents`
+	// to avoid extra allocations during this final pass through the AST.
+	root := ast.NavigateAST(a)
+	ast.PostOrderVisit(root, ast.NewExprVisitor(func(e ast.Expr) {
+		if e.Kind() != ast.LiteralKind {
+			return
+		}
+		val := e.AsLiteral()
+		adapted, err := adaptLiteral(ctx, val)
+		if err != nil {
+			ctx.ReportErrorAtID(root.ID(), "constant-folding evaluation failed: %v", err.Error())
+			return
+		}
+		ctx.UpdateExpr(e, adapted)
+	}))
+
+	return a
+}
+
+func (opt *constantFoldingOptimizer) foldConstants(ctx *OptimizerContext, a *ast.AST) bool {
 	constantExprMatcherCapture := func(e ast.NavigableExpr) bool { return opt.constantExprMatcher(ctx, a, e) }
-	foldableExprs := ast.MatchDescendants(root, constantExprMatcherCapture)
+	foldableExprs := ast.MatchDescendants(ast.NavigateAST(a), constantExprMatcherCapture)
 	foldCount := 0
 	for len(foldableExprs) != 0 && foldCount < opt.maxFoldIterations {
 		for _, fold := range foldableExprs {
@@ -108,40 +178,382 @@ func (opt *constantFoldingOptimizer) Optimize(ctx *OptimizerContext, a *ast.AST)
 			// has a value for them.
 			if err != nil && fold.Kind() != ast.IdentKind && !errors.Is(err, errCannotFold) {
 				ctx.ReportErrorAtID(fold.ID(), "constant-folding evaluation failed: %v", err.Error())
-				return a
+				return false
 			}
 		}
 		foldCount++
-		foldableExprs = ast.MatchDescendants(root, constantExprMatcherCapture)
+		foldableExprs = ast.MatchDescendants(ast.NavigateAST(a), constantExprMatcherCapture)
 	}
-	// Once all of the constants have been folded, try to run through the remaining comprehensions
-	// one last time. In this case, there's no guarantee they'll run, so we only update the
-	// target comprehension node with the literal value if the evaluation succeeds.
-	for _, compre := range ast.MatchDescendants(root, ast.KindMatcher(ast.ComprehensionKind)) {
-		opt.tryFold(ctx, a, compre)
+	return true
+}
+
+func (opt *constantFoldingOptimizer) tryUnrollComprehension(ctx *OptimizerContext, a *ast.AST, compNode ast.NavigableExpr) bool {
+	if opt.maxUnrollSize <= 0 {
+		return false
+	}
+	comp := compNode.AsComprehension()
+	if comp.IterVar2() != "" {
+		return false
 	}
 
-	// If the output is a list, map, or struct which contains optional entries, then prune it
-	// to make sure that the optionals, if resolved, do not surface in the output literal.
-	pruneOptionalElements(ctx, root)
+	if comp.AccuInit().Kind() != ast.LiteralKind {
+		return false
+	}
+	initBool, ok := comp.AccuInit().AsLiteral().(types.Bool)
+	if !ok {
+		return false
+	}
+	isAll := initBool == types.True
 
-	// Ensure that all intermediate values in the folded expression can be represented as valid
-	// CEL literals within the AST structure. Use `PostOrderVisit` rather than `MatchDescendents`
-	// to avoid extra allocations during this final pass through the AST.
-	ast.PostOrderVisit(root, ast.NewExprVisitor(func(e ast.Expr) {
-		if e.Kind() != ast.LiteralKind {
-			return
+	if comp.Result().Kind() != ast.IdentKind || comp.Result().AsIdent() != comp.AccuVar() {
+		return false
+	}
+
+	if !isStandardQuantifierCondition(comp.LoopCondition(), comp.AccuVar(), isAll) {
+		return false
+	}
+
+	predTemplate, expectedOp, ok := extractQuantifierPredicate(comp.LoopStep(), comp.AccuVar(), isAll)
+	if !ok || !isBoolType(a, predTemplate) {
+		return false
+	}
+
+	if hasLateBoundOrAsyncCall(ctx, compNode) {
+		return false
+	}
+
+	iterRange := comp.IterRange()
+	if iterRange.Kind() == ast.LiteralKind && iterRange.AsLiteral().Type() == types.ListType {
+		lister, ok := iterRange.AsLiteral().(traits.Lister)
+		if !ok {
+			return false
 		}
-		val := e.AsLiteral()
-		adapted, err := adaptLiteral(ctx, val)
-		if err != nil {
-			ctx.ReportErrorAtID(root.ID(), "constant-folding evaluation failed: %v", err.Error())
-			return
+		sz, ok := lister.Size().(types.Int)
+		if !ok || int(sz) > opt.maxUnrollSize {
+			return false
 		}
-		ctx.UpdateExpr(e, adapted)
+		elems := make([]ast.Expr, int(sz))
+		it := lister.Iterator()
+		for idx := 0; it.HasNext() == types.True; idx++ {
+			elems[idx] = ctx.NewLiteral(it.Next())
+		}
+		ctx.UpdateExpr(iterRange, ctx.NewList(elems, []int32{}))
+		iterRange = comp.IterRange()
+	}
+
+	if iterRange.Kind() != ast.ListKind {
+		return false
+	}
+	list := iterRange.AsList()
+	if len(list.OptionalIndices()) != 0 || list.Size() > opt.maxUnrollSize {
+		return false
+	}
+
+	if list.Size() == 0 {
+		lit := ctx.NewLiteral(initBool)
+		clearSubtreeMacroCalls(ctx, compNode)
+		ctx.UpdateExpr(compNode, lit)
+		if a != nil {
+			delete(a.ReferenceMap(), compNode.ID())
+			a.SetType(compNode.ID(), types.BoolType)
+		}
+		return true
+	}
+
+	boundVars := collectBoundComprehensionVars(comp, predTemplate)
+	elems := list.Elements()
+	allElemsConstant := true
+	for _, elem := range elems {
+		if navElem, ok := elem.(ast.NavigableExpr); !ok || !constantMatcher(navElem) {
+			allElemsConstant = false
+		}
+		freeInElem := map[string]bool{}
+		collectFreeIdents(elem, nil, freeInElem)
+		for identName := range freeInElem {
+			if boundVars[identName] {
+				return false
+			}
+		}
+	}
+
+	freeInPred := map[string]bool{}
+	collectFreeIdents(predTemplate, nil, freeInPred)
+	if freeInPred[comp.AccuVar()] {
+		return false
+	}
+	iterVarFree := freeInPred[comp.IterVar()]
+	if !iterVarFree && !allElemsConstant {
+		return false
+	}
+
+	var preds []ast.Expr
+	if !iterVarFree {
+		preds = []ast.Expr{copySubExpr(ctx, a, predTemplate)}
+	} else {
+		preds = make([]ast.Expr, len(elems))
+		for i, elem := range elems {
+			predCopy := copySubExpr(ctx, a, predTemplate)
+			substituteIterVar(ctx, a, predCopy, comp.IterVar(), elem)
+			preds[i] = predCopy
+		}
+	}
+
+	combined := buildBalancedLogicalTree(ctx, a, expectedOp, preds)
+	clearSubtreeMacroCalls(ctx, compNode)
+	ctx.UpdateExpr(compNode, combined)
+	updateMetadata(a, compNode.ID(), combined.ID())
+	if a != nil {
+		a.SetType(compNode.ID(), types.BoolType)
+	}
+	return true
+}
+
+func clearSubtreeMacroCalls(ctx *OptimizerContext, expr ast.Expr) {
+	var clearRec func(e ast.Expr)
+	clearRec = func(e ast.Expr) {
+		ast.PostOrderVisit(e, ast.NewExprVisitor(func(node ast.Expr) {
+			if call, found := ctx.MacroCalls()[node.ID()]; found {
+				ctx.ClearMacroCall(node.ID())
+				clearRec(call)
+			}
+		}))
+	}
+	clearRec(expr)
+}
+
+func isStandardQuantifierCondition(cond ast.Expr, accuVar string, isAll bool) bool {
+	if cond.Kind() != ast.CallKind {
+		return false
+	}
+	condCall := cond.AsCall()
+	if condCall.IsMemberFunction() || len(condCall.Args()) != 1 {
+		return false
+	}
+	fn := condCall.FunctionName()
+	if fn != operators.NotStrictlyFalse && fn != operators.OldNotStrictlyFalse {
+		return false
+	}
+	arg := condCall.Args()[0]
+	if isAll {
+		return arg.Kind() == ast.IdentKind && arg.AsIdent() == accuVar
+	}
+	if arg.Kind() != ast.CallKind {
+		return false
+	}
+	notCall := arg.AsCall()
+	if notCall.IsMemberFunction() || notCall.FunctionName() != operators.LogicalNot || len(notCall.Args()) != 1 {
+		return false
+	}
+	innerArg := notCall.Args()[0]
+	return innerArg.Kind() == ast.IdentKind && innerArg.AsIdent() == accuVar
+}
+
+func extractQuantifierPredicate(step ast.Expr, accuVar string, isAll bool) (ast.Expr, string, bool) {
+	if step.Kind() != ast.CallKind {
+		return nil, "", false
+	}
+	stepCall := step.AsCall()
+	expectedOp := operators.LogicalOr
+	if isAll {
+		expectedOp = operators.LogicalAnd
+	}
+	if stepCall.IsMemberFunction() || stepCall.FunctionName() != expectedOp || len(stepCall.Args()) != 2 {
+		return nil, "", false
+	}
+	args := stepCall.Args()
+	if args[0].Kind() == ast.IdentKind && args[0].AsIdent() == accuVar {
+		return args[1], expectedOp, true
+	}
+	if args[1].Kind() == ast.IdentKind && args[1].AsIdent() == accuVar {
+		return args[0], expectedOp, true
+	}
+	return nil, "", false
+}
+
+func hasLateBoundOrAsyncCall(ctx *OptimizerContext, expr ast.Expr) bool {
+	found := false
+	ast.PreOrderVisit(expr, ast.NewExprVisitor(func(e ast.Expr) {
+		if e.Kind() == ast.CallKind && (isLateBoundFunctionCall(ctx, e) || isAsyncFunctionCall(ctx, e)) {
+			found = true
+		}
 	}))
+	return found
+}
 
-	return a
+func collectBoundComprehensionVars(comp ast.ComprehensionExpr, predTemplate ast.Expr) map[string]bool {
+	bound := map[string]bool{
+		comp.IterVar(): true,
+		comp.AccuVar(): true,
+	}
+	if comp.IterVar2() != "" {
+		bound[comp.IterVar2()] = true
+	}
+	ast.PreOrderVisit(predTemplate, ast.NewExprVisitor(func(e ast.Expr) {
+		if e.Kind() != ast.ComprehensionKind {
+			return
+		}
+		inner := e.AsComprehension()
+		bound[inner.IterVar()] = true
+		bound[inner.AccuVar()] = true
+		if inner.IterVar2() != "" {
+			bound[inner.IterVar2()] = true
+		}
+	}))
+	return bound
+}
+
+func collectFreeIdents(expr ast.Expr, bound map[string]bool, free map[string]bool) {
+	switch expr.Kind() {
+	case ast.IdentKind:
+		name := expr.AsIdent()
+		if !bound[name] {
+			free[name] = true
+		}
+	case ast.SelectKind:
+		collectFreeIdents(expr.AsSelect().Operand(), bound, free)
+	case ast.CallKind:
+		call := expr.AsCall()
+		if call.IsMemberFunction() {
+			collectFreeIdents(call.Target(), bound, free)
+		}
+		for _, arg := range call.Args() {
+			collectFreeIdents(arg, bound, free)
+		}
+	case ast.ListKind:
+		for _, elem := range expr.AsList().Elements() {
+			collectFreeIdents(elem, bound, free)
+		}
+	case ast.MapKind:
+		for _, entry := range expr.AsMap().Entries() {
+			mapEntry := entry.AsMapEntry()
+			collectFreeIdents(mapEntry.Key(), bound, free)
+			collectFreeIdents(mapEntry.Value(), bound, free)
+		}
+	case ast.StructKind:
+		for _, field := range expr.AsStruct().Fields() {
+			collectFreeIdents(field.AsStructField().Value(), bound, free)
+		}
+	case ast.ComprehensionKind:
+		comp := expr.AsComprehension()
+		collectFreeIdents(comp.IterRange(), bound, free)
+		collectFreeIdents(comp.AccuInit(), bound, free)
+		innerBound := make(map[string]bool, len(bound)+3)
+		for k, v := range bound {
+			innerBound[k] = v
+		}
+		innerBound[comp.IterVar()] = true
+		innerBound[comp.AccuVar()] = true
+		if comp.IterVar2() != "" {
+			innerBound[comp.IterVar2()] = true
+		}
+		collectFreeIdents(comp.LoopCondition(), innerBound, free)
+		collectFreeIdents(comp.LoopStep(), innerBound, free)
+		collectFreeIdents(comp.Result(), innerBound, free)
+	}
+}
+
+func copySubExpr(ctx *OptimizerContext, a *ast.AST, subExpr ast.Expr) ast.Expr {
+	subInfo := ast.NewSourceInfo(nil)
+	var oldIDs []int64
+	var collectMacroInfo func(e ast.Expr)
+	collectMacroInfo = func(e ast.Expr) {
+		ast.PostOrderVisit(e, ast.NewExprVisitor(func(node ast.Expr) {
+			id := node.ID()
+			if a == nil || a.SourceInfo() == nil {
+				return
+			}
+			if offset, found := a.SourceInfo().GetOffsetRange(id); found {
+				subInfo.SetOffsetRange(id, offset)
+			}
+			if call, found := a.SourceInfo().GetMacroCall(id); found {
+				if _, exists := subInfo.GetMacroCall(id); !exists {
+					subInfo.SetMacroCall(id, call)
+					collectMacroInfo(call)
+				}
+			}
+		}))
+	}
+	ast.PostOrderVisit(subExpr, ast.NewExprVisitor(func(node ast.Expr) {
+		oldIDs = append(oldIDs, node.ID())
+	}))
+	collectMacroInfo(subExpr)
+
+	copied := ctx.CopyASTAndMetadata(ast.NewAST(subExpr, subInfo))
+	if a == nil {
+		return copied
+	}
+	idx := 0
+	ast.PostOrderVisit(copied, ast.NewExprVisitor(func(node ast.Expr) {
+		oldID := oldIDs[idx]
+		idx++
+		newID := node.ID()
+		if t, found := a.TypeMap()[oldID]; found {
+			a.TypeMap()[newID] = t
+		}
+		if ref, found := a.ReferenceMap()[oldID]; found {
+			a.ReferenceMap()[newID] = ref
+		}
+	}))
+	return copied
+}
+
+func substituteIterVar(ctx *OptimizerContext, a *ast.AST, expr ast.Expr, iterVar string, elem ast.Expr) {
+	switch expr.Kind() {
+	case ast.IdentKind:
+		if expr.AsIdent() == iterVar {
+			elemCopy := copySubExpr(ctx, a, elem)
+			ctx.UpdateExpr(expr, elemCopy)
+			updateMetadata(a, expr.ID(), elemCopy.ID())
+		}
+	case ast.SelectKind:
+		substituteIterVar(ctx, a, expr.AsSelect().Operand(), iterVar, elem)
+	case ast.CallKind:
+		call := expr.AsCall()
+		if call.IsMemberFunction() {
+			substituteIterVar(ctx, a, call.Target(), iterVar, elem)
+		}
+		for _, arg := range call.Args() {
+			substituteIterVar(ctx, a, arg, iterVar, elem)
+		}
+	case ast.ListKind:
+		for _, el := range expr.AsList().Elements() {
+			substituteIterVar(ctx, a, el, iterVar, elem)
+		}
+	case ast.MapKind:
+		for _, entry := range expr.AsMap().Entries() {
+			mapEntry := entry.AsMapEntry()
+			substituteIterVar(ctx, a, mapEntry.Key(), iterVar, elem)
+			substituteIterVar(ctx, a, mapEntry.Value(), iterVar, elem)
+		}
+	case ast.StructKind:
+		for _, field := range expr.AsStruct().Fields() {
+			substituteIterVar(ctx, a, field.AsStructField().Value(), iterVar, elem)
+		}
+	case ast.ComprehensionKind:
+		inner := expr.AsComprehension()
+		substituteIterVar(ctx, a, inner.IterRange(), iterVar, elem)
+		substituteIterVar(ctx, a, inner.AccuInit(), iterVar, elem)
+		if inner.IterVar() == iterVar || inner.IterVar2() == iterVar || inner.AccuVar() == iterVar {
+			return
+		}
+		substituteIterVar(ctx, a, inner.LoopCondition(), iterVar, elem)
+		substituteIterVar(ctx, a, inner.LoopStep(), iterVar, elem)
+		substituteIterVar(ctx, a, inner.Result(), iterVar, elem)
+	}
+}
+
+func buildBalancedLogicalTree(ctx *OptimizerContext, a *ast.AST, op string, preds []ast.Expr) ast.Expr {
+	if len(preds) == 1 {
+		return preds[0]
+	}
+	mid := len(preds) / 2
+	left := buildBalancedLogicalTree(ctx, a, op, preds[:mid])
+	right := buildBalancedLogicalTree(ctx, a, op, preds[mid:])
+	call := ctx.NewCall(op, left, right)
+	if a != nil {
+		a.SetType(call.ID(), types.BoolType)
+	}
+	return call
 }
 
 var errCannotFold = errors.New("subexpression cannot be folded")
@@ -819,5 +1231,6 @@ var (
 )
 
 const (
-	defaultMaxConstantFoldIterations = 100
+	defaultMaxConstantFoldIterations  = 100
+	defaultMaxComprehensionUnrollSize = 100
 )
