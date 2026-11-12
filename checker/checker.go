@@ -128,7 +128,7 @@ func (c *checker) checkIdent(e ast.Expr) {
 	}
 
 	c.setType(e, types.ErrorType)
-	c.errors.undeclaredReference(e.ID(), c.location(e), c.env.container.Name(), identName)
+	c.errors.undeclaredIdent(e.ID(), c.location(e), c.env.container.Name(), identName)
 }
 
 func (c *checker) checkSelect(e ast.Expr) {
@@ -493,7 +493,7 @@ func (c *checker) checkCreateStruct(e ast.Expr) {
 	resultType := types.ErrorType
 	ident := c.env.resolveTypeIdent(msgVal.TypeName())
 	if ident == nil {
-		c.errors.undeclaredReference(
+		c.errors.undeclaredIdent(
 			e.ID(), c.location(e), c.env.container.Name(), msgVal.TypeName())
 		c.setType(e, types.ErrorType)
 		return

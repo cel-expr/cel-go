@@ -80,6 +80,10 @@ type Env struct {
 	catalogSupplier     CatalogSupplier
 	catalogOnce         sync.Once
 	catalog             *env.Catalog
+
+	// resolutionCandidates indicates whether undeclared reference errors list the names attempted
+	// during resolution.
+	resolutionCandidates bool
 }
 
 // NewEnv returns a new *Env with the given parameters.
@@ -108,6 +112,8 @@ func NewEnv(container *containers.Container, provider types.Provider, opts ...Op
 		filteredOverloadIDs: map[string]struct{}{},
 		jsonFieldNames:      envOptions.jsonFieldNames,
 		catalogSupplier:     envOptions.catalogSupplier,
+
+		resolutionCandidates: envOptions.resolutionCandidates,
 	}, nil
 }
 
@@ -346,6 +352,8 @@ func (e *Env) cloneWithDecls(decls *Scopes) *Env {
 		jsonFieldNames:      e.jsonFieldNames,
 		catalogSupplier:     e.catalogSupplier,
 		catalog:             e.catalog,
+
+		resolutionCandidates: e.resolutionCandidates,
 	}
 }
 

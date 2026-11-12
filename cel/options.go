@@ -78,6 +78,9 @@ const (
 	// numeric timezone offsets. Strict validation is the default; the feature only has an effect
 	// when it is explicitly disabled, see StrictTimestampParsing.
 	featureStrictTimestampParsing
+
+	// Enable listing the names attempted during resolution in undeclared reference errors.
+	featureResolutionCandidates
 )
 
 var featureIDsToNames = map[int]string{
@@ -1172,6 +1175,19 @@ func DefaultUTCTimeZone(enabled bool) EnvOption {
 // apply to timestamp literal validation (see ValidateTimestampLiterals).
 func StrictTimestampParsing(enabled bool) EnvOption {
 	return features(featureStrictTimestampParsing, enabled)
+}
+
+// ResolutionCandidates enables listing the fully-qualified names the type-checker attempted when
+// an identifier or type name fails to resolve.
+//
+// The candidate names follow the namespace resolution order of the Container and account for
+// abbreviations and aliases, for example:
+//
+//	undeclared reference to 'foo' (in container 'my.app') (tried 'my.app.foo', 'my.foo', 'foo')
+//
+// Disabled by default.
+func ResolutionCandidates(enabled bool) EnvOption {
+	return features(featureResolutionCandidates, enabled)
 }
 
 // features sets the given feature flags.  See list of Feature constants above.
