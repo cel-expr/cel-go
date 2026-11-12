@@ -16,7 +16,6 @@ go_library(
         "options.go",
         "parser.go",
         "pratt_parser.go",
-        "unescape.go",
         "unparser.go",
     ],
     importpath = "cel.dev/cel-go/parser",
@@ -28,6 +27,7 @@ go_library(
         "//common/runes:go_default_library",
         "//common/types:go_default_library",
         "//common/types/ref:go_default_library",
+        "//internal/strings:go_default_library",
         "//parser/gen:go_default_library",
         "@com_github_antlr4_go_antlr_v4//:go_default_library",
         "@org_golang_google_genproto_googleapis_api//expr/v1alpha1:go_default_library",
@@ -43,7 +43,6 @@ go_test(
         "helper_test.go",
         "lexer_test.go",
         "parser_test.go",
-        "unescape_test.go",
         "unparser_test.go",
     ],
     embed = [
