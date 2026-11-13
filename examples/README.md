@@ -268,6 +268,21 @@ fmt.Println(out) // true
 
 ---
 
+## 15. Evaluation Explainer (`cel.ExplainEval`)
+
+Trace comprehension iterations with `cel.OptTraceIterations` (and optionally `cel.OptExhaustiveEval`) to explain violations, inspect evaluation steps, and step through evaluations with `Debugger`:
+
+```go
+prg, _ := env.Program(ast, cel.EvalOptions(cel.OptTraceIterations, cel.OptExhaustiveEval))
+_, details, _ := prg.Eval(input)
+exp, _ := cel.ExplainEval(ast, details)
+fmt.Print(exp.String())
+```
+
+[Source code: example_cel_explain_test.go](example_cel_explain_test.go)
+
+---
+
 ## Running the Examples
 
 Run all examples locally with `go test`:
