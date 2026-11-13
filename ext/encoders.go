@@ -38,8 +38,9 @@ import (
 )
 
 const (
-	maxJSONSize = 10 * 1024 * 1024 // 10MB maximum allowed JSON string size
-	maxYAMLSize = 10 * 1024 * 1024 // 10MB maximum allowed YAML string size
+	maxParseSize = 10 * 1024 * 1024 // 10MB default maximum allowed parse input size
+	maxJSONSize  = maxParseSize     // 10MB maximum allowed JSON string size
+	maxYAMLSize  = maxParseSize     // 10MB maximum allowed YAML string size
 )
 
 // Encoders returns a cel.EnvOption to configure extended functions for string, byte, and object
