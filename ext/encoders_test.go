@@ -2417,3 +2417,317 @@ type mockProtoVal struct {
 	ref.Val
 	*proto3pb.TestAllTypes
 }
+
+func TestJSONAndYAMLParseBytes(t *testing.T) {
+	env, err := cel.NewEnv(
+		cel.OptionalTypes(),
+		Encoders(),
+		cel.Variable("jsonBytes", cel.BytesType),
+		cel.Variable("yamlBytes", cel.BytesType),
+		cel.Variable("badUTF8", cel.BytesType),
+	)
+	if err != nil {
+		t.Fatalf("cel.NewEnv() failed: %v", err)
+	}
+	vars := map[string]any{
+		"jsonBytes": []byte(`{"count": 42, "active": true}`),
+		"yamlBytes": []byte("service: api\nport: 8080\n"),
+		"badUTF8":   []byte{0xff, 0xfe},
+	}
+	tests := []struct {
+		expr string
+		want any
+	}{
+		{
+			expr: "json.parse(jsonBytes).value().count == 42 && json.parse(jsonBytes).value().active",
+			want: true,
+		},
+		{
+			expr: "json.parse(b'123', int).value() == 123",
+			want: true,
+		},
+		{
+			expr: "yaml.parse(yamlBytes).value().service == 'api' && yaml.parse(yamlBytes).value().port == 8080",
+			want: true,
+		},
+		{
+			expr: "yaml.parse(b'123', int).value() == 123",
+			want: true,
+		},
+		{
+			expr: "!json.parse(badUTF8).hasValue()",
+			want: true,
+		},
+		{
+			expr: "!json.parse(badUTF8, int).hasValue()",
+			want: true,
+		},
+		{
+			expr: "!json.parse(b'{bad').hasValue()",
+			want: true,
+		},
+		{
+			expr: "!json.parse(b'\"not_an_int\"', int).hasValue()",
+			want: true,
+		},
+		{
+			expr: "!yaml.parse(badUTF8).hasValue()",
+			want: true,
+		},
+		{
+			expr: "!yaml.parse(badUTF8, int).hasValue()",
+			want: true,
+		},
+		{
+			expr: "!yaml.parse(b': : bad').hasValue()",
+			want: true,
+		},
+		{
+			expr: "!yaml.parse(b'not_an_int', int).hasValue()",
+			want: true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.expr, func(t *testing.T) {
+			ast, iss := env.Compile(tc.expr)
+			if iss.Err() != nil {
+				t.Fatalf("Compile(%q) failed: %v", tc.expr, iss.Err())
+			}
+			prg, err := env.Program(ast)
+			if err != nil {
+				t.Fatalf("Program(%q) failed: %v", tc.expr, err)
+			}
+			out, _, err := prg.Eval(vars)
+			if err != nil {
+				t.Fatalf("Eval(%q) failed: %v", tc.expr, err)
+			}
+			got, err := out.ConvertToNative(reflect.TypeOf(tc.want))
+			if err != nil || !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("Eval(%q) = %v (%v), want %v", tc.expr, out, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestJSONAndYAMLParseBytesCostUnbounded(t *testing.T) {
+	env, err := cel.NewEnv(cel.OptionalTypes(), Encoders(EncodersVersion(3)))
+	if err != nil {
+		t.Fatalf("cel.NewEnv() failed: %v", err)
+	}
+	for _, tc := range []struct {
+		expr    string
+		wantMin uint64
+	}{
+		{expr: "json.parse(b'\"hello\"')", wantMin: 1},
+		{expr: "json.parse(b'123', int)", wantMin: 2},
+		{expr: "json.parseStrict('\"hello\"')", wantMin: 1},
+		{expr: "json.parseStrict('123', int)", wantMin: 2},
+		{expr: "json.parseStrict(b'\"hello\"')", wantMin: 1},
+		{expr: "json.parseStrict(b'123', int)", wantMin: 2},
+		{expr: "yaml.parse(b'hello: world')", wantMin: 1},
+		{expr: "yaml.parse(b'123', int)", wantMin: 2},
+	} {
+		t.Run(tc.expr, func(t *testing.T) {
+			ast, iss := env.Compile(tc.expr)
+			if iss.Err() != nil {
+				t.Fatalf("env.Compile(%q) failed: %v", tc.expr, iss.Err())
+			}
+			est, err := env.EstimateCost(ast, testCostHintEstimator{})
+			if err != nil {
+				t.Fatalf("env.EstimateCost(%q) failed: %v", tc.expr, err)
+			}
+			wantEst := checker.CostEstimate{Min: tc.wantMin, Max: math.MaxUint64}
+			if est != wantEst {
+				t.Errorf("env.EstimateCost(%q) got %v, wanted %v", tc.expr, est, wantEst)
+			}
+			prg, err := env.Program(ast, cel.CostTracking(nil))
+			if err != nil {
+				t.Fatalf("env.Program(%q) failed: %v", tc.expr, err)
+			}
+			_, det, err := prg.Eval(cel.NoVars())
+			if err != nil {
+				t.Fatalf("prg.Eval(%q) failed: %v", tc.expr, err)
+			}
+			if det.ActualCost() == nil {
+				t.Fatalf("det.ActualCost() for %q got nil, wanted a value", tc.expr)
+			}
+			if *det.ActualCost() != math.MaxUint64 {
+				t.Errorf("det.ActualCost() for %q got %d, wanted %d", tc.expr, *det.ActualCost(), uint64(math.MaxUint64))
+			}
+		})
+	}
+}
+
+func TestEncodersVersion2DoesNotIncludeVersion3Overloads(t *testing.T) {
+	env, err := cel.NewEnv(cel.OptionalTypes(), Encoders(EncodersVersion(2)))
+	if err != nil {
+		t.Fatalf("cel.NewEnv() failed: %v", err)
+	}
+	for _, expr := range []string{
+		"json.parse(b'{}')",
+		"json.parse(b'123', int)",
+		"yaml.parse(b'a: 1')",
+		"yaml.parse(b'123', int)",
+		"json.parseStrict('{}')",
+		"json.parseStrict('123', int)",
+		"json.parseStrict(b'{}')",
+		"json.parseStrict(b'123', int)",
+	} {
+		if _, iss := env.Compile(expr); iss.Err() == nil {
+			t.Errorf("Compile(%q) at EncodersVersion(2) succeeded, wanted error", expr)
+		}
+	}
+}
+
+func TestJSONParseStrictRFC8259(t *testing.T) {
+	nativeType, err := types.NewNativeType(reflect.TypeFor[testNativeUser](), types.ParseStructTag("cel"))
+	if err != nil {
+		t.Fatalf("types.NewNativeType failed: %v", err)
+	}
+	env, err := cel.NewEnv(
+		cel.OptionalTypes(),
+		Encoders(EncodersVersion(3)),
+		cel.Types(nativeType),
+		cel.Variable("badUTF8Str", cel.StringType),
+		cel.Variable("badUTF8Bytes", cel.BytesType),
+	)
+	if err != nil {
+		t.Fatalf("cel.NewEnv() failed: %v", err)
+	}
+	vars := map[string]any{
+		"badUTF8Str":   "\"hello\xffworld\"",
+		"badUTF8Bytes": []byte("\"hello\xffworld\""),
+	}
+	tests := []struct {
+		name string
+		expr string
+		want bool
+	}{
+		{
+			name: "valid_object_string",
+			expr: `json.parseStrict('{"a": 1, "b": [true, "ok", {"c": 3}]}').value().b[2].c == 3`,
+			want: true,
+		},
+		{
+			name: "valid_object_bytes",
+			expr: `json.parseStrict(b'{"a": 1, "b": 2}').value().a == 1`,
+			want: true,
+		},
+		{
+			name: "valid_typed_int_string",
+			expr: `json.parseStrict('42', int).value() == 42`,
+			want: true,
+		},
+		{
+			name: "valid_typed_int_bytes",
+			expr: `json.parseStrict(b'42', int).value() == 42`,
+			want: true,
+		},
+		{
+			name: "valid_surrogate_pair",
+			expr: `json.parseStrict('"\\ud83d\\ude80"') == optional.of('🚀')`,
+			want: true,
+		},
+		{
+			name: "reject_duplicate_top_level_key",
+			expr: `!json.parseStrict('{"a": 1, "a": 2}').hasValue()`,
+			want: true,
+		},
+		{
+			name: "reject_duplicate_escaped_key",
+			expr: `!json.parseStrict('{"a": 1, "\\u0061": 2}').hasValue()`,
+			want: true,
+		},
+		{
+			name: "reject_duplicate_nested_key_in_array",
+			expr: `!json.parseStrict('{"items": [{"k": 1, "k": 2}]}').hasValue()`,
+			want: true,
+		},
+		{
+			name: "reject_duplicate_key_bytes",
+			expr: `!json.parseStrict(b'{"a": 1, "a": 2}').hasValue()`,
+			want: true,
+		},
+		{
+			name: "reject_duplicate_key_typed_map",
+			expr: `!json.parseStrict('{"a": 1, "a": 2}', type({'': 1})).hasValue()`,
+			want: true,
+		},
+		{
+			name: "reject_unpaired_high_surrogate",
+			expr: `!json.parseStrict('"\\ud800"').hasValue()`,
+			want: true,
+		},
+		{
+			name: "reject_unpaired_low_surrogate",
+			expr: `!json.parseStrict('"\\udc00"').hasValue()`,
+			want: true,
+		},
+		{
+			name: "reject_high_surrogate_followed_by_non_low",
+			expr: `!json.parseStrict('"\\ud800\\u0041"').hasValue()`,
+			want: true,
+		},
+		{
+			name: "reject_invalid_utf8_string",
+			expr: `!json.parseStrict(badUTF8Str).hasValue()`,
+			want: true,
+		},
+		{
+			name: "reject_invalid_utf8_bytes",
+			expr: `!json.parseStrict(badUTF8Bytes).hasValue()`,
+			want: true,
+		},
+		{
+			name: "valid_native_struct_exact_case",
+			expr: `json.parseStrict('{"user_name": "Alice", "age": 25}', ext.testNativeUser).value().username == 'Alice'`,
+			want: true,
+		},
+		{
+			name: "reject_native_struct_case_insensitive_key",
+			expr: `!json.parseStrict('{"USER_NAME": "Alice", "age": 25}', ext.testNativeUser).hasValue()`,
+			want: true,
+		},
+		{
+			name: "reject_native_struct_unknown_field",
+			expr: `!json.parseStrict('{"user_name": "Alice", "age": 25, "extra": true}', ext.testNativeUser).hasValue()`,
+			want: true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ast, iss := env.Compile(tc.expr)
+			if iss.Err() != nil {
+				t.Fatalf("Compile(%q) failed: %v", tc.expr, iss.Err())
+			}
+			prg, err := env.Program(ast)
+			if err != nil {
+				t.Fatalf("Program(%q) failed: %v", tc.expr, err)
+			}
+			out, _, err := prg.Eval(vars)
+			if err != nil {
+				t.Fatalf("Eval(%q) failed: %v", tc.expr, err)
+			}
+			if got, ok := out.Value().(bool); !ok || got != tc.want {
+				t.Errorf("Eval(%q) = %v, want %v", tc.expr, out, tc.want)
+			}
+		})
+	}
+
+	// Direct Go helper coverage for JSONParseStrict and JSONParseStrictWithType.
+	if _, err := JSONParseStrict(nil, `{"a": 1, "a": 2}`); err == nil {
+		t.Error("JSONParseStrict with duplicate keys succeeded, wanted error")
+	}
+	if val, err := JSONParseStrict(nil, `{"a": 1}`); err != nil || val == nil {
+		t.Errorf("JSONParseStrict valid input = (%v, %v), wanted value", val, err)
+	}
+	if _, err := JSONParseStrictWithType(nil, nil, `{"a": 1, "a": 2}`, types.NewMapType(types.StringType, types.IntType)); err == nil {
+		t.Error("JSONParseStrictWithType with duplicate keys succeeded, wanted error")
+	}
+	if val, err := JSONParseStrictWithType(nil, nil, `{"a": 1}`, types.NewMapType(types.StringType, types.IntType)); err != nil || val == nil {
+		t.Errorf("JSONParseStrictWithType valid input = (%v, %v), wanted value", val, err)
+	}
+}
+
+
+

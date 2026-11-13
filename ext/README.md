@@ -109,17 +109,40 @@ Examples:
 
 ### JSON.Parse
 
-Introduced at version: 2
+Introduced at version: 2 (`<bytes>` overloads introduced at version: 3)
 
-Parses a JSON string to a CEL value or a specific type.
+Parses a JSON string or bytes value to a CEL value or a specific type.
 
     json.parse(<string>) -> <optional_type(dyn)>
     json.parse(<string>, <type(T)>) -> <optional_type(T)>
+    json.parse(<bytes>) -> <optional_type(dyn)>
+    json.parse(<bytes>, <type(T)>) -> <optional_type(T)>
 
 Examples:
 
-    json.parse('{"hello":"world"}') // return optional.of({'hello': 'world'})
-    json.parse('123', int)          // return optional.of(123)
+    json.parse('{"hello":"world"}')  // return optional.of({'hello': 'world'})
+    json.parse('123', int)           // return optional.of(123)
+    json.parse(b'{"hello":"world"}') // return optional.of({'hello': 'world'})
+
+### JSON.ParseStrict
+
+Introduced at version: 3
+
+Parses a JSON string or bytes value in strict RFC 8259 mode. In addition to
+standard JSON syntax, strict mode requires valid UTF-8 (including rejecting
+unpaired UTF-16 surrogates), rejects duplicate object member names at every
+nesting level, rejects unknown struct fields, and requires case-sensitive
+struct field matching.
+
+    json.parseStrict(<string>) -> <optional_type(dyn)>
+    json.parseStrict(<string>, <type(T)>) -> <optional_type(T)>
+    json.parseStrict(<bytes>) -> <optional_type(dyn)>
+    json.parseStrict(<bytes>, <type(T)>) -> <optional_type(T)>
+
+Examples:
+
+    json.parseStrict('{"a": 1, "b": 2}') // return optional.of({'a': 1, 'b': 2})
+    json.parseStrict('{"a": 1, "a": 2}') // return optional.none()
 
 ### YAML.Encode
 
@@ -137,17 +160,20 @@ Examples:
 
 ### YAML.Parse
 
-Introduced at version: 2
+Introduced at version: 2 (`<bytes>` overloads introduced at version: 3)
 
-Parses a YAML string to a CEL value or a specific type.
+Parses a YAML string or bytes value to a CEL value or a specific type.
 
     yaml.parse(<string>) -> <optional_type(dyn)>
     yaml.parse(<string>, <type(T)>) -> <optional_type(T)>
+    yaml.parse(<bytes>) -> <optional_type(dyn)>
+    yaml.parse(<bytes>, <type(T)>) -> <optional_type(T)>
 
 Examples:
 
-    yaml.parse('hello: world') // return optional.of({'hello': 'world'})
-    yaml.parse('123', int)     // return optional.of(123)
+    yaml.parse('hello: world')  // return optional.of({'hello': 'world'})
+    yaml.parse('123', int)      // return optional.of(123)
+    yaml.parse(b'hello: world') // return optional.of({'hello': 'world'})
 
 ## Math
 
