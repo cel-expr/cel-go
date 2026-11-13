@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
 	"google.golang.org/protobuf/encoding/prototext"
 	"google.golang.org/protobuf/proto"
 
@@ -31,6 +32,7 @@ import (
 	"cel.dev/cel-go/common/types/ref"
 	"cel.dev/cel-go/internal/typedef"
 	"cel.dev/cel-go/internal/typedef/typedefpb"
+	celpb "cel.dev/expr"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -191,6 +193,124 @@ func TestCelTypeErrors(t *testing.T) {
 	}
 }
 
+// TestCelTypesToYAML verifies TypeDefToYAML and TypeDefSetToYAML against
+// testdata/cel_types_to_yaml.baseline (ported from cel-cpp with expected Go
+// formatting differences: omitted unspec_* fields, inline empty `proto: {}`,
+// shortest-representation doubles, `.inf`/`-.inf`, and trailing newlines).
+func TestCelTypesToYAML(t *testing.T) {
+	txtpb, err := os.ReadFile("testdata/cel_types.txtproto")
+	if err != nil {
+		t.Fatalf("os.ReadFile(testdata/cel_types.txtproto) failed: %v", err)
+	}
+	protoSet := &typedefpb.TypeDefSet{}
+	if err := prototext.Unmarshal(txtpb, protoSet); err != nil {
+		t.Fatalf("prototext.Unmarshal() failed: %v", err)
+	}
+	typeDefSet, err := typedef.TypeDefSetFromProto(protoSet)
+	if err != nil {
+		t.Fatalf("TypeDefSetFromProto() failed: %v", err)
+	}
+
+	baselineBytes, err := os.ReadFile("testdata/cel_types_to_yaml.baseline")
+	if err != nil {
+		t.Fatalf("os.ReadFile(testdata/cel_types_to_yaml.baseline) failed: %v", err)
+	}
+	const separator = "--------------------------------------------------------------------\n"
+	var out bytes.Buffer
+	out.WriteString("PROTO SOURCE: cel_types.txtproto\n")
+	for _, td := range typeDefSet.Types() {
+		out.WriteString(separator)
+		concise, err := typedef.TypeDefToYAML(td, typedef.UseTypeSignatures(true))
+		if err != nil {
+			t.Fatalf("TypeDefToYAML(%q, useSig=true) failed: %v", td.Name(), err)
+		}
+		out.Write(concise)
+
+		verbose, err := typedef.TypeDefToYAML(td, typedef.UseTypeSignatures(false))
+		if err != nil {
+			t.Fatalf("TypeDefToYAML(%q, useSig=false) failed: %v", td.Name(), err)
+		}
+		if !bytes.Equal(verbose, concise) {
+			out.WriteString("# use_type_signatures = false\n")
+			out.Write(verbose)
+		}
+	}
+	gotBaseline := strings.TrimSpace(out.String())
+	wantBaseline := strings.TrimSpace(string(baselineBytes))
+	if diff := cmp.Diff(wantBaseline, gotBaseline); diff != "" {
+		t.Fatalf("TypeDefToYAML() baseline mismatch (-want +got):\n%s", diff)
+	}
+
+	wantProto, err := typedef.TypeDefSetToProto(typeDefSet)
+	if err != nil {
+		t.Fatalf("TypeDefSetToProto(original) failed: %v", err)
+	}
+	// Normalize the 4 fields whose proto type representation is not preserved
+	// by YAML: unset map key -> dyn{}, error{} -> dyn{}, type{} -> type{dyn{}},
+	// message_type -> abstract_type.
+	for _, td := range wantProto.GetTypes() {
+		if td.GetStructType().GetName() != "AllSupportedFieldTypes" {
+			continue
+		}
+		for _, f := range td.GetStructType().GetFields() {
+			switch f.GetName() {
+			case "map_val_only_f":
+				f.Type = &celpb.Type{TypeKind: &celpb.Type_MapType_{MapType: &celpb.Type_MapType{
+					KeyType:   &celpb.Type{TypeKind: &celpb.Type_Dyn{}},
+					ValueType: &celpb.Type{TypeKind: &celpb.Type_Primitive{Primitive: celpb.Type_INT64}},
+				}}}
+			case "error_f":
+				f.Type = &celpb.Type{TypeKind: &celpb.Type_Dyn{}}
+			case "type_unspec_f":
+				f.Type = &celpb.Type{TypeKind: &celpb.Type_Type{Type: &celpb.Type{TypeKind: &celpb.Type_Dyn{}}}}
+			case "shipping_addr":
+				f.Type = &celpb.Type{TypeKind: &celpb.Type_AbstractType_{AbstractType: &celpb.Type_AbstractType{Name: "com.example.Address"}}}
+			}
+		}
+	}
+
+	for _, useSig := range []bool{true, false} {
+		yamlOut, err := typedef.TypeDefSetToYAML(typeDefSet, typedef.UseTypeSignatures(useSig))
+		if err != nil {
+			t.Fatalf("TypeDefSetToYAML(useSig=%v) failed: %v", useSig, err)
+		}
+		roundTripped, err := typedef.TypeDefSetFromYAML(yamlOut)
+		if err != nil {
+			t.Fatalf("TypeDefSetFromYAML(useSig=%v) failed: %v\nYAML:\n%s", useSig, err, string(yamlOut))
+		}
+		gotProto, err := typedef.TypeDefSetToProto(roundTripped)
+		if err != nil {
+			t.Fatalf("TypeDefSetToProto(useSig=%v) failed: %v", useSig, err)
+		}
+		// TypeDefSetToYAML sorts by type name; compare each TypeDef by name.
+		gotByName := make(map[string]*typedefpb.TypeDef, len(gotProto.GetTypes()))
+		for _, td := range gotProto.GetTypes() {
+			name := td.GetStructType().GetName()
+			if td.GetEnumType() != nil {
+				name = td.GetEnumType().GetName()
+			}
+			gotByName[name] = td
+		}
+		if len(gotByName) != len(wantProto.GetTypes()) {
+			t.Fatalf("round-trip type count (useSig=%v) = %d, want %d", useSig, len(gotByName), len(wantProto.GetTypes()))
+		}
+		for _, wantTD := range wantProto.GetTypes() {
+			name := wantTD.GetStructType().GetName()
+			if wantTD.GetEnumType() != nil {
+				name = wantTD.GetEnumType().GetName()
+			}
+			gotTD, ok := gotByName[name]
+			if !ok {
+				t.Fatalf("round-trip missing type %q (useSig=%v)", name, useSig)
+			}
+			if !proto.Equal(gotTD, wantTD) {
+				t.Fatalf("round-trip proto mismatch for %q (useSig=%v):\ngot:\n%s\nwant:\n%s",
+					name, useSig, prototext.Format(gotTD), prototext.Format(wantTD))
+			}
+		}
+	}
+}
+
 func TestTypeDefFromYAMLInvalidYAML(t *testing.T) {
 	empty, err := typedef.TypeDefFromYAML(nil)
 	if err != nil {
@@ -253,6 +373,201 @@ types:
 		if _, err := typedef.TypeDefSetFromYAML([]byte(bad)); !errors.Is(err, typedef.ErrBadTypeDef) {
 			t.Errorf("TypeDefSetFromYAML(%q) = %v, want ErrBadTypeDef", bad, err)
 		}
+	}
+}
+
+func TestTypeDefSetToYAML(t *testing.T) {
+	emptyOut, err := typedef.TypeDefSetToYAML(&typedef.TypeDefSet{})
+	if err != nil {
+		t.Fatalf("TypeDefSetToYAML(empty) failed: %v", err)
+	}
+	if len(emptyOut) != 0 {
+		t.Errorf("TypeDefSetToYAML(empty) = %q, want empty", string(emptyOut))
+	}
+	nilOut, err := typedef.TypeDefSetToYAML(nil)
+	if err != nil {
+		t.Fatalf("TypeDefSetToYAML(nil) failed: %v", err)
+	}
+	if len(nilOut) != 0 {
+		t.Errorf("TypeDefSetToYAML(nil) = %q, want empty", string(nilOut))
+	}
+
+	s, _ := typedef.NewStruct("com.example.B")
+	e, _ := typedef.NewEnum("com.example.A")
+	set, err := typedef.NewTypeDefSet(s.AsTypeDef(), e.AsTypeDef())
+	if err != nil {
+		t.Fatalf("NewTypeDefSet() failed: %v", err)
+	}
+
+	out, err := typedef.TypeDefSetToYAML(set)
+	if err != nil {
+		t.Fatalf("TypeDefSetToYAML() failed: %v", err)
+	}
+	want := unindent(`
+		- enum:
+		    name: "com.example.A"
+		- struct:
+		    name: "com.example.B"
+	`) + "\n"
+	if string(out) != want {
+		t.Errorf("TypeDefSetToYAML() got:\n%s\nwant:\n%s", string(out), want)
+	}
+}
+
+func TestNaNDoubleToYAML(t *testing.T) {
+	protoDef := &typedefpb.TypeDef{}
+	if err := prototext.Unmarshal([]byte(`
+		struct_type {
+			name: "NanFloats"
+			fields {
+				name: "nan_val"
+				type { primitive: DOUBLE }
+				default_value { double_value: nan }
+			}
+		}
+	`), protoDef); err != nil {
+		t.Fatalf("prototext.Unmarshal() failed: %v", err)
+	}
+	td, err := typedef.TypeDefFromProto(protoDef)
+	if err != nil {
+		t.Fatalf("TypeDefFromProto() failed: %v", err)
+	}
+
+	out, err := typedef.TypeDefToYAML(td)
+	if err != nil {
+		t.Fatalf("TypeDefToYAML() failed: %v", err)
+	}
+	want := unindent(`
+		struct:
+		  name: "NanFloats"
+		  fields:
+		    - name: "nan_val"
+		      type: "double"
+		      default: .nan
+	`) + "\n"
+	if string(out) != want {
+		t.Errorf("TypeDefToYAML(NaN) got:\n%s\nwant:\n%s", string(out), want)
+	}
+}
+
+func TestAspectDurationAndTimestampWrittenAsStrings(t *testing.T) {
+	aspect, err := typedef.NewAspect(map[string]ref.Val{
+		"d": types.Duration{Duration: 10 * time.Second},
+		"t": types.Timestamp{Time: time.Unix(0, 0).UTC()},
+	})
+	if err != nil {
+		t.Fatalf("NewAspect() failed: %v", err)
+	}
+	s, err := typedef.NewStruct("com.example.AspectTime", typedef.StructAspect("proto", aspect))
+	if err != nil {
+		t.Fatalf("NewStruct() failed: %v", err)
+	}
+
+	out, err := typedef.TypeDefToYAML(s.AsTypeDef())
+	if err != nil {
+		t.Fatalf("TypeDefToYAML() failed: %v", err)
+	}
+	want := unindent(`
+		struct:
+		  name: "com.example.AspectTime"
+		  aspects:
+		    proto:
+		      d: "10s"
+		      t: "1970-01-01T00:00:00Z"
+	`) + "\n"
+	if string(out) != want {
+		t.Errorf("TypeDefToYAML() got:\n%s\nwant:\n%s", string(out), want)
+	}
+
+	parsed, err := typedef.TypeDefFromYAML([]byte(unindent(`
+		struct:
+		  name: A
+		  aspects:
+		    proto:
+		      d: "10s"
+	`)))
+	if err != nil {
+		t.Fatalf("TypeDefFromYAML() failed: %v", err)
+	}
+	protoAspect, ok := parsed.Aspect("proto")
+	if !ok {
+		t.Fatalf("Aspect(proto) not found")
+	}
+	dVal, ok := protoAspect.Property("d")
+	if !ok || dVal != types.String("10s") {
+		t.Errorf("Property(d) = (%v, %v), want (\"10s\", true)", dVal, ok)
+	}
+}
+
+func TestStructuredTypeSpecMaxDepthExceeded(t *testing.T) {
+	deepType := types.IntType
+	for i := 0; i < 35; i++ {
+		deepType = types.NewListType(deepType)
+	}
+	field, err := typedef.NewField("deep_field", deepType)
+	if err != nil {
+		t.Fatalf("NewField() failed: %v", err)
+	}
+	s, err := typedef.NewStruct("com.example.DeepStruct", typedef.StructFields(field))
+	if err != nil {
+		t.Fatalf("NewStruct() failed: %v", err)
+	}
+
+	_, err = typedef.TypeDefToYAML(s.AsTypeDef(), typedef.UseTypeSignatures(false))
+	if !errors.Is(err, typedef.ErrBadTypeDef) || !strings.Contains(err.Error(), "type specification exceeds maximum depth") {
+		t.Errorf("TypeDefToYAML(deep) = %v, want ErrBadTypeDef with max depth", err)
+	}
+}
+
+func TestTypeDefToYAMLNilAndEmptyErrors(t *testing.T) {
+	if _, err := typedef.TypeDefToYAML(nil); !errors.Is(err, typedef.ErrBadTypeDef) {
+		t.Errorf("TypeDefToYAML(nil) = %v, want ErrBadTypeDef", err)
+	}
+	if _, err := typedef.TypeDefToYAML(&typedef.TypeDef{}); !errors.Is(err, typedef.ErrBadTypeDef) {
+		t.Errorf("TypeDefToYAML(unspecified) = %v, want ErrBadTypeDef", err)
+	}
+}
+
+func TestAspectDoubleSpecialValuesRoundTrip(t *testing.T) {
+	aspect, err := typedef.NewAspect(map[string]ref.Val{
+		"nan_prop":     types.Double(math.NaN()),
+		"pos_inf_prop": types.Double(math.Inf(1)),
+		"neg_inf_prop": types.Double(math.Inf(-1)),
+	})
+	if err != nil {
+		t.Fatalf("NewAspect() failed: %v", err)
+	}
+	s, err := typedef.NewStruct("com.example.AspectFloats", typedef.StructAspect("meta", aspect))
+	if err != nil {
+		t.Fatalf("NewStruct() failed: %v", err)
+	}
+
+	out, err := typedef.TypeDefToYAML(s.AsTypeDef())
+	if err != nil {
+		t.Fatalf("TypeDefToYAML() failed: %v", err)
+	}
+	parsed, err := typedef.TypeDefFromYAML(out)
+	if err != nil {
+		t.Fatalf("TypeDefFromYAML() failed: %v\nYAML:\n%s", err, string(out))
+	}
+	meta, ok := parsed.Aspect("meta")
+	if !ok {
+		t.Fatalf("Aspect(meta) not found")
+	}
+	nanVal, ok := meta.Property("nan_prop")
+	if !ok {
+		t.Fatalf("Property(nan_prop) not found")
+	}
+	if d, isDouble := nanVal.(types.Double); !isDouble || !math.IsNaN(float64(d)) {
+		t.Errorf("nan_prop = %T(%v), want types.Double(NaN)", nanVal, nanVal)
+	}
+	posInf, _ := meta.Property("pos_inf_prop")
+	if posInf != types.Double(math.Inf(1)) {
+		t.Errorf("pos_inf_prop = %T(%v), want types.Double(+Inf)", posInf, posInf)
+	}
+	negInf, _ := meta.Property("neg_inf_prop")
+	if negInf != types.Double(math.Inf(-1)) {
+		t.Errorf("neg_inf_prop = %T(%v), want types.Double(-Inf)", negInf, negInf)
 	}
 }
 
@@ -548,5 +863,47 @@ func TestTypedDefaultEdgeCases(t *testing.T) {
 		if f.DefaultValue().Equal(want) != types.True {
 			t.Errorf("field %q default = %T(%v), want %T(%v)", f.Name(), f.DefaultValue(), f.DefaultValue(), want, want)
 		}
+	}
+}
+
+func TestDurationFormattingParity(t *testing.T) {
+	durations := []struct {
+		name string
+		d    time.Duration
+		want string
+	}{
+		{name: "zero", d: 0, want: "0"},
+		{name: "hms", d: 90 * time.Minute, want: "1h30m"},
+		{name: "micro", d: 1500 * time.Nanosecond, want: "1.5us"},
+		{name: "neg_milli", d: -2500 * time.Microsecond, want: "-2.5ms"},
+		{name: "nano", d: 500 * time.Nanosecond, want: "500ns"},
+		{name: "frac_sec", d: time.Hour + 500*time.Millisecond, want: "1h0.5s"},
+	}
+	for _, tc := range durations {
+		t.Run(tc.name, func(t *testing.T) {
+			f, err := typedef.NewField("d", types.DurationType, typedef.FieldDefaultValue(types.Duration{Duration: tc.d}))
+			if err != nil {
+				t.Fatalf("NewField() failed: %v", err)
+			}
+			s, err := typedef.NewStruct("S", typedef.StructFields(f))
+			if err != nil {
+				t.Fatalf("NewStruct() failed: %v", err)
+			}
+			out, err := typedef.TypeDefToYAML(s.AsTypeDef())
+			if err != nil {
+				t.Fatalf("TypeDefToYAML() failed: %v", err)
+			}
+			wantLine := "default: " + tc.want
+			if !strings.Contains(string(out), wantLine) {
+				t.Errorf("YAML output:\n%s\nwant substring %q", string(out), wantLine)
+			}
+			rt, err := typedef.TypeDefFromYAML(out)
+			if err != nil {
+				t.Fatalf("TypeDefFromYAML() failed: %v", err)
+			}
+			if got := rt.StructType().Fields()[0].DefaultValue(); got != (types.Duration{Duration: tc.d}) {
+				t.Errorf("round-trip duration = %v, want %v", got, tc.d)
+			}
+		})
 	}
 }

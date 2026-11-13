@@ -290,3 +290,86 @@ types {
     }
   }
 }
+
+# Struct with typed aspect properties
+types {
+  struct_type {
+    name: "com.example.Order"
+    fields {
+      name: "order_id"
+      type { primitive: STRING }
+      aspects {
+        key: "proto"
+        value {
+          properties {
+            key: "id"
+            value { int64_value: 1 }
+          }
+          properties {
+            key: "json_name"
+            value { string_value: "orderId" }
+          }
+        }
+      }
+    }
+    aspects {
+      key: "proto"
+      value {
+        properties {
+          key: "bool_prop"
+          value { bool_value: false }
+        }
+        properties {
+          key: "bytes_prop"
+          value { bytes_value: "\001\002" }
+        }
+        properties {
+          key: "double_prop"
+          value { double_value: 2.5 }
+        }
+        properties {
+          key: "name"
+          value { string_value: "com.example.proto.Order" }
+        }
+        properties {
+          key: "null_prop"
+          value { null_value: NULL_VALUE }
+        }
+        properties {
+          key: "uint_prop"
+          value { uint64_value: 42 }
+        }
+        properties {
+          key: "version"
+          value { int64_value: 2 }
+        }
+        properties {
+          key: "whole_double_prop"
+          value { double_value: 2 }
+        }
+      }
+    }
+  }
+}
+
+# High-precision and special IEEE-754 double defaults
+types {
+  struct_type {
+    name: "Floats"
+    fields {
+      name: "pi"
+      type { primitive: DOUBLE }
+      default_value { double_value: 3.141592653589793 }
+    }
+    fields {
+      name: "pos_inf"
+      type { primitive: DOUBLE }
+      default_value { double_value: inf }
+    }
+    fields {
+      name: "neg_inf"
+      type { primitive: DOUBLE }
+      default_value { double_value: -inf }
+    }
+  }
+}
