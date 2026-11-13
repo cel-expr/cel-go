@@ -1,0 +1,352 @@
+PROTO SOURCE: cel_types.txtproto
+--------------------------------------------------------------------
+struct:
+  name: "MinimalStruct"
+--------------------------------------------------------------------
+enum:
+  name: "MinimalEnum"
+--------------------------------------------------------------------
+struct:
+  name: "NoFields"
+  doc: "Empty struct."
+--------------------------------------------------------------------
+enum:
+  name: "com.example.OrderStatus"
+  doc: "Order lifecycle state."
+  constants:
+    - name: "UNSPECIFIED"
+      id: 0
+      doc: "Default value."
+    - name: "PENDING"
+      id: 1
+    - name: "SHIPPED"
+      id: 10
+      doc: "Shipped to customer."
+--------------------------------------------------------------------
+struct:
+  name: "com.example.store.Order"
+  fields:
+    - name: "items"
+      type: "list<com.example.store.Item>"
+    - name: "metadata"
+      type: "map<string,dyn>"
+    - name: "notes"
+      type: "string_wrapper"
+# use_type_signatures = false
+struct:
+  name: "com.example.store.Order"
+  fields:
+    - name: "items"
+      type:
+        type_name: "list"
+        params:
+          - type_name: "com.example.store.Item"
+    - name: "metadata"
+      type:
+        type_name: "map"
+        params:
+          - type_name: "string"
+          - type_name: "dyn"
+    - name: "notes"
+      type:
+        type_name: "string_wrapper"
+--------------------------------------------------------------------
+struct:
+  name: "AllSupportedFieldTypes"
+  fields:
+    - name: "null_field"
+      type: "null"
+      default: ~
+    - name: "bool_field"
+      type: "bool"
+      default: true
+    - name: "int_field"
+      type: "int"
+      default: 123
+    - name: "uint_field"
+      type: "uint"
+      default: 456
+    - name: "double_field"
+      type: "double"
+      default: 3.25
+    - name: "bytes_field"
+      type: "bytes"
+      default: b"\x01\x02\x03"
+    - name: "string_field"
+      type: "string"
+      default: "hello"
+    - name: "duration_field"
+      type: "duration"
+      default: 10s
+    - name: "timestamp_field"
+      type: "timestamp"
+      default: 2026-10-05T00:00:00Z
+    - name: "enum_field"
+      type: "com.example.Status"
+      default: "ACTIVE"
+    - name: "struct_field"
+      type: "map<string,dyn>"
+    - name: "list_value_field"
+      type: "list<dyn>"
+    - name: "any_field"
+      type: "any"
+    - name: "func_field"
+      type: "function<bool,int,string>"
+    - name: "type_param_f"
+      type: "~T"
+    - name: "bool_w_f"
+      type: "bool_wrapper"
+    - name: "int_w_f"
+      type: "int_wrapper"
+    - name: "uint_w_f"
+      type: "uint_wrapper"
+    - name: "double_w_f"
+      type: "double_wrapper"
+    - name: "bytes_w_f"
+      type: "bytes_wrapper"
+    - name: "map_val_only_f"
+      type: "map<dyn,int>"
+    - name: "type_int_f"
+      type: "type<int>"
+    - name: "type_unspec_f"
+      type:
+        type_name: "type"
+    - name: "abstract_params_f"
+      type: "MyGeneric<int>"
+    - name: "shipping_addr"
+      type: "com.example.Address"
+    - name: "error_f"
+      type:
+        type_name: "dyn"
+# use_type_signatures = false
+struct:
+  name: "AllSupportedFieldTypes"
+  fields:
+    - name: "null_field"
+      type:
+        type_name: "null"
+      default: ~
+    - name: "bool_field"
+      type:
+        type_name: "bool"
+      default: true
+    - name: "int_field"
+      type:
+        type_name: "int"
+      default: 123
+    - name: "uint_field"
+      type:
+        type_name: "uint"
+      default: 456
+    - name: "double_field"
+      type:
+        type_name: "double"
+      default: 3.25
+    - name: "bytes_field"
+      type:
+        type_name: "bytes"
+      default: b"\x01\x02\x03"
+    - name: "string_field"
+      type:
+        type_name: "string"
+      default: "hello"
+    - name: "duration_field"
+      type:
+        type_name: "duration"
+      default: 10s
+    - name: "timestamp_field"
+      type:
+        type_name: "timestamp"
+      default: 2026-10-05T00:00:00Z
+    - name: "enum_field"
+      type:
+        type_name: "com.example.Status"
+      default: "ACTIVE"
+    - name: "struct_field"
+      type:
+        type_name: "map"
+        params:
+          - type_name: "string"
+          - type_name: "dyn"
+    - name: "list_value_field"
+      type:
+        type_name: "list"
+        params:
+          - type_name: "dyn"
+    - name: "any_field"
+      type:
+        type_name: "any"
+    - name: "func_field"
+      type:
+        type_name: "function"
+        params:
+          - type_name: "bool"
+          - type_name: "int"
+          - type_name: "string"
+    - name: "type_param_f"
+      type:
+        type_name: "T"
+        is_type_param: true
+    - name: "bool_w_f"
+      type:
+        type_name: "bool_wrapper"
+    - name: "int_w_f"
+      type:
+        type_name: "int_wrapper"
+    - name: "uint_w_f"
+      type:
+        type_name: "uint_wrapper"
+    - name: "double_w_f"
+      type:
+        type_name: "double_wrapper"
+    - name: "bytes_w_f"
+      type:
+        type_name: "bytes_wrapper"
+    - name: "map_val_only_f"
+      type:
+        type_name: "map"
+        params:
+          - type_name: "dyn"
+          - type_name: "int"
+    - name: "type_int_f"
+      type:
+        type_name: "type"
+        params:
+          - type_name: "int"
+    - name: "type_unspec_f"
+      type:
+        type_name: "type"
+    - name: "abstract_params_f"
+      type:
+        type_name: "MyGeneric"
+        params:
+          - type_name: "int"
+    - name: "shipping_addr"
+      type:
+        type_name: "com.example.Address"
+    - name: "error_f"
+      type:
+        type_name: "dyn"
+--------------------------------------------------------------------
+struct:
+  name: "com.example.AnnotatedOrder"
+  doc: "Order with schema aspects."
+  aspects:
+    proto:
+      name: "com.example.proto.Order"
+  fields:
+    - name: "order_id"
+      type: "string"
+      aspects:
+        proto:
+          id: 1
+          json_name: "orderId"
+          name: "order_id_proto"
+    - name: "empty_aspect_field"
+      type: "int"
+      aspects:
+        proto: {}
+# use_type_signatures = false
+struct:
+  name: "com.example.AnnotatedOrder"
+  doc: "Order with schema aspects."
+  aspects:
+    proto:
+      name: "com.example.proto.Order"
+  fields:
+    - name: "order_id"
+      type:
+        type_name: "string"
+      aspects:
+        proto:
+          id: 1
+          json_name: "orderId"
+          name: "order_id_proto"
+    - name: "empty_aspect_field"
+      type:
+        type_name: "int"
+      aspects:
+        proto: {}
+--------------------------------------------------------------------
+enum:
+  name: "com.example.AnnotatedStatus"
+  aspects:
+    proto:
+      allow_alias: true
+      name: "com.example.proto.Status"
+  constants:
+    - name: "STATUS_ACTIVE"
+      id: 1
+      aspects:
+        proto:
+          name: "ACTIVE"
+--------------------------------------------------------------------
+struct:
+  name: "com.example.Order"
+  aspects:
+    proto:
+      bool_prop: false
+      bytes_prop: b"\x01\x02"
+      double_prop: 2.5
+      name: "com.example.proto.Order"
+      null_prop: ~
+      uint_prop: 42u
+      version: 2
+      whole_double_prop: 2.0
+  fields:
+    - name: "order_id"
+      type: "string"
+      aspects:
+        proto:
+          id: 1
+          json_name: "orderId"
+# use_type_signatures = false
+struct:
+  name: "com.example.Order"
+  aspects:
+    proto:
+      bool_prop: false
+      bytes_prop: b"\x01\x02"
+      double_prop: 2.5
+      name: "com.example.proto.Order"
+      null_prop: ~
+      uint_prop: 42u
+      version: 2
+      whole_double_prop: 2.0
+  fields:
+    - name: "order_id"
+      type:
+        type_name: "string"
+      aspects:
+        proto:
+          id: 1
+          json_name: "orderId"
+--------------------------------------------------------------------
+struct:
+  name: "Floats"
+  fields:
+    - name: "pi"
+      type: "double"
+      default: 3.141592653589793
+    - name: "pos_inf"
+      type: "double"
+      default: .inf
+    - name: "neg_inf"
+      type: "double"
+      default: -.inf
+# use_type_signatures = false
+struct:
+  name: "Floats"
+  fields:
+    - name: "pi"
+      type:
+        type_name: "double"
+      default: 3.141592653589793
+    - name: "pos_inf"
+      type:
+        type_name: "double"
+      default: .inf
+    - name: "neg_inf"
+      type:
+        type_name: "double"
+      default: -.inf
