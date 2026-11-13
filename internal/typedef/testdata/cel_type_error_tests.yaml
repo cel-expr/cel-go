@@ -1,0 +1,1245 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+- test:
+    name: "struct_name_not_a_string"
+    types:
+      - struct:
+          name:
+            - "bad_name"
+    error: |-
+      Type definition 'name' is not a string
+      |            - "bad_name"
+      |            ^
+
+- test:
+    name: "unsupported_type_def_kind"
+    types:
+      - union:
+          name: "Item"
+    error: |-
+      Type definition must specify 'struct' or 'enum'
+      |      - union:
+      |        ^
+
+- test:
+    name: "struct_cannot_have_constants"
+    types:
+      - struct:
+          name: "Item"
+          constants: []
+    error: |-
+      Struct type definition cannot have 'constants'
+      |          constants: []
+      |          ^
+
+- test:
+    name: "enum_cannot_have_fields"
+    types:
+      - enum:
+          name: "Status"
+          fields: []
+    error: |-
+      Enum type definition cannot have 'fields'
+      |          fields: []
+      |          ^
+
+- test:
+    name: "empty_field_type_signature"
+    types:
+      - struct:
+          name: "Item"
+          fields:
+            - name: "f"
+              type: ""
+    error: |-
+      Empty type signature
+      |              type: ""
+      |                    ^
+
+- test:
+    name: "structured_type_missing_type_name"
+    types:
+      - struct:
+          name: "Item"
+          fields:
+            - name: "f"
+              type: {}
+    error: |-
+      Node 'type_name' is not specified
+      |              type: {}
+      |                    ^
+
+- test:
+    name: "negative_uint_default_constant"
+    types:
+      - struct:
+          name: "Item"
+          fields:
+            - name: "f"
+              type: "uint"
+              default: -1
+    error: |-
+      Failed to parse uint constant
+      |              default: -1
+      |                       ^
+
+- test:
+    name: "duplicate_struct_field_name"
+    types:
+      - struct:
+          name: "Item"
+          fields:
+            - name: "f"
+              type: "string"
+            - name: "f"
+              type: "int"
+    error: |-
+      Field 'f' is already defined.
+      |            - name: "f"
+      |                    ^
+    go_error: |-
+      already exists: field "f"
+      |            - name: "f"
+      |                    ^
+
+- test:
+    name: "enum_constant_id_not_an_integer"
+    types:
+      - enum:
+          name: "Status"
+          constants:
+            - name: "ACTIVE"
+              id: "not_an_int"
+    error: |-
+      Node 'id' is not an integer
+      |              id: "not_an_int"
+      |                  ^
+
+- test:
+    name: "duplicate_enum_constant_name"
+    types:
+      - enum:
+          name: "Status"
+          constants:
+            - name: "ACTIVE"
+            - name: "ACTIVE"
+    error: |-
+      Enum constant 'ACTIVE' is already defined.
+      |            - name: "ACTIVE"
+      |                    ^
+    go_error: |-
+      already exists: enum constant "ACTIVE"
+      |            - name: "ACTIVE"
+      |                    ^
+
+- test:
+    name: "aspect_value_not_a_map"
+    types:
+      - struct:
+          name: "Item"
+          aspects:
+            proto: 123
+    error: |-
+      Aspect 'proto' is not a map
+      |            proto: 123
+      |                   ^
+
+- test:
+    name: "empty_aspect_name"
+    types:
+      - struct:
+          name: "Item"
+          aspects:
+            "": {}
+    error: |-
+      Target aspect name cannot be empty
+      |            "": {}
+      |            ^
+
+- test:
+    name: "aspect_property_name_not_a_string"
+    types:
+      - struct:
+          name: "Item"
+          aspects:
+            proto:
+              ? [1]: "Foo"
+    error: |-
+      Aspect property name is not a string
+      |              ? [1]: "Foo"
+      |                ^
+
+- test:
+    name: "empty_aspect_property_name"
+    types:
+      - struct:
+          name: "Item"
+          aspects:
+            proto:
+              "": "Foo"
+    error: |-
+      Aspect property name cannot be empty
+      |              "": "Foo"
+      |              ^
+
+- test:
+    name: "aspect_property_value_not_a_scalar"
+    types:
+      - struct:
+          name: "Item"
+          aspects:
+            proto:
+              ids: [1, 2]
+    error: |-
+      Aspect property value is not a scalar
+      |              ids: [1, 2]
+      |                   ^
+
+- test:
+    name: "struct_not_a_map"
+    types:
+      - struct: [1, 2]
+    error: |-
+      Struct type definition is not a map
+      |      - struct: [1, 2]
+      |                ^
+
+- test:
+    name: "struct_doc_not_a_string"
+    types:
+      - struct:
+          name: "A"
+          doc: [1]
+    error: |-
+      Type definition 'doc' is not a string
+      |          doc: [1]
+      |               ^
+
+- test:
+    name: "struct_fields_not_a_sequence"
+    types:
+      - struct:
+          name: "A"
+          fields: 123
+    error: |-
+      Node 'fields' is not a sequence
+      |          fields: 123
+      |                  ^
+
+- test:
+    name: "struct_field_not_a_map"
+    types:
+      - struct:
+          name: "A"
+          fields: [123]
+    error: |-
+      Field is not a map
+      |          fields: [123]
+      |                   ^
+
+- test:
+    name: "struct_field_name_not_a_string"
+    types:
+      - struct:
+          name: "A"
+          fields:
+            - name: [1]
+    error: |-
+      Field name is not a string
+      |            - name: [1]
+      |                    ^
+
+- test:
+    name: "struct_field_missing_type"
+    types:
+      - struct:
+          name: "A"
+          fields:
+            - name: "f"
+    error: |-
+      Field 'type' is not specified
+      |            - name: "f"
+      |              ^
+
+- test:
+    name: "struct_field_type_neither_string_nor_map"
+    types:
+      - struct:
+          name: "A"
+          fields:
+            - name: "f"
+              type: [1]
+    error: |-
+      Field 'type' is neither a string nor a map
+      |              type: [1]
+      |                    ^
+
+- test:
+    name: "struct_field_doc_not_a_string"
+    types:
+      - struct:
+          name: "A"
+          fields:
+            - name: "f"
+              type: "int"
+              doc: [1]
+    error: |-
+      Field 'doc' is not a string
+      |              doc: [1]
+      |                   ^
+
+- test:
+    name: "unsupported_list_default_constant_type"
+    types:
+      - struct:
+          name: "A"
+          fields:
+            - name: "f"
+              type: "list<int>"
+              default: 123
+    error: |-
+      Constant type 'list<int>' is not supported
+      |              default: 123
+      |                       ^
+
+- test:
+    name: "struct_field_default_not_a_scalar"
+    types:
+      - struct:
+          name: "A"
+          fields:
+            - name: "f"
+              type: "int"
+              default: [1]
+    error: |-
+      Field 'default' is not a scalar
+      |              default: [1]
+      |                       ^
+
+- test:
+    name: "structured_type_name_not_a_string"
+    types:
+      - struct:
+          name: "A"
+          fields:
+            - name: "f"
+              type:
+                type_name: [1]
+    error: |-
+      Node 'type_name' is not a string
+      |                type_name: [1]
+      |                           ^
+
+- test:
+    name: "structured_type_is_type_param_not_a_boolean"
+    types:
+      - struct:
+          name: "A"
+          fields:
+            - name: "f"
+              type:
+                type_name: "int"
+                is_type_param: [1]
+    error: |-
+      Node 'is_type_param' is not a boolean
+      |                is_type_param: [1]
+      |                               ^
+
+- test:
+    name: "structured_type_params_not_a_sequence"
+    types:
+      - struct:
+          name: "A"
+          fields:
+            - name: "f"
+              type:
+                type_name: "map"
+                params: 123
+    error: |-
+      Node 'params' is not a sequence
+      |                params: 123
+      |                        ^
+
+- test:
+    name: "structured_type_param_not_a_map"
+    types:
+      - struct:
+          name: "A"
+          fields:
+            - name: "f"
+              type:
+                type_name: "map"
+                params: [123]
+    error: |-
+      Type parameter is not a map
+      |                params: [123]
+      |                         ^
+
+- test:
+    name: "enum_not_a_map"
+    types:
+      - enum: [1, 2]
+    error: |-
+      Enum type definition is not a map
+      |      - enum: [1, 2]
+      |              ^
+
+- test:
+    name: "enum_constants_not_a_sequence"
+    types:
+      - enum:
+          name: "E"
+          constants: 123
+    error: |-
+      Node 'constants' is not a sequence
+      |          constants: 123
+      |                     ^
+
+- test:
+    name: "enum_constant_not_a_map"
+    types:
+      - enum:
+          name: "E"
+          constants: [123]
+    error: |-
+      Enum constant is not a map
+      |          constants: [123]
+      |                      ^
+
+- test:
+    name: "enum_constant_name_not_a_string"
+    types:
+      - enum:
+          name: "E"
+          constants:
+            - name: [1]
+    error: |-
+      Enum constant name is not a string
+      |            - name: [1]
+      |                    ^
+
+- test:
+    name: "enum_constant_doc_not_a_string"
+    types:
+      - enum:
+          name: "E"
+          constants:
+            - name: "C"
+              doc: [1]
+    error: |-
+      Enum constant 'doc' is not a string
+      |              doc: [1]
+      |                   ^
+
+- test:
+    name: "type_def_not_a_map"
+    types:
+      - [1]
+    error: |-
+      Type definition is not a map
+      |      - [1]
+      |        ^
+
+- test:
+    name: "struct_and_enum_mutually_exclusive"
+    types:
+      - struct: {}
+        enum: {}
+    error: |-
+      Node 'struct' and 'enum' are mutually exclusive
+      |        enum: {}
+      |        ^
+
+- test:
+    name: "type_def_missing_struct_or_enum"
+    types:
+      - {}
+    error: |-
+      Type definition must specify 'struct' or 'enum'
+      |      - {}
+      |        ^
+
+- test:
+    name: "struct_aspects_not_a_map"
+    types:
+      - struct:
+          name: "O"
+          aspects: 123
+    error: |-
+      Node 'aspects' is not a map
+      |          aspects: 123
+      |                   ^
+
+- test:
+    name: "struct_aspect_name_not_a_string"
+    types:
+      - struct:
+          name: "O"
+          aspects:
+            ? [1]: val
+    error: |-
+      Target aspect name is not a string
+      |            ? [1]: val
+      |              ^
+
+- test:
+    name: "field_aspects_not_a_map"
+    types:
+      - struct:
+          name: "O"
+          fields:
+            - name: "f"
+              type: "int"
+              aspects: 123
+    error: |-
+      Node 'aspects' is not a map
+      |              aspects: 123
+      |                       ^
+
+- test:
+    name: "field_aspect_name_not_a_string"
+    types:
+      - struct:
+          name: "O"
+          fields:
+            - name: "f"
+              type: "int"
+              aspects:
+                ? [1]: val
+    error: |-
+      Target aspect name is not a string
+      |                ? [1]: val
+      |                  ^
+
+- test:
+    name: "enum_aspects_not_a_map"
+    types:
+      - enum:
+          name: "E"
+          aspects: 123
+          constants: []
+    error: |-
+      Node 'aspects' is not a map
+      |          aspects: 123
+      |                   ^
+
+- test:
+    name: "enum_aspect_name_not_a_string"
+    types:
+      - enum:
+          name: "E"
+          aspects:
+            ? [1]: val
+          constants: []
+    error: |-
+      Target aspect name is not a string
+      |            ? [1]: val
+      |              ^
+
+- test:
+    name: "enum_constant_aspects_not_a_map"
+    types:
+      - enum:
+          name: "E"
+          constants:
+            - name: "C"
+              aspects: 123
+    error: |-
+      Node 'aspects' is not a map
+      |              aspects: 123
+      |                       ^
+
+- test:
+    name: "enum_constant_aspect_name_not_a_string"
+    types:
+      - enum:
+          name: "E"
+          constants:
+            - name: "C"
+              aspects:
+                ? [1]: val
+    error: |-
+      Target aspect name is not a string
+      |                ? [1]: val
+      |                  ^
+
+- test:
+    name: "enum_missing_name"
+    types:
+      - enum: {}
+    error: |-
+      Type definition 'name' is not a string
+      |      - enum: {}
+      |              ^
+
+- test:
+    name: "enum_doc_not_a_string"
+    types:
+      - enum:
+          name: "E"
+          doc: [1]
+    error: |-
+      Type definition 'doc' is not a string
+      |          doc: [1]
+      |               ^
+
+- test:
+    name: "empty_structured_type_name"
+    types:
+      - struct:
+          name: "A"
+          fields:
+            - name: "f"
+              type:
+                type_name: ""
+    error: |-
+      Node 'type_name' cannot be empty
+      |                type_name: ""
+      |                           ^
+
+- test:
+    name: "invalid_null_default_constant"
+    types:
+      - struct:
+          name: "A"
+          fields:
+            - name: "f"
+              type: "null"
+              default: "abc"
+    error: |-
+      Failed to parse null constant
+      |              default: "abc"
+      |                       ^
+
+- test:
+    name: "unsupported_any_default_constant_type"
+    types:
+      - struct:
+          name: "A"
+          fields:
+            - name: "f"
+              type: "any"
+              default: 123
+    error: |-
+      Constant type 'any' is not supported
+      |              default: 123
+      |                       ^
+
+- test:
+    name: "invalid_bool_default_constant"
+    types:
+      - struct:
+          name: "A"
+          fields:
+            - name: "f"
+              type: "bool"
+              default: "bad"
+    error: |-
+      Failed to parse bool constant
+      |              default: "bad"
+      |                       ^
+
+- test:
+    name: "invalid_int_default_constant"
+    types:
+      - struct:
+          name: "A"
+          fields:
+            - name: "f"
+              type: "int"
+              default: "bad"
+    error: |-
+      Failed to parse int constant
+      |              default: "bad"
+      |                       ^
+
+- test:
+    name: "invalid_uint_default_constant"
+    types:
+      - struct:
+          name: "A"
+          fields:
+            - name: "f"
+              type: "uint"
+              default: "bad"
+    error: |-
+      Failed to parse uint constant
+      |              default: "bad"
+      |                       ^
+
+- test:
+    name: "invalid_double_default_constant"
+    types:
+      - struct:
+          name: "A"
+          fields:
+            - name: "f"
+              type: "double"
+              default: "bad"
+    error: |-
+      Failed to parse double constant
+      |              default: "bad"
+      |                       ^
+
+- test:
+    name: "invalid_duration_default_constant"
+    types:
+      - struct:
+          name: "A"
+          fields:
+            - name: "f"
+              type: "duration"
+              default: "bad"
+    error: |-
+      Failed to parse duration constant
+      |              default: "bad"
+      |                       ^
+
+- test:
+    name: "invalid_timestamp_default_constant"
+    types:
+      - struct:
+          name: "A"
+          fields:
+            - name: "f"
+              type: "timestamp"
+              default: "bad"
+    error: |-
+      Failed to parse timestamp constant: Failed to parse input supported format: YYYY-MM-DDThh:mm:ssZ
+      |              default: "bad"
+      |                       ^
+    go_error: "failed to parse timestamp constant:"
+
+- test:
+    name: "empty_struct_name"
+    types:
+      - struct:
+          name: ""
+    error: |-
+      Type definition 'name' cannot be empty
+      |          name: ""
+      |                ^
+
+- test:
+    name: "empty_field_name"
+    types:
+      - struct:
+          name: "A"
+          fields:
+            - name: ""
+              type: "int"
+    error: |-
+      Field name cannot be empty
+      |            - name: ""
+      |                    ^
+
+- test:
+    name: "empty_enum_name"
+    types:
+      - enum:
+          name: ""
+    error: |-
+      Type definition 'name' cannot be empty
+      |          name: ""
+      |                ^
+
+- test:
+    name: "empty_enum_constant_name"
+    types:
+      - enum:
+          name: "E"
+          constants:
+            - name: ""
+    error: |-
+      Enum constant name cannot be empty
+      |            - name: ""
+      |                    ^
+
+- test:
+    name: "type_param_cannot_have_params"
+    types:
+      - struct:
+          name: "A"
+          fields:
+            - name: "f"
+              type:
+                type_name: "T"
+                is_type_param: true
+                params:
+                  - type_name: "int"
+    error: |-
+      Type parameter cannot have type parameters
+      |                type_name: "T"
+      |                ^
+
+- test:
+    name: "null_type_cannot_have_params"
+    types:
+      - struct:
+          name: "A"
+          fields:
+            - name: "f"
+              type:
+                type_name: "null"
+                params:
+                  - type_name: "int"
+    error: |-
+      Type 'null' cannot have type parameters
+      |                type_name: "null"
+      |                ^
+
+- test:
+    name: "bool_type_cannot_have_params"
+    types:
+      - struct:
+          name: "A"
+          fields:
+            - name: "f"
+              type:
+                type_name: "bool"
+                params:
+                  - type_name: "int"
+    error: |-
+      Type 'bool' cannot have type parameters
+      |                type_name: "bool"
+      |                ^
+
+- test:
+    name: "int_type_cannot_have_params"
+    types:
+      - struct:
+          name: "A"
+          fields:
+            - name: "f"
+              type:
+                type_name: "int"
+                params:
+                  - type_name: "int"
+    error: |-
+      Type 'int' cannot have type parameters
+      |                type_name: "int"
+      |                ^
+
+- test:
+    name: "uint_type_cannot_have_params"
+    types:
+      - struct:
+          name: "A"
+          fields:
+            - name: "f"
+              type:
+                type_name: "uint"
+                params:
+                  - type_name: "int"
+    error: |-
+      Type 'uint' cannot have type parameters
+      |                type_name: "uint"
+      |                ^
+
+- test:
+    name: "double_type_cannot_have_params"
+    types:
+      - struct:
+          name: "A"
+          fields:
+            - name: "f"
+              type:
+                type_name: "double"
+                params:
+                  - type_name: "int"
+    error: |-
+      Type 'double' cannot have type parameters
+      |                type_name: "double"
+      |                ^
+
+- test:
+    name: "string_type_cannot_have_params"
+    types:
+      - struct:
+          name: "A"
+          fields:
+            - name: "f"
+              type:
+                type_name: "string"
+                params:
+                  - type_name: "int"
+    error: |-
+      Type 'string' cannot have type parameters
+      |                type_name: "string"
+      |                ^
+
+- test:
+    name: "bytes_type_cannot_have_params"
+    types:
+      - struct:
+          name: "A"
+          fields:
+            - name: "f"
+              type:
+                type_name: "bytes"
+                params:
+                  - type_name: "int"
+    error: |-
+      Type 'bytes' cannot have type parameters
+      |                type_name: "bytes"
+      |                ^
+
+- test:
+    name: "any_type_cannot_have_params"
+    types:
+      - struct:
+          name: "A"
+          fields:
+            - name: "f"
+              type:
+                type_name: "any"
+                params:
+                  - type_name: "int"
+    error: |-
+      Type 'any' cannot have type parameters
+      |                type_name: "any"
+      |                ^
+
+- test:
+    name: "timestamp_type_cannot_have_params"
+    types:
+      - struct:
+          name: "A"
+          fields:
+            - name: "f"
+              type:
+                type_name: "timestamp"
+                params:
+                  - type_name: "int"
+    error: |-
+      Type 'timestamp' cannot have type parameters
+      |                type_name: "timestamp"
+      |                ^
+
+- test:
+    name: "duration_type_cannot_have_params"
+    types:
+      - struct:
+          name: "A"
+          fields:
+            - name: "f"
+              type:
+                type_name: "duration"
+                params:
+                  - type_name: "int"
+    error: |-
+      Type 'duration' cannot have type parameters
+      |                type_name: "duration"
+      |                ^
+
+- test:
+    name: "dyn_type_cannot_have_params"
+    types:
+      - struct:
+          name: "A"
+          fields:
+            - name: "f"
+              type:
+                type_name: "dyn"
+                params:
+                  - type_name: "int"
+    error: |-
+      Type 'dyn' cannot have type parameters
+      |                type_name: "dyn"
+      |                ^
+
+- test:
+    name: "bool_wrapper_type_cannot_have_params"
+    types:
+      - struct:
+          name: "A"
+          fields:
+            - name: "f"
+              type:
+                type_name: "bool_wrapper"
+                params:
+                  - type_name: "int"
+    error: |-
+      Type 'bool_wrapper' cannot have type parameters
+      |                type_name: "bool_wrapper"
+      |                ^
+
+- test:
+    name: "int_wrapper_type_cannot_have_params"
+    types:
+      - struct:
+          name: "A"
+          fields:
+            - name: "f"
+              type:
+                type_name: "int_wrapper"
+                params:
+                  - type_name: "int"
+    error: |-
+      Type 'int_wrapper' cannot have type parameters
+      |                type_name: "int_wrapper"
+      |                ^
+
+- test:
+    name: "uint_wrapper_type_cannot_have_params"
+    types:
+      - struct:
+          name: "A"
+          fields:
+            - name: "f"
+              type:
+                type_name: "uint_wrapper"
+                params:
+                  - type_name: "int"
+    error: |-
+      Type 'uint_wrapper' cannot have type parameters
+      |                type_name: "uint_wrapper"
+      |                ^
+
+- test:
+    name: "double_wrapper_type_cannot_have_params"
+    types:
+      - struct:
+          name: "A"
+          fields:
+            - name: "f"
+              type:
+                type_name: "double_wrapper"
+                params:
+                  - type_name: "int"
+    error: |-
+      Type 'double_wrapper' cannot have type parameters
+      |                type_name: "double_wrapper"
+      |                ^
+
+- test:
+    name: "string_wrapper_type_cannot_have_params"
+    types:
+      - struct:
+          name: "A"
+          fields:
+            - name: "f"
+              type:
+                type_name: "string_wrapper"
+                params:
+                  - type_name: "int"
+    error: |-
+      Type 'string_wrapper' cannot have type parameters
+      |                type_name: "string_wrapper"
+      |                ^
+
+- test:
+    name: "bytes_wrapper_type_cannot_have_params"
+    types:
+      - struct:
+          name: "A"
+          fields:
+            - name: "f"
+              type:
+                type_name: "bytes_wrapper"
+                params:
+                  - type_name: "int"
+    error: |-
+      Type 'bytes_wrapper' cannot have type parameters
+      |                type_name: "bytes_wrapper"
+      |                ^
+
+- test:
+    name: "list_value_type_cannot_have_params"
+    types:
+      - struct:
+          name: "A"
+          fields:
+            - name: "f"
+              type:
+                type_name: "google.protobuf.ListValue"
+                params:
+                  - type_name: "int"
+    error: |-
+      Type 'google.protobuf.ListValue' cannot have type parameters
+      |                type_name: "google.protobuf.ListValue"
+      |                ^
+
+- test:
+    name: "protobuf_struct_type_cannot_have_params"
+    types:
+      - struct:
+          name: "A"
+          fields:
+            - name: "f"
+              type:
+                type_name: "google.protobuf.Struct"
+                params:
+                  - type_name: "int"
+    error: |-
+      Type 'google.protobuf.Struct' cannot have type parameters
+      |                type_name: "google.protobuf.Struct"
+      |                ^
+
+- test:
+    name: "type_with_too_many_params"
+    types:
+      - struct:
+          name: "A"
+          fields:
+            - name: "f"
+              type:
+                type_name: "type"
+                params:
+                  - type_name: "int"
+                  - type_name: "string"
+    error: |-
+      Type 'type' expects at most 1 parameter
+      |                type_name: "type"
+      |                ^
+
+- test:
+    name: "list_type_with_too_many_params"
+    types:
+      - struct:
+          name: "A"
+          fields:
+            - name: "f"
+              type:
+                type_name: "list"
+                params:
+                  - type_name: "int"
+                  - type_name: "string"
+    error: |-
+      Type 'list' expects at most 1 parameter
+      |                type_name: "list"
+      |                ^
+
+- test:
+    name: "map_type_with_one_param"
+    types:
+      - struct:
+          name: "A"
+          fields:
+            - name: "f"
+              type:
+                type_name: "map"
+                params:
+                  - type_name: "string"
+    error: |-
+      Type 'map' expects 0 or 2 parameters
+      |                type_name: "map"
+      |                ^
+
+- test:
+    name: "map_type_with_three_params"
+    types:
+      - struct:
+          name: "A"
+          fields:
+            - name: "f"
+              type:
+                type_name: "map"
+                params:
+                  - type_name: "string"
+                  - type_name: "int"
+                  - type_name: "bool"
+    error: |-
+      Type 'map' expects 0 or 2 parameters
+      |                type_name: "map"
+      |                ^
+
+- test:
+    name: "types_not_a_sequence"
+    types: 123
+    error: |-
+      Node 'types' is not a sequence
+      |    types: 123
+      |           ^
+
+- test:
+    name: "type_def_scalar_not_a_map"
+    types:
+      - 1
+    error: |-
+      Type definition is not a map
+      |      - 1
+      |        ^
+
+- test:
+    name: "invalid_binary_default_constant"
+    types:
+      - struct:
+          name: "A"
+          fields:
+            - name: "f"
+              type: "bytes"
+              default: !!binary "%%%"
+    error: |-
+      Node '%%%' is not a valid Base64 encoded binary
+      |              default: !!binary "%%%"
+      |                       ^
+
+- test:
+    name: "invalid_binary_aspect_property"
+    types:
+      - struct:
+          name: "A"
+          aspects:
+            proto:
+              raw: !!binary "%%%"
+    error: |-
+      Node '%%%' is not a valid Base64 encoded binary
+      |              raw: !!binary "%%%"
+      |                   ^
+
+- test:
+    name: "structured_type_is_type_param_invalid_scalar"
+    types:
+      - struct:
+          name: "A"
+          fields:
+            - name: "f"
+              type:
+                type_name: "T"
+                is_type_param: "not_a_bool"
+    error: |-
+      Node 'is_type_param' is not a boolean
+      |                is_type_param: "not_a_bool"
+      |                               ^
+
+- test:
+    name: "enum_constant_id_not_a_scalar"
+    types:
+      - enum:
+          name: "Status"
+          constants:
+            - name: "ACTIVE"
+              id: [1]
+    error: |-
+      Node 'id' is not an integer
+      |              id: [1]
+      |                  ^
+
+- test:
+    name: "cyclic_structured_type_alias"
+    types:
+      - struct:
+          name: "A"
+          fields:
+            - name: "f"
+              type: &t
+                type_name: "list"
+                params:
+                  - *t
+    error: |-
+      Type specification exceeds maximum depth
+      |              type: &t
+      |                    ^
