@@ -120,13 +120,21 @@ func (drainAll) NextAction(completed []Call, active int) DrainAction {
 // goroutine), so its goroutine continues running in the background until it returns on its own;
 // only its result is abandoned. This is the recommended way to bound functions that may hang or
 // are not under the caller's control. The extra goroutine is incurred only by Timeout-wrapped
-// calls, not by async evaluation in general.
+// calls, not by async evaluation in general. Panics inside the wrapped function are recovered
+// and returned as CEL errors.
 func Timeout(fn functions.BlockingAsyncOp, timeout time.Duration) functions.BlockingAsyncOp {
 	return func(ctx context.Context, args ...ref.Val) ref.Val {
 		tCtx, cancel := context.WithTimeout(ctx, timeout)
 		defer cancel()
 		resCh := make(chan ref.Val, 1)
-		go func() { resCh <- fn(tCtx, args...) }()
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					resCh <- types.NewErr("internal error: %v", r)
+				}
+			}()
+			resCh <- fn(tCtx, args...)
+		}()
 		select {
 		case res := <-resCh:
 			return res

@@ -1112,3 +1112,40 @@ func TestAsyncSetupWithoutContextErrors(t *testing.T) {
 		t.Error("SetAsyncMaxConcurrency() succeeded without context, wanted error")
 	}
 }
+
+func TestAsyncLaunchPanicRecovery(t *testing.T) {
+	completions := make(chan int64, 1)
+	tracker := newAsyncCallStateTracker()
+	gate := newAsyncGate(1, completions)
+	obs := &recordingObserver{}
+
+	ctx := context.Background()
+	acs := tracker.getOrCreate(1, "bad_call", "bad_call_overload", nil, func(ctx context.Context, args ...ref.Val) <-chan ref.Val {
+		panic("boom")
+	}, gate)
+
+	res := tracker.launch(ctx, acs, obs)
+	if !types.IsUnknown(res) {
+		t.Fatalf("launch() = %v, wanted Unknown", res)
+	}
+
+	callID := <-completions
+	if callID != acs.CallID() {
+		t.Errorf("completed callID = %d, wanted %d", callID, acs.CallID())
+	}
+
+	got := acs.ResultOrUnknown()
+	if !types.IsError(got) || !strings.Contains(got.(*types.Err).Error(), "internal error: boom") {
+		t.Errorf("ResultOrUnknown() = %v, wanted error containing %q", got, "internal error: boom")
+	}
+
+	if obs.started.Load() != 1 || obs.finished.Load() != 1 {
+		t.Errorf("observer counts: started=%d finished=%d, wanted 1/1", obs.started.Load(), obs.finished.Load())
+	}
+
+	// Gate slot should have been released so another acquire succeeds.
+	if !gate.TryAcquire() {
+		t.Error("gate.TryAcquire() = false after panicked call completed, wanted true")
+	}
+	gate.Release()
+}

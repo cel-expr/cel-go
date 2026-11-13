@@ -269,3 +269,33 @@ func TestTimeoutBindingEnforcesAgainstContextIgnoringOp(t *testing.T) {
 		time.Sleep(2 * time.Second)
 	})
 }
+
+func TestTimeoutBindingPanicRecovery(t *testing.T) {
+	op := buildZeroArgAsync(t, async.TimeoutBinding(func(ctx context.Context, args ...ref.Val) ref.Val {
+		panic("timeout boom")
+	}, time.Second))
+
+	res := <-op(t.Context())
+	if !types.IsError(res) || !strings.Contains(res.(*types.Err).Error(), "internal error: timeout boom") {
+		t.Errorf("result = %v, want error containing %q", res, "internal error: timeout boom")
+	}
+}
+
+func TestTimeoutBindingLatePanicRecovery(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		op := buildZeroArgAsync(t, async.TimeoutBinding(func(ctx context.Context, args ...ref.Val) ref.Val {
+			time.Sleep(2 * time.Second) // ignores ctx; panics after the deadline
+			panic("late timeout boom")
+		}, 50*time.Millisecond))
+
+		res := <-op(t.Context())
+		if !types.IsError(res) || !strings.Contains(res.(*types.Err).Error(), "timed out") {
+			t.Errorf("result = %v, want a timeout error", res)
+		}
+
+		// Advance the fake clock past the abandoned op's sleep so it panics after the
+		// deadline, recovers, sends on the buffered channel, and exits without crashing
+		// or leaking a goroutine.
+		time.Sleep(2 * time.Second)
+	})
+}
