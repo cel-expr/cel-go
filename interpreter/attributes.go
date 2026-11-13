@@ -570,7 +570,12 @@ func (a *conditionalAttribute) QualifyIfPresent(vars Activation, obj any, presen
 
 // Resolve evaluates the condition, and then resolves the truthy or falsy branch accordingly.
 func (a *conditionalAttribute) Resolve(vars Activation) (any, error) {
-	val := a.expr.Eval(vars)
+	var val ref.Val
+	if frame, ok := vars.(*ExecutionFrame); ok {
+		val = a.expr.Exec(frame)
+	} else {
+		val = a.expr.Eval(vars)
+	}
 	if val == types.True {
 		return a.truthy.Resolve(vars)
 	}

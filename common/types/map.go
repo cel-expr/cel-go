@@ -99,7 +99,7 @@ func NewMutableMap(adapter Adapter, mutableValues map[ref.Val]ref.Val) traits.Mu
 	mutableCopy := make(map[ref.Val]ref.Val, len(mutableValues))
 	maps.Copy(mutableCopy, mutableValues)
 	return &mutableMap{
-		nativeMap: &nativeMap[ref.Val, ref.Val]{
+		nativeMap: nativeMap[ref.Val, ref.Val]{
 			Adapter: adapter,
 			mapVal:  mutableCopy,
 		},
@@ -393,7 +393,7 @@ func (m *baseMap) Value() any {
 
 // mutableMap holds onto a set of mutable values which are used for intermediate computations.
 type mutableMap struct {
-	*nativeMap[ref.Val, ref.Val]
+	nativeMap[ref.Val, ref.Val]
 }
 
 // Insert implements the traits.MutableMapper interface method, returning true if the key insertion
@@ -405,6 +405,12 @@ func (m *mutableMap) Insert(k, v ref.Val) ref.Val {
 	m.mapVal[k] = v
 	atomic.StoreUint32(&m.aggSize, 0)
 	return m
+}
+
+// IntoImmutableMap transfers ownership of the internal nativeMap as an immutable Mapper without
+// copying map entries. The receiver must not be mutated after this call.
+func (m *mutableMap) IntoImmutableMap() traits.Mapper {
+	return &m.nativeMap
 }
 
 // ToImmutableMap implements the traits.MutableMapper interface method, converting a mutable map

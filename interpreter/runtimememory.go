@@ -102,7 +102,7 @@ func (mt *memoryTrackerFactory) observe(vars Activation, id int64, programStep a
 	}
 	tracker := frame.ctx.memory
 	switch programStep.(type) {
-	case InterpretableAttribute, InterpretableConst, InterpretableCall, InterpretableConstructor, *evalFold, *evalBlock:
+	case InterpretableAttribute, InterpretableConst, InterpretableCall, InterpretableConstructor, *evalFold, *evalBlock, *evalListAppend, *evalMapInsert:
 		// Values within comprehension loops and block scopes may be observed many times in a
 		// single evaluation, so they are sampled. All other values are tracked on every
 		// observation, including when an evaluation is resumed across multiple passes, e.g. during

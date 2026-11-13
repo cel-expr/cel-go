@@ -117,6 +117,20 @@ func decOptimize() InterpretableDecoratorV2 {
 			return maybeBuildListLiteral(i, inst)
 		case *evalMap:
 			return maybeBuildMapLiteral(i, inst)
+		case *evalListAppend:
+			if _, isConst := inst.elem.(InterpretableConst); isConst {
+				inst.constContainer = true
+			}
+			return inst, nil
+		case *evalMapInsert:
+			if inst.binary {
+				_, keyConst := inst.key.(InterpretableConst)
+				_, valConst := inst.val.(InterpretableConst)
+				if keyConst && valConst {
+					inst.constContainer = true
+				}
+			}
+			return inst, nil
 		case InterpretableCall:
 			if inst.OverloadID() == overloads.InList {
 				return maybeOptimizeSetMembership(i, inst)

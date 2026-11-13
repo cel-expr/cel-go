@@ -161,7 +161,7 @@ func NewJSONList(adapter Adapter, l *structpb.ListValue) traits.Lister {
 // NewMutableList creates a new mutable list whose internal state can be modified.
 func NewMutableList(adapter Adapter) traits.MutableLister {
 	return &mutableList{
-		sliceList: &sliceList[ref.Val]{
+		sliceList: sliceList[ref.Val]{
 			Adapter: adapter,
 		},
 	}
@@ -477,7 +477,7 @@ func (l *baseList) format(sb *strings.Builder) {
 
 // mutableList aggregates values into its internal storage. For use with internal CEL variables only.
 type mutableList struct {
-	*sliceList[ref.Val]
+	sliceList[ref.Val]
 }
 
 // Add copies elements from the other list into the internal storage of the mutable list.
@@ -496,6 +496,18 @@ func (l *mutableList) Add(other ref.Val) ref.Val {
 		return MaybeNoSuchOverloadErr(otherList)
 	}
 	return l
+}
+
+// Append adds a single element to the internal storage of the mutable list.
+func (l *mutableList) Append(val ref.Val) {
+	l.elems = append(l.elems, val)
+	atomic.StoreUint32(&l.aggSize, 0)
+}
+
+// IntoImmutableList transfers ownership of the internal sliceList as an immutable Lister without
+// allocating a new wrapper struct. The receiver must not be mutated after this call.
+func (l *mutableList) IntoImmutableList() traits.Lister {
+	return &l.sliceList
 }
 
 // ToImmutableList returns an immutable list based on the internal storage of the mutable list.
