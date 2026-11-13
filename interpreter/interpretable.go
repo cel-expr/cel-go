@@ -428,9 +428,25 @@ type lazySlot struct {
 	slot int
 	expr InterpretableV2
 	fold *evalFold
+
+	// trace is the iteration in which the slot was declared. When iteration tracing is active, the
+	// initializer is evaluated under that iteration regardless of where the slot is first
+	// referenced. Only set on per-evaluation copies of the slot.
+	trace int
 }
 
 func (l *lazySlot) resolve(frame *ExecutionFrame) ref.Val {
+	if ctx := frame.ctx; ctx != nil && ctx.tracer != nil {
+		prev := ctx.trace
+		ctx.trace = l.trace
+		val := l.eval(frame)
+		ctx.trace = prev
+		return val
+	}
+	return l.eval(frame)
+}
+
+func (l *lazySlot) eval(frame *ExecutionFrame) ref.Val {
 	if l.fold != nil {
 		return l.fold.initAccu(frame)
 	}
@@ -524,6 +540,9 @@ type evalBlock struct {
 	firstSlot int
 	inits     []blockSlotInit
 	expr      InterpretableV2
+
+	// traced indicates that iteration tracing was requested at plan time.
+	traced bool
 }
 
 // ID implements the Interpretable interface method.
@@ -541,6 +560,8 @@ func (b *evalBlock) Exec(frame *ExecutionFrame) ref.Val {
 		init := &b.inits[i]
 		if init.constVal != nil {
 			slots[b.firstSlot+i] = init.constVal
+		} else if b.traced {
+			slots[b.firstSlot+i] = tracedLazySlot(frame, &init.lazy)
 		} else {
 			slots[b.firstSlot+i] = &init.lazy
 		}
@@ -1631,11 +1652,22 @@ type evalFold struct {
 	// rather than make a throw-away computation.
 	exhaustive    bool
 	interruptable bool
+
+	// traced indicates that iteration tracing was requested at plan time.
+	traced bool
 }
 
 // ID implements the Interpretable interface method.
 func (fold *evalFold) ID() int64 {
 	return fold.id
+}
+
+// accuSlotInit returns the lazy accumulator initializer to install for this evaluation.
+func (fold *evalFold) accuSlotInit(frame *ExecutionFrame) *lazySlot {
+	if fold.traced {
+		return tracedLazySlot(frame, &fold.lazyAccu)
+	}
+	return &fold.lazyAccu
 }
 
 // Exec implements the InterpretableV2 interface method.
@@ -1645,7 +1677,7 @@ func (fold *evalFold) Exec(frame *ExecutionFrame) ref.Val {
 			costs.CreateList(fold.id, nil)
 		}
 		if fold.accuSlot >= 0 {
-			frame.localSlots[fold.accuSlot] = &fold.lazyAccu
+			frame.localSlots[fold.accuSlot] = fold.accuSlotInit(frame)
 		}
 		return fold.evalSlotResult(frame, false)
 	}
@@ -1658,7 +1690,7 @@ func (fold *evalFold) Exec(frame *ExecutionFrame) ref.Val {
 
 	slots := frame.localSlots
 	if fold.accuSlot >= 0 {
-		slots[fold.accuSlot] = &fold.lazyAccu
+		slots[fold.accuSlot] = fold.accuSlotInit(frame)
 	}
 
 	// Short-circuit the iteration if the range is empty.
@@ -1676,7 +1708,11 @@ func (fold *evalFold) Exec(frame *ExecutionFrame) ref.Val {
 	if foldable != nil {
 		sf := newSlotFolder(fold, frame)
 		sf.listV1Fold = listV1Fold
-		foldable.Fold(sf)
+		if fold.traced {
+			foldable.Fold(newTracingFolder(sf))
+		} else {
+			foldable.Fold(sf)
+		}
 		res := fold.evalSlotResult(frame, sf.interrupted)
 		releaseSlotFolder(sf)
 		return res
@@ -1690,7 +1726,11 @@ func (fold *evalFold) Exec(frame *ExecutionFrame) ref.Val {
 		return types.ValOrErr(foldRange, "got '%T', expected iterable type", foldRange)
 	}
 	sf := newSlotFolder(fold, frame)
-	sf.foldIterable(foldRange.(traits.Iterable))
+	if fold.traced {
+		sf.foldIterable(foldRange.(traits.Iterable), newTracingFolder(sf))
+	} else {
+		sf.foldIterable(foldRange.(traits.Iterable), sf)
+	}
 	res := fold.evalSlotResult(frame, sf.interrupted)
 	releaseSlotFolder(sf)
 	return res
@@ -1800,11 +1840,13 @@ func (f *slotFolder) FoldEntry(key, val any) bool {
 	return true
 }
 
-func (f *slotFolder) foldIterable(iterable traits.Iterable) {
+// foldIterable folds each element of the iterable through the folder, which is either the
+// slotFolder itself or a tracingFolder wrapping it.
+func (f *slotFolder) foldIterable(iterable traits.Iterable, folder traits.Folder) {
 	f.listV1Fold = true
 	it := iterable.Iterator()
 	for it.HasNext() == types.True {
-		if !f.FoldEntry(nil, it.Next()) {
+		if !folder.FoldEntry(nil, it.Next()) {
 			return
 		}
 	}

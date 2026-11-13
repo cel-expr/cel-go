@@ -43,6 +43,14 @@ type evalContext struct {
 	// state provides the context for tracking the evaluation state.
 	state EvalState
 
+	// tracer records every observation and comprehension iteration when the state was created by
+	// NewTracedEvalState, and is nil otherwise.
+	tracer *evalState
+
+	// trace is the number of the record which began the comprehension iteration being evaluated,
+	// or zero outside of any iteration.
+	trace int
+
 	// costs provides the context for tracking the evaluation costs.
 	costs *CostTracker
 
@@ -188,6 +196,8 @@ func (f *ExecutionFrame) Close() {
 		f.ctx.observer = nil
 		f.ctx.interrupt = nil
 		f.ctx.state = nil
+		f.ctx.tracer = nil
+		f.ctx.trace = 0
 		f.ctx.costs = nil
 		f.ctx.memory = nil
 		f.ctx.interrupted.Store(false)

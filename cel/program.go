@@ -397,7 +397,15 @@ func newProgram(e *Env, a *ast.AST, opts []ProgramOption) (Program, error) {
 		var observers []interpreter.PlannerOption
 		if p.evalOpts&(OptExhaustiveEval|OptTrackState) != 0 {
 			// EvalStateObserver is required for OptExhaustiveEval.
-			observers = append(observers, interpreter.EvalStateObserver())
+			if p.evalOpts&OptTraceIterations == OptTraceIterations {
+				observers = append(observers,
+					interpreter.IterationTracing(),
+					interpreter.EvalStateObserver(interpreter.EvalStateFactory(func() interpreter.EvalState {
+						return interpreter.NewTracedEvalState()
+					})))
+			} else {
+				observers = append(observers, interpreter.EvalStateObserver())
+			}
 		}
 		if p.evalOpts&OptTrackCost == OptTrackCost {
 			trackerOpts := p.costModel.tracker

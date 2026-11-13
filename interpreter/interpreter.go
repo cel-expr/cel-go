@@ -125,6 +125,12 @@ type evalStateFactory struct {
 // not visible to expression evaluation.
 func (et *evalStateFactory) InitState(frame *ExecutionFrame) (any, error) {
 	if frame.ctx != nil && frame.ctx.state != nil {
+		// Evaluation is being resumed, e.g. during ConcurrentEval, so it restarts from the root and
+		// the traces of the previous pass are replaced by those of the new pass.
+		if frame.ctx.tracer != nil {
+			frame.ctx.trace = 0
+			frame.ctx.tracer.Reset()
+		}
 		return frame.ctx.state, nil
 	}
 	state := et.factory()
@@ -132,24 +138,42 @@ func (et *evalStateFactory) InitState(frame *ExecutionFrame) (any, error) {
 		frame.ctx = evalContextPool.Get().(*evalContext)
 	}
 	frame.ctx.state = state
+	if s, ok := state.(*evalState); ok && s.traced {
+		frame.ctx.tracer = s
+		frame.ctx.trace = 0
+	}
 	return state, nil
 }
 
-// GetState extracts the EvalState from the Activation.
+// GetState extracts the EvalState from the Activation once evaluation completes.
+//
+// The records of a traced state are indexed here so that reading the state does not write to it.
 func (et *evalStateFactory) GetState(frame *ExecutionFrame) any {
 	if frame.ctx == nil {
 		return nil
+	}
+	if tracer := frame.ctx.tracer; tracer != nil {
+		tracer.index()
 	}
 	return frame.ctx.state
 }
 
 // Observe records the evaluation state for a given expression node and program step.
+//
+// A state created by NewTracedEvalState records the value within the comprehension iteration being
+// evaluated.
 func (et *evalStateFactory) Observe(vars Activation, id int64, programStep any, val ref.Val) {
 	frame, ok := vars.(*ExecutionFrame)
 	if !ok {
 		return
 	}
 	if frame.ctx == nil || frame.ctx.state == nil {
+		return
+	}
+	if tracer := frame.ctx.tracer; tracer != nil {
+		if val != nil {
+			tracer.recordValue(id, frame.ctx.trace, val)
+		}
 		return
 	}
 	frame.ctx.state.SetValue(id, val)

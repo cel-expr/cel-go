@@ -7045,3 +7045,65 @@ func TestCustomRefValInNativeStruct(t *testing.T) {
 		t.Errorf("Eval() got %v, wanted %v", out, testMoneyVal{Amount: 100})
 	}
 }
+
+func TestOptTraceIterations(t *testing.T) {
+	env, err := NewEnv(Variable("m", MapType(StringType, IntType)))
+	if err != nil {
+		t.Fatalf("NewEnv() failed: %v", err)
+	}
+	ast, iss := env.Compile(`[1, 2].all(x, x < 2) || [3, 4].exists(y, y > 2) && m.all(k, m[k] > 0)`)
+	if iss.Err() != nil {
+		t.Fatalf("Compile() failed: %v", iss.Err())
+	}
+	tests := []struct {
+		name string
+		opts []EvalOption
+		// iterations are the keys of the recorded iterations, in evaluation order.
+		iterations []string
+	}{
+		{
+			name: "track_state",
+			opts: []EvalOption{OptTrackState},
+		},
+		{
+			// exists() stops at the first true predicate. Map iterations are keyed by map key.
+			name:       "trace_iterations",
+			opts:       []EvalOption{OptTraceIterations},
+			iterations: []string{"0", "1", "0", "a"},
+		},
+		{
+			name:       "trace_iterations_exhaustive",
+			opts:       []EvalOption{OptTraceIterations, OptExhaustiveEval},
+			iterations: []string{"0", "1", "0", "1", "a"},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			prg, err := env.Program(ast, EvalOptions(tc.opts...))
+			if err != nil {
+				t.Fatalf("Program() failed: %v", err)
+			}
+			out, det, err := prg.Eval(map[string]any{"m": map[string]int64{"a": 2}})
+			if err != nil || out != types.True {
+				t.Fatalf("Eval() got %v, %v, wanted true", out, err)
+			}
+			// Tracing does not change the last values reported by the state.
+			if v, found := det.State().Value(ast.NativeRep().Expr().ID()); !found || v != types.True {
+				t.Errorf("State().Value(root) got %v, %v, wanted true", v, found)
+			}
+			records, traced := interpreter.TraceRecords(det.State())
+			if traced != (tc.iterations != nil) {
+				t.Fatalf("TraceRecords() reported traced=%t, wanted %t", traced, tc.iterations != nil)
+			}
+			var keys []string
+			for _, r := range records {
+				if r.IsIteration() {
+					keys = append(keys, fmt.Sprintf("%v", r.Key))
+				}
+			}
+			if !reflect.DeepEqual(keys, tc.iterations) {
+				t.Errorf("iteration keys got %v, wanted %v", keys, tc.iterations)
+			}
+		})
+	}
+}
