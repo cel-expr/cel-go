@@ -15,8 +15,11 @@
 package typedef
 
 import (
+	"bytes"
+	"cmp"
 	"fmt"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -26,6 +29,28 @@ import (
 	celstrings "cel.dev/cel-go/internal/strings"
 	"go.yaml.in/yaml/v3"
 )
+
+// ToYAMLOption configures how TypeDef and TypeDefSet values are serialized to YAML.
+type ToYAMLOption func(*toYAMLOptions)
+
+type toYAMLOptions struct {
+	useTypeSignatures bool
+}
+
+func defaultToYAMLOptions() toYAMLOptions {
+	return toYAMLOptions{
+		useTypeSignatures: true,
+	}
+}
+
+// UseTypeSignatures configures whether to emit concise type signatures (e.g.,
+// `type: "list<string>"`) instead of structured type definitions
+// (`type_name: "list"`, `params: ...`) in the output YAML. Enabled by default.
+func UseTypeSignatures(enabled bool) ToYAMLOption {
+	return func(o *toYAMLOptions) {
+		o.useTypeSignatures = enabled
+	}
+}
 
 // TypeDefFromYAML parses a TypeDef from a YAML mapping.
 //
@@ -67,6 +92,61 @@ func TypeDefSetFromYAML(data []byte) (*TypeDefSet, error) {
 		return parseTypeDefSetNode(data, typesNode)
 	}
 	return nil, yamlError(data, root, "invalid CEL type definitions YAML")
+}
+
+// TypeDefToYAML serializes a TypeDef as a YAML mapping.
+func TypeDefToYAML(t *TypeDef, opts ...ToYAMLOption) ([]byte, error) {
+	if t == nil || t.Kind() == UnspecifiedKind {
+		return nil, fmt.Errorf("%w: cannot serialize unspecified TypeDef", ErrBadTypeDef)
+	}
+	cfg := defaultToYAMLOptions()
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	node, err := emitTypeDefNode(t, cfg)
+	if err != nil {
+		return nil, err
+	}
+	return encodeYAMLNode(node)
+}
+
+// TypeDefSetToYAML serializes a TypeDefSet as a YAML sequence sorted
+// deterministically by type name. Returns nil if s is nil or empty.
+func TypeDefSetToYAML(s *TypeDefSet, opts ...ToYAMLOption) ([]byte, error) {
+	typeDefs := s.Types()
+	if len(typeDefs) == 0 {
+		return nil, nil
+	}
+	cfg := defaultToYAMLOptions()
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	slices.SortFunc(typeDefs, func(a, b *TypeDef) int {
+		return cmp.Compare(a.Name(), b.Name())
+	})
+	seq := &yaml.Node{Kind: yaml.SequenceNode, Content: make([]*yaml.Node, 0, len(typeDefs))}
+	for _, td := range typeDefs {
+		node, err := emitTypeDefNode(td, cfg)
+		if err != nil {
+			return nil, err
+		}
+		seq.Content = append(seq.Content, node)
+	}
+	return encodeYAMLNode(seq)
+}
+
+func encodeYAMLNode(node *yaml.Node) ([]byte, error) {
+	var buf bytes.Buffer
+	enc := yaml.NewEncoder(&buf)
+	enc.SetIndent(2)
+	if err := enc.Encode(node); err != nil {
+		_ = enc.Close()
+		return nil, err
+	}
+	if err := enc.Close(); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
 
 func parseTypeDefSetNode(yamlBytes []byte, seqNode *yaml.Node) (*TypeDefSet, error) {
@@ -582,4 +662,277 @@ func parseYAMLDouble(val string) (float64, bool) {
 	}
 	v, err := strconv.ParseFloat(val, 64)
 	return v, err == nil
+}
+
+// formatBytesLiteral formats b as a CEL-style hex-escaped bytes literal, e.g. `b"\x00\xff"`.
+func formatBytesLiteral(b []byte) string {
+	var sb strings.Builder
+	sb.Grow(3 + len(b)*4)
+	sb.WriteString(`b"`)
+	for _, c := range b {
+		fmt.Fprintf(&sb, `\x%02x`, c)
+	}
+	sb.WriteByte('"')
+	return sb.String()
+}
+
+// formatDuration formats d using absl::FormatDuration rules so emitted YAML is
+// compatible with C++: ASCII "us" is used instead of Go's "µs" (which
+// absl::ParseDuration rejects), zero components are omitted, and 0 formats as "0".
+func formatDuration(d time.Duration) string {
+	if d == 0 {
+		return "0"
+	}
+	var sb strings.Builder
+	var u uint64
+	if d < 0 {
+		sb.WriteByte('-')
+		u = uint64(-d)
+	} else {
+		u = uint64(d)
+	}
+	if u < uint64(time.Second) {
+		switch {
+		case u < uint64(time.Microsecond):
+			fmt.Fprintf(&sb, "%dns", u)
+		case u < uint64(time.Millisecond):
+			appendScaledDuration(&sb, u, uint64(time.Microsecond), 3, "us")
+		default:
+			appendScaledDuration(&sb, u, uint64(time.Millisecond), 6, "ms")
+		}
+		return sb.String()
+	}
+	if h := u / uint64(time.Hour); h > 0 {
+		fmt.Fprintf(&sb, "%dh", h)
+		u %= uint64(time.Hour)
+	}
+	if m := u / uint64(time.Minute); m > 0 {
+		fmt.Fprintf(&sb, "%dm", m)
+		u %= uint64(time.Minute)
+	}
+	if u > 0 {
+		appendScaledDuration(&sb, u, uint64(time.Second), 9, "s")
+	}
+	return sb.String()
+}
+
+func appendScaledDuration(sb *strings.Builder, u, unit uint64, fracDigits int, suffix string) {
+	whole := u / unit
+	rem := u % unit
+	fmt.Fprintf(sb, "%d", whole)
+	if rem > 0 {
+		frac := fmt.Sprintf("%0*d", fracDigits, rem)
+		frac = strings.TrimRight(frac, "0")
+		sb.WriteByte('.')
+		sb.WriteString(frac)
+	}
+	sb.WriteString(suffix)
+}
+
+func emitTypeDefNode(td *TypeDef, cfg toYAMLOptions) (*yaml.Node, error) {
+	outer := &yaml.Node{Kind: yaml.MappingNode}
+	if td.IsStruct() {
+		s := td.StructType()
+		m := &yaml.Node{Kind: yaml.MappingNode}
+		if s.Name() != "" {
+			appendMapPair(m, "name", newYAMLQuotedStringNode(s.Name()))
+		}
+		if s.Doc() != "" {
+			appendMapPair(m, "doc", newYAMLQuotedStringNode(s.Doc()))
+		}
+		aspectsNode, err := emitAspectsNode(s.Aspects())
+		if err != nil {
+			return nil, err
+		}
+		if aspectsNode != nil {
+			appendMapPair(m, "aspects", aspectsNode)
+		}
+		if fields := s.Fields(); len(fields) > 0 {
+			seq := &yaml.Node{Kind: yaml.SequenceNode, Content: make([]*yaml.Node, 0, len(fields))}
+			for _, f := range fields {
+				fm, err := emitFieldNode(f, cfg.useTypeSignatures)
+				if err != nil {
+					return nil, err
+				}
+				seq.Content = append(seq.Content, fm)
+			}
+			appendMapPair(m, "fields", seq)
+		}
+		appendMapPair(outer, "struct", m)
+		return outer, nil
+	}
+
+	e := td.EnumType()
+	m := &yaml.Node{Kind: yaml.MappingNode}
+	if e.Name() != "" {
+		appendMapPair(m, "name", newYAMLQuotedStringNode(e.Name()))
+	}
+	if e.Doc() != "" {
+		appendMapPair(m, "doc", newYAMLQuotedStringNode(e.Doc()))
+	}
+	aspectsNode, err := emitAspectsNode(e.Aspects())
+	if err != nil {
+		return nil, err
+	}
+	if aspectsNode != nil {
+		appendMapPair(m, "aspects", aspectsNode)
+	}
+	if constants := e.Constants(); len(constants) > 0 {
+		seq := &yaml.Node{Kind: yaml.SequenceNode, Content: make([]*yaml.Node, 0, len(constants))}
+		for _, c := range constants {
+			cm, err := emitEnumConstantNode(c)
+			if err != nil {
+				return nil, err
+			}
+			seq.Content = append(seq.Content, cm)
+		}
+		appendMapPair(m, "constants", seq)
+	}
+	appendMapPair(outer, "enum", m)
+	return outer, nil
+}
+
+func emitFieldNode(f *Field, useTypeSignatures bool) (*yaml.Node, error) {
+	fm := &yaml.Node{Kind: yaml.MappingNode}
+	appendMapPair(fm, "name", newYAMLQuotedStringNode(f.Name()))
+	typeNode, err := emitTypeNode(f.Type(), useTypeSignatures)
+	if err != nil {
+		return nil, err
+	}
+	appendMapPair(fm, "type", typeNode)
+	if f.Doc() != "" {
+		appendMapPair(fm, "doc", newYAMLQuotedStringNode(f.Doc()))
+	}
+	if f.HasDefaultValue() {
+		defNode, err := emitConstantNode(f.DefaultValue(), false)
+		if err != nil {
+			return nil, err
+		}
+		if defNode != nil {
+			appendMapPair(fm, "default", defNode)
+		}
+	}
+	fAspects, err := emitAspectsNode(f.Aspects())
+	if err != nil {
+		return nil, err
+	}
+	if fAspects != nil {
+		appendMapPair(fm, "aspects", fAspects)
+	}
+	return fm, nil
+}
+
+func emitEnumConstantNode(c *EnumConstant) (*yaml.Node, error) {
+	cm := &yaml.Node{Kind: yaml.MappingNode}
+	appendMapPair(cm, "name", newYAMLQuotedStringNode(c.Name()))
+	appendMapPair(cm, "id", newYAMLPlainNode("!!int", strconv.FormatInt(int64(c.ID()), 10)))
+	if c.Doc() != "" {
+		appendMapPair(cm, "doc", newYAMLQuotedStringNode(c.Doc()))
+	}
+	cAspects, err := emitAspectsNode(c.Aspects())
+	if err != nil {
+		return nil, err
+	}
+	if cAspects != nil {
+		appendMapPair(cm, "aspects", cAspects)
+	}
+	return cm, nil
+}
+
+func emitAspectsNode(aspects map[string]*Aspect) (*yaml.Node, error) {
+	if len(aspects) == 0 {
+		return nil, nil
+	}
+	keys := make([]string, 0, len(aspects))
+	for k := range aspects {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+
+	m := &yaml.Node{Kind: yaml.MappingNode}
+	for _, k := range keys {
+		aspect := aspects[k]
+		am := &yaml.Node{Kind: yaml.MappingNode}
+		props := aspect.Properties()
+		if len(props) > 0 {
+			propKeys := make([]string, 0, len(props))
+			for pk, pv := range props {
+				if pv != nil {
+					propKeys = append(propKeys, pk)
+				}
+			}
+			slices.Sort(propKeys)
+			for _, pk := range propKeys {
+				valNode, err := emitConstantNode(props[pk], true)
+				if err != nil {
+					return nil, err
+				}
+				if valNode != nil {
+					appendMapPair(am, pk, valNode)
+				}
+			}
+		}
+		appendMapPair(m, k, am)
+	}
+	return m, nil
+}
+
+func emitConstantNode(val ref.Val, untyped bool) (*yaml.Node, error) {
+	switch v := val.(type) {
+	case nil:
+		return nil, nil
+	case types.Null:
+		return newYAMLPlainNode("!!null", "~"), nil
+	case types.Bool:
+		if bool(v) {
+			return newYAMLPlainNode("!!bool", "true"), nil
+		}
+		return newYAMLPlainNode("!!bool", "false"), nil
+	case types.Int:
+		return newYAMLPlainNode("!!int", strconv.FormatInt(int64(v), 10)), nil
+	case types.Uint:
+		s := strconv.FormatUint(uint64(v), 10)
+		if untyped {
+			return newYAMLPlainNode("!!str", s+"u"), nil
+		}
+		return newYAMLPlainNode("!!int", s), nil
+	case types.Double:
+		f := float64(v)
+		switch {
+		case math.IsNaN(f):
+			return newYAMLPlainNode("!!float", ".nan"), nil
+		case math.IsInf(f, 1):
+			return newYAMLPlainNode("!!float", ".inf"), nil
+		case math.IsInf(f, -1):
+			return newYAMLPlainNode("!!float", "-.inf"), nil
+		default:
+			s := strconv.FormatFloat(f, 'g', -1, 64)
+			if untyped && !strings.ContainsAny(s, ".eE") {
+				s += ".0"
+			}
+			return newYAMLPlainNode("!!float", s), nil
+		}
+	case types.Bytes:
+		return newYAMLPlainNode("!!str", formatBytesLiteral([]byte(v))), nil
+	case types.String:
+		return newYAMLQuotedStringNode(string(v)), nil
+	case types.Duration:
+		s := formatDuration(v.Duration)
+		if untyped {
+			return newYAMLQuotedStringNode(s), nil
+		}
+		// Leave the tag empty so yaml.v3 emits durations (including "0") as plain
+		// scalars matching yaml-cpp instead of quoting "0" under !!str.
+		return newYAMLPlainNode("", s), nil
+	case types.Timestamp:
+		s := v.Time.UTC().Format(time.RFC3339Nano)
+		if untyped {
+			return newYAMLQuotedStringNode(s), nil
+		}
+		// Leave the tag empty so yaml.v3 emits RFC3339 timestamps as plain scalars
+		// rather than quoting them as !!str, matching yaml-cpp's output.
+		return newYAMLPlainNode("", s), nil
+	default:
+		return nil, fmt.Errorf("%w: unsupported constant value %T", ErrBadTypeDef, val)
+	}
 }
