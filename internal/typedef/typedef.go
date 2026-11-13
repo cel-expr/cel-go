@@ -47,16 +47,19 @@ type Aspect struct {
 
 // NewAspect creates a new Aspect with a defensive copy of properties.
 //
-// Supported non-nil property values are CEL scalar constants (types.Null,
+// Supported property values are non-nil CEL scalar constants (types.Null,
 // types.Bool, types.Int, types.Uint, types.Double, types.Bytes, types.String,
-// types.Duration, and types.Timestamp); nil values represent unset constants,
-// and any other ref.Val returns ErrBadTypeDef.
+// types.Duration, and types.Timestamp); nil or any other ref.Val returns
+// ErrBadTypeDef.
 func NewAspect(properties map[string]ref.Val) (*Aspect, error) {
 	if len(properties) == 0 {
 		return &Aspect{}, nil
 	}
 	cloned := make(map[string]ref.Val, len(properties))
 	for k, v := range properties {
+		if v == nil {
+			return nil, fmt.Errorf("aspect property %q: %w: constant value cannot be nil", k, ErrBadTypeDef)
+		}
 		sanitized, err := sanitizeConstant(v)
 		if err != nil {
 			return nil, fmt.Errorf("aspect property %q: %w", k, err)
@@ -79,9 +82,9 @@ func (a *Aspect) Properties() map[string]ref.Val {
 	return cloned
 }
 
-// GetProperty looks up a property by key, returning the property value and
+// Property looks up a property by key, returning the property value and
 // true if the key is present, or (nil, false) otherwise.
-func (a *Aspect) GetProperty(key string) (ref.Val, bool) {
+func (a *Aspect) Property(key string) (ref.Val, bool) {
 	if a == nil || len(a.properties) == 0 {
 		return nil, false
 	}

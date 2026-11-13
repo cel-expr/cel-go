@@ -375,8 +375,8 @@ func TestStructTypeDefConstructionAndLookup(t *testing.T) {
 	if !ok {
 		t.Fatalf("gotNameField.Aspect(\"proto3\") = false, want true")
 	}
-	if gotNum, ok := proto3Aspect.GetProperty("field_number"); !ok || gotNum != types.Int(2) {
-		t.Errorf("proto3Aspect.GetProperty(\"field_number\") = (%v, %v), want (2, true)", gotNum, ok)
+	if gotNum, ok := proto3Aspect.Property("field_number"); !ok || gotNum != types.Int(2) {
+		t.Errorf("proto3Aspect.Property(\"field_number\") = (%v, %v), want (2, true)", gotNum, ok)
 	}
 
 	if f, ok := person.FindField("nonexistent"); ok || f != nil {
@@ -762,16 +762,16 @@ func TestDefaultAndNilAspect(t *testing.T) {
 	if got := zeroAspect.Properties(); got != nil {
 		t.Errorf("zeroAspect.Properties() = %v, want nil", got)
 	}
-	if got, ok := zeroAspect.GetProperty("missing"); ok || got != nil {
-		t.Errorf("zeroAspect.GetProperty(\"missing\") = (%v, %v), want (nil, false)", got, ok)
+	if got, ok := zeroAspect.Property("missing"); ok || got != nil {
+		t.Errorf("zeroAspect.Property(\"missing\") = (%v, %v), want (nil, false)", got, ok)
 	}
 
 	emptyFromNil := mustAspect(t, nil)
 	if got := emptyFromNil.Properties(); got != nil {
 		t.Errorf("emptyFromNil.Properties() = %v, want nil", got)
 	}
-	if got, ok := emptyFromNil.GetProperty("missing"); ok || got != nil {
-		t.Errorf("emptyFromNil.GetProperty(\"missing\") = (%v, %v), want (nil, false)", got, ok)
+	if got, ok := emptyFromNil.Property("missing"); ok || got != nil {
+		t.Errorf("emptyFromNil.Property(\"missing\") = (%v, %v), want (nil, false)", got, ok)
 	}
 
 	emptyFromMap := mustAspect(t, map[string]ref.Val{})
@@ -783,15 +783,14 @@ func TestDefaultAndNilAspect(t *testing.T) {
 	if got := nilAspect.Properties(); got != nil {
 		t.Errorf("nilAspect.Properties() = %v, want nil", got)
 	}
-	if got, ok := nilAspect.GetProperty("missing"); ok || got != nil {
-		t.Errorf("nilAspect.GetProperty(\"missing\") = (%v, %v), want (nil, false)", got, ok)
+	if got, ok := nilAspect.Property("missing"); ok || got != nil {
+		t.Errorf("nilAspect.Property(\"missing\") = (%v, %v), want (nil, false)", got, ok)
 	}
 }
 
-func TestAspectConstructionGetPropertyAndDefensiveCopies(t *testing.T) {
+func TestAspectConstructionPropertyAndDefensiveCopies(t *testing.T) {
 	rawBytes := []byte{0xde, 0xad}
 	inProps := map[string]ref.Val{
-		"unset":       nil,
 		"null":        types.NullValue,
 		"bool":        types.Bool(true),
 		"int":         types.Int(2),
@@ -811,22 +810,18 @@ func TestAspectConstructionGetPropertyAndDefensiveCopies(t *testing.T) {
 	inProps["injected"] = types.Bool(false)
 	rawBytes[0] = 0x00
 
-	gotStr, ok := aspect.GetProperty("string")
+	gotStr, ok := aspect.Property("string")
 	if !ok || gotStr != types.String("displayName") {
-		t.Errorf("aspect.GetProperty(\"string\") = (%v, %v), want (\"displayName\", true)", gotStr, ok)
+		t.Errorf("aspect.Property(\"string\") = (%v, %v), want (\"displayName\", true)", gotStr, ok)
 	}
-	gotUnset, ok := aspect.GetProperty("unset")
-	if !ok || gotUnset != nil {
-		t.Errorf("aspect.GetProperty(\"unset\") = (%v, %v), want (nil, true)", gotUnset, ok)
-	}
-	if got, ok := aspect.GetProperty("nonexistent"); ok || got != nil {
-		t.Errorf("aspect.GetProperty(\"nonexistent\") = (%v, %v), want (nil, false)", got, ok)
+	if got, ok := aspect.Property("nonexistent"); ok || got != nil {
+		t.Errorf("aspect.Property(\"nonexistent\") = (%v, %v), want (nil, false)", got, ok)
 	}
 
-	// Mutating returned bytes from GetProperty or Properties() must not mutate Aspect.
-	gotBytesVal, ok := aspect.GetProperty("bytes")
+	// Mutating returned bytes from Property or Properties() must not mutate Aspect.
+	gotBytesVal, ok := aspect.Property("bytes")
 	if !ok {
-		t.Fatalf("aspect.GetProperty(\"bytes\") = false, want true")
+		t.Fatalf("aspect.Property(\"bytes\") = false, want true")
 	}
 	gotBytes := gotBytesVal.(types.Bytes)
 	gotBytes[1] = 0xff
@@ -836,7 +831,6 @@ func TestAspectConstructionGetPropertyAndDefensiveCopies(t *testing.T) {
 	outProps["bytes"].(types.Bytes)[0] = 0x99
 
 	wantProps := map[string]ref.Val{
-		"unset":       nil,
 		"null":        types.NullValue,
 		"bool":        types.Bool(true),
 		"int":         types.Int(2),
@@ -861,6 +855,7 @@ func TestAspectConstructionGetPropertyAndDefensiveCopies(t *testing.T) {
 		name string
 		val  ref.Val
 	}{
+		{name: "nil", val: nil},
 		{name: "list", val: types.DefaultTypeAdapter.NativeToValue([]string{"a"})},
 		{name: "map", val: types.DefaultTypeAdapter.NativeToValue(map[string]int{"a": 1})},
 		{name: "type_val", val: types.IntType},

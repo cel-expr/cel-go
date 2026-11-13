@@ -1,0 +1,72 @@
+// Copyright 2026 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      https://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+edition = "2023";
+
+package cel.types;
+
+import "cel/expr/checked.proto";
+import "cel/expr/syntax.proto";
+
+option go_package = "cel.dev/cel-go/internal/typedef/typedefpb";
+
+// Represents a collection of CEL type definitions.
+message TypeDefSet {
+  repeated TypeDef types = 1;
+}
+
+// Represents a single CEL type definition (either a struct or an enum).
+message TypeDef {
+  oneof kind {
+    Struct struct_type = 1;
+    Enum enum_type = 2;
+  }
+}
+
+// Represents a structured type with typed fields.
+message Struct {
+  message Field {
+    string name = 1;
+    cel.expr.Type type = 2;
+    string doc = 3;
+    cel.expr.Constant default_value = 4;
+    map<string, Aspect> aspects = 5;
+  }
+
+  string name = 1;
+  string doc = 2;
+  repeated Field fields = 3;
+  map<string, Aspect> aspects = 4;
+}
+
+// Represents a named enumeration type.
+message Enum {
+  message EnumConstant {
+    string name = 1;
+    int32 id = 2;
+    string doc = 3;
+    map<string, Aspect> aspects = 4;
+  }
+
+  string name = 1;
+  string doc = 2;
+  repeated EnumConstant constants = 3;
+  map<string, Aspect> aspects = 4;
+}
+
+// Represents a set of schema-specific or extension properties attached to a
+// type definition, field, or enum constant.
+message Aspect {
+  map<string, cel.expr.Constant> properties = 1;
+}
