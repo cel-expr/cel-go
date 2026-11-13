@@ -24,6 +24,7 @@ import (
 	"cel.dev/cel-go/common/operators"
 	"cel.dev/cel-go/common/runes"
 	"cel.dev/cel-go/common/types"
+	celstrings "cel.dev/cel-go/internal/strings"
 )
 
 type binaryOpInfo struct {
@@ -1107,7 +1108,7 @@ func (p *prattParserWorker) parseStringLiteral() ast.Expr {
 	tok := p.nextToken()
 	id := p.nextID(tok)
 	text := p.tokenText(tok)
-	unescaped, err := unescape(text, false)
+	unescaped, err := celstrings.Unescape(text, false)
 	if err != nil {
 		return p.reportError(tok, "%s", err.Error())
 	}
@@ -1118,16 +1119,9 @@ func (p *prattParserWorker) parseBytesLiteral() ast.Expr {
 	tok := p.nextToken()
 	id := p.nextID(tok)
 	text := p.tokenText(tok)
-	if strings.HasPrefix(text, "b") || strings.HasPrefix(text, "B") {
-		text = text[1:]
-	} else if strings.HasPrefix(text, "rb") || strings.HasPrefix(text, "RB") || strings.HasPrefix(text, "rB") || strings.HasPrefix(text, "Rb") {
-		text = "r" + text[2:]
-	} else if strings.HasPrefix(text, "br") || strings.HasPrefix(text, "BR") || strings.HasPrefix(text, "bR") || strings.HasPrefix(text, "Br") {
-		text = text[1:]
-	}
-	unescaped, err := unescape(text, true)
+	unescaped, err := celstrings.ParseBytesLiteral(text)
 	if err != nil {
 		return p.reportError(tok, "%s", err.Error())
 	}
-	return p.helper.newLiteralBytes(id, []byte(unescaped))
+	return p.helper.newLiteralBytes(id, unescaped)
 }

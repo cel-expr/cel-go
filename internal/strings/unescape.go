@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//      http://www.apache.org/licenses/LICENSE-2.0
+//      https://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package parser
+// Package strings provides internal CEL string and bytes literal utilities.
+package strings
 
 import (
 	"errors"
@@ -20,10 +21,78 @@ import (
 	"unicode/utf8"
 )
 
+// ParseBytesLiteral parses a CEL bytes literal (e.g., `b"abc"`, `B'a\n'`,
+// `rb"\x41"`, `b"""..."""`) and returns the decoded byte slice.
+func ParseBytesLiteral(s string) ([]byte, error) {
+	if len(s) < 3 {
+		return nil, errors.New("invalid bytes literal")
+	}
+	var isRaw bool
+	var quoted string
+	switch {
+	case len(s) >= 4 && (strings.EqualFold(s[:2], "rb") || strings.EqualFold(s[:2], "br")):
+		isRaw = true
+		quoted = s[2:]
+	case s[0] == 'b' || s[0] == 'B':
+		quoted = s[1:]
+	default:
+		return nil, errors.New("invalid bytes literal")
+	}
+	if len(quoted) < 2 {
+		return nil, errors.New("invalid bytes literal")
+	}
+	var quote string
+	switch {
+	case len(quoted) >= 6 && (strings.HasPrefix(quoted, `"""`) || strings.HasPrefix(quoted, `'''`)):
+		quote = quoted[:3]
+	case quoted[0] == '"' || quoted[0] == '\'':
+		quote = quoted[:1]
+	default:
+		return nil, errors.New("invalid bytes literal")
+	}
+	if err := checkClosingQuote(quoted[len(quote):], quote); err != nil {
+		return nil, err
+	}
+	input := quoted
+	if isRaw {
+		input = "r" + quoted
+	}
+	unescaped, err := Unescape(input, true)
+	if err != nil {
+		return nil, err
+	}
+	return []byte(unescaped), nil
+}
+
+// checkClosingQuote ensures `source` ends with `closing` and contains no
+// earlier unescaped occurrences of `closing` (matches C++ CheckForClosingString).
+func checkClosingQuote(source, closing string) error {
+	closed := false
+	for i := 0; i+len(closing) <= len(source); {
+		if source[i] == '\\' {
+			// Skip the escape character and the escaped byte. If the backslash
+			// is the final byte, the closing quote is escaped/missing.
+			i += 2
+			continue
+		}
+		if strings.HasPrefix(source[i:], closing) {
+			if i+len(closing) < len(source) {
+				return errors.New("literal cannot contain unescaped closing quote")
+			}
+			closed = true
+		}
+		i++
+	}
+	if !closed {
+		return errors.New("literal missing closing quote")
+	}
+	return nil
+}
+
 // Unescape takes a quoted string, unquotes, and unescapes it.
 //
 // This function performs escaping compatible with GoogleSQL.
-func unescape(value string, isBytes bool) (string, error) {
+func Unescape(value string, isBytes bool) (string, error) {
 	// All strings normalize newlines to the \n representation.
 	value = newlineNormalizer.Replace(value)
 	n := len(value)

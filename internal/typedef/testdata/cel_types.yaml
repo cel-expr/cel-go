@@ -1,0 +1,316 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Struct with no fields (and unrecognized keys ignored for forward compatibility)
+- struct:
+    name: "NoFields"
+    unrecognized_struct_key: "ignored"
+  unrecognized_type_def_key: "ignored"
+
+# Enum with no constants (and unrecognized keys ignored for forward compatibility)
+- enum:
+    name: "NoConstants"
+    unrecognized_enum_key: "ignored"
+
+# Struct with aspects and defaults
+- struct:
+    name: "com.example.Item"
+    doc: "Store item entity."
+    aspects:
+      proto:
+        name: "com.example.proto.Item"
+    fields:
+      - name: "item_id"
+        type: "string"
+        doc: "Unique item identifier."
+        default: "default_id"
+        aspects:
+          proto:
+            id: 1
+            name: "itemId"
+      - name: "tags"
+        type: "list<string>"
+      - name: "attributes"
+        type: "map<string, dyn>"
+      - name: "nested_type"
+        type: "list<~T>"
+
+# All supported field types and default constant kinds (concise syntax)
+- struct:
+    name: "AllSupportedFieldTypes"
+    fields:
+      - name: "f_null"
+        type: "null"
+        default: ~
+      - name: "f_null_empty"
+        type: "null"
+        default: ""
+      - name: "f_bool"
+        type: "bool"
+        default: true
+      - name: "f_bool_false"
+        type: "bool"
+        default: false
+      - name: "f_int"
+        type: "int"
+        default: -42
+      - name: "f_uint"
+        type: "uint"
+        default: 100u
+      - name: "f_uint_upper"
+        type: "uint"
+        default: 200U
+        unrecognized_field_key: "ignored"
+      - name: "f_double"
+        type: "double"
+        default: 3.25
+      - name: "f_bytes"
+        type: "bytes"
+        default: b"\xff\x00\x01"
+      - name: "f_bytes_b64"
+        type: "bytes"
+        default: !!binary "AQID"
+      - name: "f_string"
+        type: "string"
+        default: "hello"
+      - name: "f_duration"
+        type: "duration"
+        default: "1h2m3s"
+      - name: "f_timestamp"
+        type: "timestamp"
+        default: "2026-01-02T03:04:05Z"
+      - name: "f_enum"
+        type: "com.example.Status"
+        default: "ACTIVE"
+      - name: "dyn_field"
+        type: "dyn"
+      - name: "struct_field"
+        type: "google.protobuf.Struct"
+      - name: "list_value_field"
+        type: "google.protobuf.ListValue"
+      - name: "any_field"
+        type: "any"
+      - name: "func_field"
+        type: "function<bool, int, string>"
+      - name: "bool_w_f"
+        type: "bool_wrapper"
+      - name: "int_w_f"
+        type: "int_wrapper"
+      - name: "uint_w_f"
+        type: "uint_wrapper"
+      - name: "double_w_f"
+        type: "double_wrapper"
+      - name: "string_w_f"
+        type: "string_wrapper"
+      - name: "bytes_w_f"
+        type: "bytes_wrapper"
+      - name: "list_unspec_f"
+        type: "list"
+      - name: "map_unspec_f"
+        type: "map"
+      - name: "type_int_f"
+        type: "type<int>"
+      - name: "type_unspec_f"
+        type: "type"
+      - name: "type_param_f"
+        type: "~T"
+      - name: "abstract_params_f"
+        type: "MyGeneric<int>"
+
+# Comprehensive structured type syntax
+- struct:
+    name: "StructuredFieldTypes"
+    fields:
+      - name: "null_f"
+        type:
+          type_name: "null"
+      - name: "bool_f"
+        type:
+          type_name: "bool"
+      - name: "int_f"
+        type:
+          type_name: "int"
+      - name: "uint_f"
+        type:
+          type_name: "uint"
+      - name: "double_f"
+        type:
+          type_name: "double"
+      - name: "string_f"
+        type:
+          type_name: "string"
+      - name: "bytes_f"
+        type:
+          type_name: "bytes"
+      - name: "any_f"
+        type:
+          type_name: "any"
+      - name: "timestamp_f"
+        type:
+          type_name: "timestamp"
+      - name: "duration_f"
+        type:
+          type_name: "duration"
+      - name: "dyn_f"
+        type:
+          type_name: "dyn"
+      - name: "bool_w_f"
+        type:
+          type_name: "bool_wrapper"
+      - name: "int_w_f"
+        type:
+          type_name: "int_wrapper"
+      - name: "uint_w_f"
+        type:
+          type_name: "uint_wrapper"
+      - name: "double_w_f"
+        type:
+          type_name: "double_wrapper"
+      - name: "string_w_f"
+        type:
+          type_name: "string_wrapper"
+      - name: "bytes_w_f"
+        type:
+          type_name: "bytes_wrapper"
+      - name: "list_value_f"
+        type:
+          type_name: "google.protobuf.ListValue"
+      - name: "struct_f"
+        type:
+          type_name: "google.protobuf.Struct"
+      - name: "type_int_f"
+        type:
+          type_name: "type"
+          params:
+            - type_name: "int"
+      - name: "type_unspec_f"
+        type:
+          type_name: "type"
+      - name: "list_str_f"
+        type:
+          type_name: "list"
+          params:
+            - type_name: "string"
+      - name: "list_unspec_f"
+        type:
+          type_name: "list"
+      - name: "map_str_dyn_f"
+        type:
+          type_name: "map"
+          params:
+            - type_name: "string"
+            - type_name: "dyn"
+      - name: "map_unspec_f"
+        type:
+          type_name: "map"
+      - name: "func_f"
+        type:
+          type_name: "function"
+          params:
+            - type_name: "bool"
+            - type_name: "int"
+            - type_name: "string"
+      - name: "type_param_f"
+        type:
+          type_name: "T"
+          is_type_param: true
+      - name: "abstract_f"
+        type:
+          type_name: "com.example.Status"
+      - name: "abstract_params_f"
+        type:
+          type_name: "MyGeneric"
+          params:
+            - type_name: "int"
+
+# Enum type definition
+- enum:
+    name: "com.example.OrderStatus"
+    doc: "Order lifecycle state."
+    aspects:
+      proto:
+        allow_alias: true
+        name: "com.example.proto.OrderStatus"
+    constants:
+      - name: "UNSPECIFIED"
+        doc: "Default value."
+      - name: "PENDING"
+      - name: "SHIPPED"
+        id: 10
+        doc: "Shipped to customer."
+        aspects:
+          proto:
+            name: "STATUS_SHIPPED"
+      - name: "DELIVERED"
+
+# Aspects with empty property maps (`{}` or `~`) produce empty Aspect entries.
+- struct:
+    name: "Item"
+    aspects:
+      proto: {}
+    fields:
+      - name: "f"
+        type: "int"
+        aspects:
+          proto: ~
+- enum:
+    name: "Status"
+    aspects:
+      proto: {}
+    constants:
+      - name: "A"
+        aspects:
+          proto: ~
+
+# Struct with typed aspect properties
+- struct:
+    name: "com.example.Order"
+    aspects:
+      proto:
+        name: "com.example.proto.Order"
+        version: 2
+        null_prop: ~
+        bool_prop: false
+        uint_prop: 42u
+        double_prop: 2.5
+        bytes_prop: b"\x01\x02"
+        binary_prop: !!binary "AQID"
+        tagged_str_prop: !!str "123"
+    fields:
+      - name: "order_id"
+        type: "string"
+        aspects:
+          proto:
+            id: 1
+            json_name: "orderId"
+
+# High-precision and special IEEE-754 double defaults
+- struct:
+    name: "Floats"
+    fields:
+      - name: "pi"
+        type: "double"
+        default: 3.141592653589793
+      - name: "pos_inf"
+        type: "double"
+        default: inf
+      - name: "neg_inf"
+        type: "double"
+        default: -inf
+      - name: "nan_val"
+        type: "double"
+        default: nan
+      - name: "neg_nan_val"
+        type: "double"
+        default: -nan

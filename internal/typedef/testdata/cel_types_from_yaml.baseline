@@ -1,0 +1,848 @@
+YAML SOURCE: cel_types.yaml
+--------------------------------------------------------------------
+TYPEDEF PROTO:
+types {
+  struct_type {
+    name: "NoFields"
+  }
+}
+types {
+  enum_type {
+    name: "NoConstants"
+  }
+}
+types {
+  struct_type {
+    name: "com.example.Item"
+    doc: "Store item entity."
+    fields {
+      name: "item_id"
+      type {
+        primitive: STRING
+      }
+      doc: "Unique item identifier."
+      default_value {
+        string_value: "default_id"
+      }
+      aspects {
+        key: "proto"
+        value {
+          properties {
+            key: "id"
+            value {
+              int64_value: 1
+            }
+          }
+          properties {
+            key: "name"
+            value {
+              string_value: "itemId"
+            }
+          }
+        }
+      }
+    }
+    fields {
+      name: "tags"
+      type {
+        list_type {
+          elem_type {
+            primitive: STRING
+          }
+        }
+      }
+    }
+    fields {
+      name: "attributes"
+      type {
+        map_type {
+          key_type {
+            primitive: STRING
+          }
+          value_type {
+            dyn {
+            }
+          }
+        }
+      }
+    }
+    fields {
+      name: "nested_type"
+      type {
+        list_type {
+          elem_type {
+            type_param: "T"
+          }
+        }
+      }
+    }
+    aspects {
+      key: "proto"
+      value {
+        properties {
+          key: "name"
+          value {
+            string_value: "com.example.proto.Item"
+          }
+        }
+      }
+    }
+  }
+}
+types {
+  struct_type {
+    name: "AllSupportedFieldTypes"
+    fields {
+      name: "f_null"
+      type {
+        null: NULL_VALUE
+      }
+      default_value {
+        null_value: NULL_VALUE
+      }
+    }
+    fields {
+      name: "f_null_empty"
+      type {
+        null: NULL_VALUE
+      }
+      default_value {
+        null_value: NULL_VALUE
+      }
+    }
+    fields {
+      name: "f_bool"
+      type {
+        primitive: BOOL
+      }
+      default_value {
+        bool_value: true
+      }
+    }
+    fields {
+      name: "f_bool_false"
+      type {
+        primitive: BOOL
+      }
+      default_value {
+        bool_value: false
+      }
+    }
+    fields {
+      name: "f_int"
+      type {
+        primitive: INT64
+      }
+      default_value {
+        int64_value: -42
+      }
+    }
+    fields {
+      name: "f_uint"
+      type {
+        primitive: UINT64
+      }
+      default_value {
+        uint64_value: 100
+      }
+    }
+    fields {
+      name: "f_uint_upper"
+      type {
+        primitive: UINT64
+      }
+      default_value {
+        uint64_value: 200
+      }
+    }
+    fields {
+      name: "f_double"
+      type {
+        primitive: DOUBLE
+      }
+      default_value {
+        double_value: 3.25
+      }
+    }
+    fields {
+      name: "f_bytes"
+      type {
+        primitive: BYTES
+      }
+      default_value {
+        bytes_value: "\377\000\001"
+      }
+    }
+    fields {
+      name: "f_bytes_b64"
+      type {
+        primitive: BYTES
+      }
+      default_value {
+        bytes_value: "\001\002\003"
+      }
+    }
+    fields {
+      name: "f_string"
+      type {
+        primitive: STRING
+      }
+      default_value {
+        string_value: "hello"
+      }
+    }
+    fields {
+      name: "f_duration"
+      type {
+        well_known: DURATION
+      }
+      default_value {
+        duration_value {
+          seconds: 3723
+        }
+      }
+    }
+    fields {
+      name: "f_timestamp"
+      type {
+        well_known: TIMESTAMP
+      }
+      default_value {
+        timestamp_value {
+          seconds: 1767323045
+        }
+      }
+    }
+    fields {
+      name: "f_enum"
+      type {
+        abstract_type {
+          name: "com.example.Status"
+        }
+      }
+      default_value {
+        string_value: "ACTIVE"
+      }
+    }
+    fields {
+      name: "dyn_field"
+      type {
+        dyn {
+        }
+      }
+    }
+    fields {
+      name: "struct_field"
+      type {
+        map_type {
+          key_type {
+            primitive: STRING
+          }
+          value_type {
+            dyn {
+            }
+          }
+        }
+      }
+    }
+    fields {
+      name: "list_value_field"
+      type {
+        list_type {
+          elem_type {
+            dyn {
+            }
+          }
+        }
+      }
+    }
+    fields {
+      name: "any_field"
+      type {
+        well_known: ANY
+      }
+    }
+    fields {
+      name: "func_field"
+      type {
+        function {
+          result_type {
+            primitive: BOOL
+          }
+          arg_types {
+            primitive: INT64
+          }
+          arg_types {
+            primitive: STRING
+          }
+        }
+      }
+    }
+    fields {
+      name: "bool_w_f"
+      type {
+        wrapper: BOOL
+      }
+    }
+    fields {
+      name: "int_w_f"
+      type {
+        wrapper: INT64
+      }
+    }
+    fields {
+      name: "uint_w_f"
+      type {
+        wrapper: UINT64
+      }
+    }
+    fields {
+      name: "double_w_f"
+      type {
+        wrapper: DOUBLE
+      }
+    }
+    fields {
+      name: "string_w_f"
+      type {
+        wrapper: STRING
+      }
+    }
+    fields {
+      name: "bytes_w_f"
+      type {
+        wrapper: BYTES
+      }
+    }
+    fields {
+      name: "list_unspec_f"
+      type {
+        list_type {
+          elem_type {
+            dyn {
+            }
+          }
+        }
+      }
+    }
+    fields {
+      name: "map_unspec_f"
+      type {
+        map_type {
+          key_type {
+            dyn {
+            }
+          }
+          value_type {
+            dyn {
+            }
+          }
+        }
+      }
+    }
+    fields {
+      name: "type_int_f"
+      type {
+        type {
+          primitive: INT64
+        }
+      }
+    }
+    fields {
+      name: "type_unspec_f"
+      type {
+        type {
+          dyn {
+          }
+        }
+      }
+    }
+    fields {
+      name: "type_param_f"
+      type {
+        type_param: "T"
+      }
+    }
+    fields {
+      name: "abstract_params_f"
+      type {
+        abstract_type {
+          name: "MyGeneric"
+          parameter_types {
+            primitive: INT64
+          }
+        }
+      }
+    }
+  }
+}
+types {
+  struct_type {
+    name: "StructuredFieldTypes"
+    fields {
+      name: "null_f"
+      type {
+        null: NULL_VALUE
+      }
+    }
+    fields {
+      name: "bool_f"
+      type {
+        primitive: BOOL
+      }
+    }
+    fields {
+      name: "int_f"
+      type {
+        primitive: INT64
+      }
+    }
+    fields {
+      name: "uint_f"
+      type {
+        primitive: UINT64
+      }
+    }
+    fields {
+      name: "double_f"
+      type {
+        primitive: DOUBLE
+      }
+    }
+    fields {
+      name: "string_f"
+      type {
+        primitive: STRING
+      }
+    }
+    fields {
+      name: "bytes_f"
+      type {
+        primitive: BYTES
+      }
+    }
+    fields {
+      name: "any_f"
+      type {
+        well_known: ANY
+      }
+    }
+    fields {
+      name: "timestamp_f"
+      type {
+        well_known: TIMESTAMP
+      }
+    }
+    fields {
+      name: "duration_f"
+      type {
+        well_known: DURATION
+      }
+    }
+    fields {
+      name: "dyn_f"
+      type {
+        dyn {
+        }
+      }
+    }
+    fields {
+      name: "bool_w_f"
+      type {
+        wrapper: BOOL
+      }
+    }
+    fields {
+      name: "int_w_f"
+      type {
+        wrapper: INT64
+      }
+    }
+    fields {
+      name: "uint_w_f"
+      type {
+        wrapper: UINT64
+      }
+    }
+    fields {
+      name: "double_w_f"
+      type {
+        wrapper: DOUBLE
+      }
+    }
+    fields {
+      name: "string_w_f"
+      type {
+        wrapper: STRING
+      }
+    }
+    fields {
+      name: "bytes_w_f"
+      type {
+        wrapper: BYTES
+      }
+    }
+    fields {
+      name: "list_value_f"
+      type {
+        list_type {
+          elem_type {
+            dyn {
+            }
+          }
+        }
+      }
+    }
+    fields {
+      name: "struct_f"
+      type {
+        map_type {
+          key_type {
+            primitive: STRING
+          }
+          value_type {
+            dyn {
+            }
+          }
+        }
+      }
+    }
+    fields {
+      name: "type_int_f"
+      type {
+        type {
+          primitive: INT64
+        }
+      }
+    }
+    fields {
+      name: "type_unspec_f"
+      type {
+        type {
+          dyn {
+          }
+        }
+      }
+    }
+    fields {
+      name: "list_str_f"
+      type {
+        list_type {
+          elem_type {
+            primitive: STRING
+          }
+        }
+      }
+    }
+    fields {
+      name: "list_unspec_f"
+      type {
+        list_type {
+          elem_type {
+            dyn {
+            }
+          }
+        }
+      }
+    }
+    fields {
+      name: "map_str_dyn_f"
+      type {
+        map_type {
+          key_type {
+            primitive: STRING
+          }
+          value_type {
+            dyn {
+            }
+          }
+        }
+      }
+    }
+    fields {
+      name: "map_unspec_f"
+      type {
+        map_type {
+          key_type {
+            dyn {
+            }
+          }
+          value_type {
+            dyn {
+            }
+          }
+        }
+      }
+    }
+    fields {
+      name: "func_f"
+      type {
+        function {
+          result_type {
+            primitive: BOOL
+          }
+          arg_types {
+            primitive: INT64
+          }
+          arg_types {
+            primitive: STRING
+          }
+        }
+      }
+    }
+    fields {
+      name: "type_param_f"
+      type {
+        type_param: "T"
+      }
+    }
+    fields {
+      name: "abstract_f"
+      type {
+        abstract_type {
+          name: "com.example.Status"
+        }
+      }
+    }
+    fields {
+      name: "abstract_params_f"
+      type {
+        abstract_type {
+          name: "MyGeneric"
+          parameter_types {
+            primitive: INT64
+          }
+        }
+      }
+    }
+  }
+}
+types {
+  enum_type {
+    name: "com.example.OrderStatus"
+    doc: "Order lifecycle state."
+    constants {
+      name: "UNSPECIFIED"
+      id: 0
+      doc: "Default value."
+    }
+    constants {
+      name: "PENDING"
+      id: 1
+    }
+    constants {
+      name: "SHIPPED"
+      id: 10
+      doc: "Shipped to customer."
+      aspects {
+        key: "proto"
+        value {
+          properties {
+            key: "name"
+            value {
+              string_value: "STATUS_SHIPPED"
+            }
+          }
+        }
+      }
+    }
+    constants {
+      name: "DELIVERED"
+      id: 3
+    }
+    aspects {
+      key: "proto"
+      value {
+        properties {
+          key: "allow_alias"
+          value {
+            bool_value: true
+          }
+        }
+        properties {
+          key: "name"
+          value {
+            string_value: "com.example.proto.OrderStatus"
+          }
+        }
+      }
+    }
+  }
+}
+types {
+  struct_type {
+    name: "Item"
+    fields {
+      name: "f"
+      type {
+        primitive: INT64
+      }
+      aspects {
+        key: "proto"
+        value {
+        }
+      }
+    }
+    aspects {
+      key: "proto"
+      value {
+      }
+    }
+  }
+}
+types {
+  enum_type {
+    name: "Status"
+    constants {
+      name: "A"
+      id: 0
+      aspects {
+        key: "proto"
+        value {
+        }
+      }
+    }
+    aspects {
+      key: "proto"
+      value {
+      }
+    }
+  }
+}
+types {
+  struct_type {
+    name: "com.example.Order"
+    fields {
+      name: "order_id"
+      type {
+        primitive: STRING
+      }
+      aspects {
+        key: "proto"
+        value {
+          properties {
+            key: "id"
+            value {
+              int64_value: 1
+            }
+          }
+          properties {
+            key: "json_name"
+            value {
+              string_value: "orderId"
+            }
+          }
+        }
+      }
+    }
+    aspects {
+      key: "proto"
+      value {
+        properties {
+          key: "binary_prop"
+          value {
+            bytes_value: "\001\002\003"
+          }
+        }
+        properties {
+          key: "bool_prop"
+          value {
+            bool_value: false
+          }
+        }
+        properties {
+          key: "bytes_prop"
+          value {
+            bytes_value: "\001\002"
+          }
+        }
+        properties {
+          key: "double_prop"
+          value {
+            double_value: 2.5
+          }
+        }
+        properties {
+          key: "name"
+          value {
+            string_value: "com.example.proto.Order"
+          }
+        }
+        properties {
+          key: "null_prop"
+          value {
+            null_value: NULL_VALUE
+          }
+        }
+        properties {
+          key: "tagged_str_prop"
+          value {
+            string_value: "123"
+          }
+        }
+        properties {
+          key: "uint_prop"
+          value {
+            uint64_value: 42
+          }
+        }
+        properties {
+          key: "version"
+          value {
+            int64_value: 2
+          }
+        }
+      }
+    }
+  }
+}
+types {
+  struct_type {
+    name: "Floats"
+    fields {
+      name: "pi"
+      type {
+        primitive: DOUBLE
+      }
+      default_value {
+        double_value: 3.1415926535897931
+      }
+    }
+    fields {
+      name: "pos_inf"
+      type {
+        primitive: DOUBLE
+      }
+      default_value {
+        double_value: inf
+      }
+    }
+    fields {
+      name: "neg_inf"
+      type {
+        primitive: DOUBLE
+      }
+      default_value {
+        double_value: -inf
+      }
+    }
+    fields {
+      name: "nan_val"
+      type {
+        primitive: DOUBLE
+      }
+      default_value {
+        double_value: nan
+      }
+    }
+    fields {
+      name: "neg_nan_val"
+      type {
+        primitive: DOUBLE
+      }
+      default_value {
+        double_value: nan
+      }
+    }
+  }
+}

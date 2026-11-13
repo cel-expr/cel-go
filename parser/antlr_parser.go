@@ -28,6 +28,7 @@ import (
 	"cel.dev/cel-go/common/operators"
 	"cel.dev/cel-go/common/runes"
 	"cel.dev/cel-go/common/types"
+	celstrings "cel.dev/cel-go/internal/strings"
 	"cel.dev/cel-go/parser/gen"
 )
 
@@ -792,7 +793,7 @@ func (p *antlrVisitor) visitSlice(expressions []gen.IExprContext) []ast.Expr {
 }
 
 func (p *antlrVisitor) unquote(ctx any, value string, isBytes bool) string {
-	text, err := unescape(value, isBytes)
+	text, err := celstrings.Unescape(value, isBytes)
 	if err != nil {
 		p.reportError(ctx, "%s", err.Error())
 		return value
