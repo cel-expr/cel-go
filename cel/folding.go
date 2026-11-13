@@ -40,6 +40,18 @@ func MaxConstantFoldIterations(limit int) ConstantFoldingOption {
 	}
 }
 
+// ConstantFoldCostLimit limits the runtime evaluation cost permitted for folding a single
+// sub-expression during optimization. Sub-expressions that exceed this limit are left unfolded
+// for runtime evaluation.
+//
+// Defaults to 1,000,000 if not set.
+func ConstantFoldCostLimit(limit uint64) ConstantFoldingOption {
+	return func(opt *constantFoldingOptimizer) (*constantFoldingOptimizer, error) {
+		opt.evalCostLimit = limit
+		return opt, nil
+	}
+}
+
 // FoldKnownValues adds an Activation which provides known values for the folding evaluator
 //
 // Any values the activation provides will be used by the constant folder and turned into
@@ -62,6 +74,7 @@ func FoldKnownValues(knownValues Activation) ConstantFoldingOption {
 func NewConstantFoldingOptimizer(opts ...ConstantFoldingOption) (ASTOptimizer, error) {
 	folder := &constantFoldingOptimizer{
 		maxFoldIterations: defaultMaxConstantFoldIterations,
+		evalCostLimit:     defaultConstantFoldCostLimit,
 	}
 	var err error
 	for _, o := range opts {
@@ -75,6 +88,7 @@ func NewConstantFoldingOptimizer(opts ...ConstantFoldingOption) (ASTOptimizer, e
 
 type constantFoldingOptimizer struct {
 	maxFoldIterations int
+	evalCostLimit     uint64
 	knownValues       Activation
 }
 
@@ -90,26 +104,48 @@ func (opt *constantFoldingOptimizer) Optimize(ctx *OptimizerContext, a *ast.AST)
 	// a logic bug with the selection of expressions.
 	constantExprMatcherCapture := func(e ast.NavigableExpr) bool { return opt.constantExprMatcher(ctx, a, e) }
 	foldableExprs := ast.MatchDescendants(root, constantExprMatcherCapture)
+	unfoldable := map[int64]bool{}
+	markAncestorsFoldable := func(e ast.NavigableExpr) {
+		delete(unfoldable, e.ID())
+		for p, found := e.Parent(); found; p, found = p.Parent() {
+			delete(unfoldable, p.ID())
+		}
+	}
 	foldCount := 0
 	for len(foldableExprs) != 0 && foldCount < opt.maxFoldIterations {
+		changed := false
 		for _, fold := range foldableExprs {
 			// If the expression could be folded because it's a non-strict call, and the
 			// branches are pruned, continue to the next fold.
 			if fold.Kind() == ast.CallKind && maybePruneBranches(ctx, a, fold) {
+				changed = true
+				markAncestorsFoldable(fold)
 				continue
 			}
 			// Async and late-bound function calls cannot be folded.
 			if fold.Kind() == ast.CallKind && (isLateBoundFunctionCall(ctx, fold) || isAsyncFunctionCall(ctx, fold)) {
 				continue
 			}
+			if unfoldable[fold.ID()] {
+				continue
+			}
 			// Otherwise, assume all context is needed to evaluate the expression.
 			err := opt.tryFold(ctx, a, fold)
 			// Ignore errors for identifiers or subexpressions that cannot be folded, since there is no guarantee that the environment
 			// has a value for them.
-			if err != nil && fold.Kind() != ast.IdentKind && !errors.Is(err, errCannotFold) {
-				ctx.ReportErrorAtID(fold.ID(), "constant-folding evaluation failed: %v", err.Error())
-				return a
+			if err != nil {
+				if fold.Kind() != ast.IdentKind && !errors.Is(err, errCannotFold) {
+					ctx.ReportErrorAtID(fold.ID(), "constant-folding evaluation failed: %v", err.Error())
+					return a
+				}
+				unfoldable[fold.ID()] = true
+				continue
 			}
+			changed = true
+			markAncestorsFoldable(fold)
+		}
+		if !changed {
+			break
 		}
 		foldCount++
 		foldableExprs = ast.MatchDescendants(root, constantExprMatcherCapture)
@@ -118,6 +154,9 @@ func (opt *constantFoldingOptimizer) Optimize(ctx *OptimizerContext, a *ast.AST)
 	// one last time. In this case, there's no guarantee they'll run, so we only update the
 	// target comprehension node with the literal value if the evaluation succeeds.
 	for _, compre := range ast.MatchDescendants(root, ast.KindMatcher(ast.ComprehensionKind)) {
+		if unfoldable[compre.ID()] {
+			continue
+		}
 		opt.tryFold(ctx, a, compre)
 	}
 
@@ -156,9 +195,13 @@ func (opt *constantFoldingOptimizer) tryFold(ctx *OptimizerContext, a *ast.AST, 
 		activation = NoVars()
 	}
 	navExpr := expr.(ast.NavigableExpr)
-	out, err := evaluateExpr(ctx, a, navExpr, activation)
+	out, err := evaluateExpr(ctx, a, navExpr, activation, opt.evalCostLimit)
 	if err != nil {
 		return err
+	}
+	budget := defaultMaxConstantFoldLiteralNodes
+	if !checkLiteralNodeBudget(ctx, out, &budget) {
+		return errCannotFold
 	}
 	// Update the fold expression to be a literal.
 	ctx.UpdateExpr(expr, ctx.NewLiteral(out))
@@ -166,7 +209,7 @@ func (opt *constantFoldingOptimizer) tryFold(ctx *OptimizerContext, a *ast.AST, 
 	return nil
 }
 
-func evaluateExpr(ctx *OptimizerContext, a *ast.AST, navigableExpr ast.NavigableExpr, activation Activation) (ref.Val, error) {
+func evaluateExpr(ctx *OptimizerContext, a *ast.AST, navigableExpr ast.NavigableExpr, activation Activation, evalCostLimit uint64) (ref.Val, error) {
 	partialActivation, err := ctx.PartialVars(activation)
 	if err != nil {
 		return nil, err
@@ -174,7 +217,7 @@ func evaluateExpr(ctx *OptimizerContext, a *ast.AST, navigableExpr ast.Navigable
 	subAST := &Ast{
 		impl: ast.NewCheckedAST(ast.NewAST(navigableExpr, a.SourceInfo()), a.TypeMap(), a.ReferenceMap()),
 	}
-	prg, err := ctx.Program(subAST)
+	prg, err := ctx.Program(subAST, CostLimit(evalCostLimit))
 	if err != nil {
 		return nil, errCannotFold
 	}
@@ -470,6 +513,15 @@ func pruneOptionalStructFields(ctx *OptimizerContext, e ast.Expr) {
 // For strongly typed values, the type-provider will be used to reconstruct the fields
 // which are present in the literal and their equivalent initialization values.
 func adaptLiteral(ctx *OptimizerContext, val ref.Val) (ast.Expr, error) {
+	budget := defaultMaxConstantFoldLiteralNodes
+	return adaptLiteralWithBudget(ctx, val, &budget)
+}
+
+func adaptLiteralWithBudget(ctx *OptimizerContext, val ref.Val, budget *int) (ast.Expr, error) {
+	if *budget <= 0 {
+		return nil, fmt.Errorf("failed to adapt %v to literal: node limit exceeded", val.Type())
+	}
+	*budget--
 	switch t := val.Type().(type) {
 	case *types.Type:
 		switch t {
@@ -477,11 +529,19 @@ func adaptLiteral(ctx *OptimizerContext, val ref.Val) (ast.Expr, error) {
 			types.NullType, types.StringType, types.UintType:
 			return ctx.NewLiteral(val), nil
 		case types.DurationType:
+			if *budget <= 0 {
+				return nil, fmt.Errorf("failed to adapt %v to literal: node limit exceeded", val.Type())
+			}
+			*budget--
 			return ctx.NewCall(
 				overloads.TypeConvertDuration,
 				ctx.NewLiteral(val.ConvertToType(types.StringType)),
 			), nil
 		case types.TimestampType:
+			if *budget <= 0 {
+				return nil, fmt.Errorf("failed to adapt %v to literal: node limit exceeded", val.Type())
+			}
+			*budget--
 			return ctx.NewCall(
 				overloads.TypeConvertTimestamp,
 				ctx.NewLiteral(val.ConvertToType(types.StringType)),
@@ -491,7 +551,7 @@ func adaptLiteral(ctx *OptimizerContext, val ref.Val) (ast.Expr, error) {
 			if !opt.HasValue() {
 				return ctx.NewCall("optional.none"), nil
 			}
-			target, err := adaptLiteral(ctx, opt.GetValue())
+			target, err := adaptLiteralWithBudget(ctx, opt.GetValue(), budget)
 			if err != nil {
 				return nil, err
 			}
@@ -503,12 +563,16 @@ func adaptLiteral(ctx *OptimizerContext, val ref.Val) (ast.Expr, error) {
 			if !ok {
 				return nil, fmt.Errorf("failed to adapt %v to literal", val)
 			}
-			elems := make([]ast.Expr, l.Size().(types.Int))
+			size, ok := l.Size().(types.Int)
+			if !ok || size < 0 || int64(size) > int64(*budget) {
+				return nil, fmt.Errorf("failed to adapt list of size %v to literal: node limit exceeded", l.Size())
+			}
+			elems := make([]ast.Expr, size)
 			idx := 0
 			it := l.Iterator()
 			for it.HasNext() == types.True {
 				elemVal := it.Next()
-				elemExpr, err := adaptLiteral(ctx, elemVal)
+				elemExpr, err := adaptLiteralWithBudget(ctx, elemVal, budget)
 				if err != nil {
 					return nil, err
 				}
@@ -521,17 +585,21 @@ func adaptLiteral(ctx *OptimizerContext, val ref.Val) (ast.Expr, error) {
 			if !ok {
 				return nil, fmt.Errorf("failed to adapt %v to literal", val)
 			}
-			entries := make([]ast.EntryExpr, m.Size().(types.Int))
+			size, ok := m.Size().(types.Int)
+			if !ok || size < 0 || int64(size) > int64(*budget)/2 {
+				return nil, fmt.Errorf("failed to adapt map of size %v to literal: node limit exceeded", m.Size())
+			}
+			entries := make([]ast.EntryExpr, size)
 			idx := 0
 			it := m.Iterator()
 			for it.HasNext() == types.True {
 				keyVal := it.Next()
-				keyExpr, err := adaptLiteral(ctx, keyVal)
+				keyExpr, err := adaptLiteralWithBudget(ctx, keyVal, budget)
 				if err != nil {
 					return nil, err
 				}
 				valVal := m.Get(keyVal)
-				valExpr, err := adaptLiteral(ctx, valVal)
+				valExpr, err := adaptLiteralWithBudget(ctx, valVal, budget)
 				if err != nil {
 					return nil, err
 				}
@@ -554,7 +622,7 @@ func adaptLiteral(ctx *OptimizerContext, val ref.Val) (ast.Expr, error) {
 					continue
 				}
 				fieldVal := indexer.Get(field)
-				fieldExpr, err := adaptLiteral(ctx, fieldVal)
+				fieldExpr, err := adaptLiteralWithBudget(ctx, fieldVal, budget)
 				if err != nil {
 					return nil, err
 				}
@@ -564,6 +632,87 @@ func adaptLiteral(ctx *OptimizerContext, val ref.Val) (ast.Expr, error) {
 		}
 	}
 	return nil, fmt.Errorf("failed to adapt %v to literal", val)
+}
+
+func checkLiteralNodeBudget(ctx *OptimizerContext, val ref.Val, budget *int) bool {
+	if *budget <= 0 {
+		return false
+	}
+	*budget--
+	t, ok := val.Type().(*types.Type)
+	if !ok {
+		return true
+	}
+	switch t {
+	case types.BoolType, types.BytesType, types.DoubleType, types.IntType,
+		types.NullType, types.StringType, types.UintType, types.TypeType:
+		return true
+	case types.DurationType, types.TimestampType:
+		if *budget <= 0 {
+			return false
+		}
+		*budget--
+		return true
+	case types.OptionalType:
+		opt := val.(*types.Optional)
+		if !opt.HasValue() {
+			return true
+		}
+		return checkLiteralNodeBudget(ctx, opt.GetValue(), budget)
+	case types.ListType:
+		l, ok := val.(traits.Lister)
+		if !ok {
+			return true
+		}
+		size, ok := l.Size().(types.Int)
+		if !ok || size < 0 || int64(size) > int64(*budget) {
+			return false
+		}
+		it := l.Iterator()
+		for it.HasNext() == types.True {
+			if !checkLiteralNodeBudget(ctx, it.Next(), budget) {
+				return false
+			}
+		}
+		return true
+	case types.MapType:
+		m, ok := val.(traits.Mapper)
+		if !ok {
+			return true
+		}
+		size, ok := m.Size().(types.Int)
+		if !ok || size < 0 || int64(size) > int64(*budget)/2 {
+			return false
+		}
+		it := m.Iterator()
+		for it.HasNext() == types.True {
+			keyVal := it.Next()
+			if !checkLiteralNodeBudget(ctx, keyVal, budget) || !checkLiteralNodeBudget(ctx, m.Get(keyVal), budget) {
+				return false
+			}
+		}
+		return true
+	default:
+		fields, found := ctx.CELTypeProvider().FindStructFieldNames(t.TypeName())
+		if !found {
+			return true
+		}
+		tester, okTester := val.(traits.FieldTester)
+		indexer, okIndexer := val.(traits.Indexer)
+		if !okTester || !okIndexer {
+			return true
+		}
+		for _, f := range fields {
+			field := types.String(f)
+			if tester.IsSet(field) != types.True {
+				continue
+			}
+			if !checkLiteralNodeBudget(ctx, indexer.Get(field), budget) {
+				return false
+			}
+		}
+		return true
+	}
 }
 
 // constantExprMatcher matches calls, select statements, and comprehensions whose arguments
@@ -820,4 +969,11 @@ var (
 
 const (
 	defaultMaxConstantFoldIterations = 100
+	// defaultConstantFoldCostLimit bounds the runtime evaluation cost of folding a single
+	// candidate sub-expression. Sub-expressions that exceed this limit are left unfolded for
+	// runtime evaluation, where the caller's own CostLimit (if any) applies.
+	defaultConstantFoldCostLimit = 1_000_000
+	// defaultMaxConstantFoldLiteralNodes caps the maximum AST nodes produced when adapting a
+	// folded aggregate value into literal AST nodes (matching the default ExpressionNodeLimit).
+	defaultMaxConstantFoldLiteralNodes = 100_000
 )
