@@ -14,11 +14,18 @@ go_library(
     deps = [
         "//common:go_default_library",
         "//common/decls:go_default_library",
-        "//common/functions:go_default_library",
         "//common/operators:go_default_library",
         "//common/overloads:go_default_library",
+        "//common/stdlib/bindings:go_default_library",
         "//common/types:go_default_library",
-        "//common/types/ref:go_default_library",
-        "//common/types/traits:go_default_library",
+    ],
+)
+
+go_test(
+    name = "go_default_test",
+    srcs = ["standard_test.go"],
+    embed = [":go_default_library"],
+    deps = [
+        "//common/functions:go_default_library",
     ],
 )

@@ -16,28 +16,20 @@
 package stdlib
 
 import (
-	"fmt"
-	"math"
-	"strconv"
-	"strings"
 	"sync"
-	"time"
 
 	"cel.dev/cel-go/common"
 	"cel.dev/cel-go/common/decls"
-	"cel.dev/cel-go/common/functions"
 	"cel.dev/cel-go/common/operators"
 	"cel.dev/cel-go/common/overloads"
+	"cel.dev/cel-go/common/stdlib/bindings"
 	"cel.dev/cel-go/common/types"
-	"cel.dev/cel-go/common/types/ref"
-	"cel.dev/cel-go/common/types/traits"
 )
 
 var (
 	initStandardOnce sync.Once
 	stdFunctions     []*decls.FunctionDecl
 	stdTypes         []*decls.VariableDecl
-	utcTZ            = types.String("UTC")
 )
 
 func initStandard() {
@@ -73,7 +65,7 @@ func initStandard() {
 				decls.OverloadExamples(
 					`'hello'.contains('lo') ? 'hi' : 'bye' // 'hi'`,
 					`32 % 3 == 0 ? 'divisible' : 'not divisible' // 'not divisible'`)),
-			decls.SingletonFunctionBinding(noFunctionOverrides)),
+			singletonFunctionBinding(operators.Conditional)),
 
 		function(operators.LogicalAnd,
 			decls.FunctionDocs(
@@ -86,7 +78,7 @@ func initStandard() {
 					`true && false  // false`,
 					`error && true  // error`,
 					`error && false // false`)),
-			decls.SingletonBinaryBinding(noBinaryOverrides)),
+			singletonBinaryBinding(operators.LogicalAnd)),
 
 		function(operators.LogicalOr,
 			decls.FunctionDocs(
@@ -99,7 +91,7 @@ func initStandard() {
 					`false || false // false`,
 					`error || true // true`,
 					`error || error // true`)),
-			decls.SingletonBinaryBinding(noBinaryOverrides)),
+			singletonBinaryBinding(operators.LogicalOr)),
 
 		function(operators.LogicalNot,
 			decls.FunctionDocs(`logically negate a boolean value.`),
@@ -108,27 +100,21 @@ func initStandard() {
 					`!true // false`,
 					`!false // true`,
 					`!error // error`)),
-			decls.SingletonUnaryBinding(func(val ref.Val) ref.Val {
-				b, ok := val.(types.Bool)
-				if !ok {
-					return types.MaybeNoSuchOverloadErr(val)
-				}
-				return b.Negate()
-			})),
+			singletonUnaryBinding(operators.LogicalNot)),
 
 		// Comprehension short-circuiting related function
 		function(operators.NotStrictlyFalse,
 			decls.DisableTypeGuards(true),
 			decls.Overload(overloads.NotStrictlyFalse, argTypes(types.BoolType), types.BoolType,
 				decls.OverloadIsNonStrict(),
-				decls.UnaryBinding(notStrictlyFalse))),
+				unaryBinding(overloads.NotStrictlyFalse))),
 		// Deprecated: __not_strictly_false__
 		function(operators.OldNotStrictlyFalse,
 			decls.DisableTypeGuards(true),
 			decls.DisableDeclaration(true), // safe deprecation
 			decls.Overload(operators.OldNotStrictlyFalse, argTypes(types.BoolType), types.BoolType,
 				decls.OverloadIsNonStrict(),
-				decls.UnaryBinding(notStrictlyFalse))),
+				unaryBinding(overloads.NotStrictlyFalse))),
 
 		// Equality / inequality. Special-cased in the interpreter
 		function(operators.Equals,
@@ -140,7 +126,7 @@ func initStandard() {
 					`bytes('hello') == b'hello' // true`,
 					`duration('1h') == duration('60m') // true`,
 					`dyn(3.0) == 3 // true`)),
-			decls.SingletonBinaryBinding(noBinaryOverrides)),
+			singletonBinaryBinding(operators.Equals)),
 		function(operators.NotEquals,
 			decls.FunctionDocs(`compare two values of the same type for inequality`),
 			decls.Overload(overloads.NotEquals, argTypes(paramA, paramA), types.BoolType,
@@ -148,7 +134,7 @@ func initStandard() {
 					`1 != 2     // true`,
 					`"a" != "a" // false`,
 					`3.0 != 3.1 // true`)),
-			decls.SingletonBinaryBinding(noBinaryOverrides)),
+			singletonBinaryBinding(operators.NotEquals)),
 
 		// Mathematical operators
 		function(operators.Add,
@@ -182,9 +168,7 @@ func initStandard() {
 			decls.Overload(overloads.AddUint64,
 				argTypes(types.UintType, types.UintType), types.UintType,
 				decls.OverloadExamples(`22u + 33u // 55u`)),
-			decls.SingletonBinaryBinding(func(lhs, rhs ref.Val) ref.Val {
-				return lhs.(traits.Adder).Add(rhs)
-			}, traits.AdderType)),
+			singletonBinaryBinding(operators.Add)),
 		function(operators.Divide,
 			decls.FunctionDocs(`divide two numbers`),
 			decls.Overload(overloads.DivideDouble,
@@ -196,9 +180,7 @@ func initStandard() {
 			decls.Overload(overloads.DivideUint64,
 				argTypes(types.UintType, types.UintType), types.UintType,
 				decls.OverloadExamples(`42u / 2u // 21u`)),
-			decls.SingletonBinaryBinding(func(lhs, rhs ref.Val) ref.Val {
-				return lhs.(traits.Divider).Divide(rhs)
-			}, traits.DividerType)),
+			singletonBinaryBinding(operators.Divide)),
 		function(operators.Modulo,
 			decls.FunctionDocs(`compute the modulus of one integer into another`),
 			decls.Overload(overloads.ModuloInt64,
@@ -207,9 +189,7 @@ func initStandard() {
 			decls.Overload(overloads.ModuloUint64,
 				argTypes(types.UintType, types.UintType), types.UintType,
 				decls.OverloadExamples(`6u % 3u // 0u`)),
-			decls.SingletonBinaryBinding(func(lhs, rhs ref.Val) ref.Val {
-				return lhs.(traits.Modder).Modulo(rhs)
-			}, traits.ModderType)),
+			singletonBinaryBinding(operators.Modulo)),
 		function(operators.Multiply,
 			decls.FunctionDocs(`multiply two numbers`),
 			decls.Overload(overloads.MultiplyDouble,
@@ -221,21 +201,14 @@ func initStandard() {
 			decls.Overload(overloads.MultiplyUint64,
 				argTypes(types.UintType, types.UintType), types.UintType,
 				decls.OverloadExamples(`13u * 3u // 39u`)),
-			decls.SingletonBinaryBinding(func(lhs, rhs ref.Val) ref.Val {
-				return lhs.(traits.Multiplier).Multiply(rhs)
-			}, traits.MultiplierType)),
+			singletonBinaryBinding(operators.Multiply)),
 		function(operators.Negate,
 			decls.FunctionDocs(`negate a numeric value`),
 			decls.Overload(overloads.NegateDouble, argTypes(types.DoubleType), types.DoubleType,
 				decls.OverloadExamples(`-(3.14) // -3.14`)),
 			decls.Overload(overloads.NegateInt64, argTypes(types.IntType), types.IntType,
 				decls.OverloadExamples(`-(5) // -5`)),
-			decls.SingletonUnaryBinding(func(val ref.Val) ref.Val {
-				if types.IsBool(val) {
-					return types.MaybeNoSuchOverloadErr(val)
-				}
-				return val.(traits.Negater).Negate()
-			}, traits.NegatorType)),
+			singletonUnaryBinding(operators.Negate)),
 		function(operators.Subtract,
 			decls.FunctionDocs(`subtract two numbers, or two time-related values`),
 			decls.Overload(overloads.SubtractDouble,
@@ -263,9 +236,7 @@ func initStandard() {
 					`// the subtraction result must be positive, otherwise an overflow`,
 					`// error is generated.`,
 					`42u - 3u // 39u`))),
-			decls.SingletonBinaryBinding(func(lhs, rhs ref.Val) ref.Val {
-				return lhs.(traits.Subtractor).Subtract(rhs)
-			}, traits.SubtractorType)),
+			singletonBinaryBinding(operators.Subtract)),
 
 		// Relations operators
 
@@ -315,19 +286,7 @@ func initStandard() {
 			decls.Overload(overloads.LessDuration,
 				argTypes(types.DurationType, types.DurationType), types.BoolType,
 				decls.OverloadExamples(`duration('1ms') < duration('1s') // true`)),
-			decls.SingletonBinaryBinding(func(lhs, rhs ref.Val) ref.Val {
-				if isNaN(lhs) || isNaN(rhs) {
-					return types.False
-				}
-				cmp := lhs.(traits.Comparer).Compare(rhs)
-				if cmp == types.IntNegOne {
-					return types.True
-				}
-				if cmp == types.IntOne || cmp == types.IntZero {
-					return types.False
-				}
-				return cmp
-			}, traits.ComparerType)),
+			singletonBinaryBinding(operators.Less)),
 
 		function(operators.LessEquals,
 			decls.FunctionDocs(
@@ -375,19 +334,7 @@ func initStandard() {
 			decls.Overload(overloads.LessEqualsDuration,
 				argTypes(types.DurationType, types.DurationType), types.BoolType,
 				decls.OverloadExamples(`duration('1ms') <= duration('1s') // true`)),
-			decls.SingletonBinaryBinding(func(lhs, rhs ref.Val) ref.Val {
-				if isNaN(lhs) || isNaN(rhs) {
-					return types.False
-				}
-				cmp := lhs.(traits.Comparer).Compare(rhs)
-				if cmp == types.IntNegOne || cmp == types.IntZero {
-					return types.True
-				}
-				if cmp == types.IntOne {
-					return types.False
-				}
-				return cmp
-			}, traits.ComparerType)),
+			singletonBinaryBinding(operators.LessEquals)),
 
 		function(operators.Greater,
 			decls.FunctionDocs(
@@ -435,19 +382,7 @@ func initStandard() {
 			decls.Overload(overloads.GreaterDuration,
 				argTypes(types.DurationType, types.DurationType), types.BoolType,
 				decls.OverloadExamples(`duration('1ms') > duration('1us') // true`)),
-			decls.SingletonBinaryBinding(func(lhs, rhs ref.Val) ref.Val {
-				if isNaN(lhs) || isNaN(rhs) {
-					return types.False
-				}
-				cmp := lhs.(traits.Comparer).Compare(rhs)
-				if cmp == types.IntOne {
-					return types.True
-				}
-				if cmp == types.IntNegOne || cmp == types.IntZero {
-					return types.False
-				}
-				return cmp
-			}, traits.ComparerType)),
+			singletonBinaryBinding(operators.Greater)),
 
 		function(operators.GreaterEquals,
 			decls.FunctionDocs(
@@ -495,19 +430,7 @@ func initStandard() {
 			decls.Overload(overloads.GreaterEqualsDuration,
 				argTypes(types.DurationType, types.DurationType), types.BoolType,
 				decls.OverloadExamples(`duration('60s') >= duration('1m') // true`)),
-			decls.SingletonBinaryBinding(func(lhs, rhs ref.Val) ref.Val {
-				if isNaN(lhs) || isNaN(rhs) {
-					return types.False
-				}
-				cmp := lhs.(traits.Comparer).Compare(rhs)
-				if cmp == types.IntOne || cmp == types.IntZero {
-					return types.True
-				}
-				if cmp == types.IntNegOne {
-					return types.False
-				}
-				return cmp
-			}, traits.ComparerType)),
+			singletonBinaryBinding(operators.GreaterEquals)),
 
 		// Indexing
 		function(operators.Index,
@@ -518,9 +441,7 @@ func initStandard() {
 				decls.OverloadExamples(
 					`{'key': 'value'}['key'] // 'value'`,
 					`{'key': 'value'}['missing'] // error`)),
-			decls.SingletonBinaryBinding(func(lhs, rhs ref.Val) ref.Val {
-				return lhs.(traits.Indexer).Get(rhs)
-			}, traits.IndexerType)),
+			singletonBinaryBinding(operators.Index)),
 
 		// Collections operators
 		function(operators.In,
@@ -533,17 +454,17 @@ func initStandard() {
 				decls.OverloadExamples(
 					`'key1' in {'key1': 'value1', 'key2': 'value2'} // true`,
 					`3 in {1: "one", 2: "two"} // false`)),
-			decls.SingletonBinaryBinding(inAggregate)),
+			singletonBinaryBinding(operators.In)),
 		function(operators.OldIn,
 			decls.DisableDeclaration(true), // safe deprecation
 			decls.Overload(overloads.InList, argTypes(paramA, listOfA), types.BoolType),
 			decls.Overload(overloads.InMap, argTypes(paramA, mapOfAB), types.BoolType),
-			decls.SingletonBinaryBinding(inAggregate)),
+			singletonBinaryBinding(operators.In)),
 		function(overloads.DeprecatedIn,
 			decls.DisableDeclaration(true), // safe deprecation
 			decls.Overload(overloads.InList, argTypes(paramA, listOfA), types.BoolType),
 			decls.Overload(overloads.InMap, argTypes(paramA, mapOfAB), types.BoolType),
-			decls.SingletonBinaryBinding(inAggregate)),
+			singletonBinaryBinding(operators.In)),
 		function(overloads.Size,
 			decls.FunctionDocs(
 				`compute the size of a list or map, the number of characters in a string,`,
@@ -564,9 +485,7 @@ func initStandard() {
 				decls.OverloadExamples(`size('hello') // 5`)),
 			decls.MemberOverload(overloads.SizeStringInst, argTypes(types.StringType), types.IntType,
 				decls.OverloadExamples(`'hello'.size() // 5`)),
-			decls.SingletonUnaryBinding(func(val ref.Val) ref.Val {
-				return val.(traits.Sizer).Size()
-			}, traits.SizerType)),
+			singletonUnaryBinding(overloads.Size)),
 
 		// Type conversions
 		function(overloads.TypeConvertType,
@@ -577,7 +496,7 @@ func initStandard() {
 					`type('hello') // string`,
 					`type(int) // type`,
 					`type(type) // type`)),
-			decls.SingletonUnaryBinding(convertToType(types.TypeType))),
+			singletonUnaryBinding(overloads.TypeConvertType)),
 
 		// Bool conversions
 		function(overloads.TypeConvertBool,
@@ -585,133 +504,133 @@ func initStandard() {
 			decls.Overload(overloads.BoolToBool, argTypes(types.BoolType), types.BoolType,
 
 				decls.OverloadExamples(`bool(true) // true`),
-				decls.UnaryBinding(identity)),
+				unaryBinding(overloads.BoolToBool)),
 			decls.Overload(overloads.StringToBool, argTypes(types.StringType), types.BoolType,
 
 				decls.OverloadExamples(`bool('true') // true`, `bool('false') // false`),
-				decls.UnaryBinding(convertToType(types.BoolType)))),
+				unaryBinding(overloads.StringToBool))),
 
 		// Bytes conversions
 		function(overloads.TypeConvertBytes,
 			decls.FunctionDocs(`convert a value to bytes`),
 			decls.Overload(overloads.BytesToBytes, argTypes(types.BytesType), types.BytesType,
 				decls.OverloadExamples(`bytes(b'abc') // b'abc'`),
-				decls.UnaryBinding(identity)),
+				unaryBinding(overloads.BoolToBool)),
 			decls.Overload(overloads.StringToBytes, argTypes(types.StringType), types.BytesType,
 				decls.OverloadExamples(`bytes('hello') // b'hello'`),
-				decls.UnaryBinding(convertToType(types.BytesType)))),
+				unaryBinding(overloads.StringToBytes))),
 
 		// Double conversions
 		function(overloads.TypeConvertDouble,
 			decls.FunctionDocs(`convert a value to a double`),
 			decls.Overload(overloads.DoubleToDouble, argTypes(types.DoubleType), types.DoubleType,
 				decls.OverloadExamples(`double(1.23) // 1.23`),
-				decls.UnaryBinding(identity)),
+				unaryBinding(overloads.BoolToBool)),
 			decls.Overload(overloads.IntToDouble, argTypes(types.IntType), types.DoubleType,
 				decls.OverloadExamples(`double(123) // 123.0`),
-				decls.UnaryBinding(convertToType(types.DoubleType))),
+				unaryBinding(overloads.IntToDouble)),
 			decls.Overload(overloads.StringToDouble, argTypes(types.StringType), types.DoubleType,
 				decls.OverloadExamples(`double('1.23') // 1.23`),
-				decls.UnaryBinding(convertToType(types.DoubleType))),
+				unaryBinding(overloads.IntToDouble)),
 			decls.Overload(overloads.UintToDouble, argTypes(types.UintType), types.DoubleType,
 				decls.OverloadExamples(`double(123u) // 123.0`),
-				decls.UnaryBinding(convertToType(types.DoubleType)))),
+				unaryBinding(overloads.IntToDouble))),
 
 		// Duration conversions
 		function(overloads.TypeConvertDuration,
 			decls.FunctionDocs(`convert a value to a google.protobuf.Duration`),
 			decls.Overload(overloads.DurationToDuration, argTypes(types.DurationType), types.DurationType,
 				decls.OverloadExamples(`duration(duration('1s')) // duration('1s')`),
-				decls.UnaryBinding(identity)),
+				unaryBinding(overloads.BoolToBool)),
 			decls.Overload(overloads.StringToDuration, argTypes(types.StringType), types.DurationType,
 				decls.OverloadExamples(`duration('1h2m3s') // duration('3723s')`),
-				decls.UnaryBinding(convertToType(types.DurationType)))),
+				unaryBinding(overloads.StringToDuration))),
 
 		// Dyn conversions
 		function(overloads.TypeConvertDyn,
 			decls.FunctionDocs(`indicate that the type is dynamic for type-checking purposes`),
 			decls.Overload(overloads.ToDyn, argTypes(paramA), types.DynType,
 				decls.OverloadExamples(`dyn(1) // 1`)),
-			decls.SingletonUnaryBinding(identity)),
+			singletonUnaryBinding(overloads.TypeConvertDyn)),
 
 		// Int conversions
 		function(overloads.TypeConvertInt,
 			decls.FunctionDocs(`convert a value to an int`),
 			decls.Overload(overloads.IntToInt, argTypes(types.IntType), types.IntType,
 				decls.OverloadExamples(`int(123) // 123`),
-				decls.UnaryBinding(identity)),
+				unaryBinding(overloads.BoolToBool)),
 			decls.Overload(overloads.DoubleToInt, argTypes(types.DoubleType), types.IntType,
 				decls.OverloadExamples(`int(123.45) // 123`),
-				decls.UnaryBinding(convertToType(types.IntType))),
+				unaryBinding(overloads.DoubleToInt)),
 			decls.Overload(overloads.DurationToInt, argTypes(types.DurationType), types.IntType,
 				decls.OverloadExamples(`int(duration('1s')) // 1000000000`),
-				decls.UnaryBinding(convertToType(types.IntType))), // Duration to nanoseconds
+				unaryBinding(overloads.DoubleToInt)), // Duration to nanoseconds
 			decls.Overload(overloads.StringToInt, argTypes(types.StringType), types.IntType,
 				decls.OverloadExamples(`int('123') // 123`, `int('-456') // -456`),
-				decls.UnaryBinding(convertToType(types.IntType))),
+				unaryBinding(overloads.DoubleToInt)),
 			decls.Overload(overloads.TimestampToInt, argTypes(types.TimestampType), types.IntType,
 				decls.OverloadExamples(`int(timestamp('1970-01-01T00:00:01Z')) // 1`),
-				decls.UnaryBinding(convertToType(types.IntType))), // Timestamp to epoch seconds
+				unaryBinding(overloads.DoubleToInt)), // Timestamp to epoch seconds
 			decls.Overload(overloads.UintToInt, argTypes(types.UintType), types.IntType,
 				decls.OverloadExamples(`int(123u) // 123`),
-				decls.UnaryBinding(convertToType(types.IntType)))),
+				unaryBinding(overloads.DoubleToInt))),
 
 		// String conversions
 		function(overloads.TypeConvertString,
 			decls.FunctionDocs(`convert a value to a string`),
 			decls.Overload(overloads.StringToString, argTypes(types.StringType), types.StringType,
 				decls.OverloadExamples(`string('hello') // 'hello'`),
-				decls.UnaryBinding(identity)),
+				unaryBinding(overloads.BoolToBool)),
 			decls.Overload(overloads.BoolToString, argTypes(types.BoolType), types.StringType,
 				decls.OverloadExamples(`string(true) // 'true'`),
-				decls.UnaryBinding(convertToType(types.StringType))),
+				unaryBinding(overloads.BoolToString)),
 			decls.Overload(overloads.BytesToString, argTypes(types.BytesType), types.StringType,
 				decls.OverloadExamples(`string(b'hello') // 'hello'`),
-				decls.UnaryBinding(convertToType(types.StringType))),
+				unaryBinding(overloads.BoolToString)),
 			decls.Overload(overloads.DoubleToString, argTypes(types.DoubleType), types.StringType,
-				decls.UnaryBinding(convertToType(types.StringType)),
+				unaryBinding(overloads.BoolToString),
 				decls.OverloadExamples(`string(-1.23e4) // '-12300'`)),
 			decls.Overload(overloads.DurationToString, argTypes(types.DurationType), types.StringType,
 				decls.OverloadExamples(`string(duration('1h30m')) // '5400s'`),
-				decls.UnaryBinding(convertToType(types.StringType))),
+				unaryBinding(overloads.BoolToString)),
 			decls.Overload(overloads.IntToString, argTypes(types.IntType), types.StringType,
 				decls.OverloadExamples(`string(-123) // '-123'`),
-				decls.UnaryBinding(convertToType(types.StringType))),
+				unaryBinding(overloads.BoolToString)),
 			decls.Overload(overloads.TimestampToString, argTypes(types.TimestampType), types.StringType,
 				decls.OverloadExamples(`string(timestamp('1970-01-01T00:00:00Z')) // '1970-01-01T00:00:00Z'`),
-				decls.UnaryBinding(convertToType(types.StringType))),
+				unaryBinding(overloads.BoolToString)),
 			decls.Overload(overloads.UintToString, argTypes(types.UintType), types.StringType,
 				decls.OverloadExamples(`string(123u) // '123'`),
-				decls.UnaryBinding(convertToType(types.StringType)))),
+				unaryBinding(overloads.BoolToString))),
 
 		// Timestamp conversions
 		function(overloads.TypeConvertTimestamp,
 			decls.FunctionDocs(`convert a value to a google.protobuf.Timestamp`),
 			decls.Overload(overloads.TimestampToTimestamp, argTypes(types.TimestampType), types.TimestampType,
 				decls.OverloadExamples(`timestamp(timestamp('2023-01-01T00:00:00Z')) // timestamp('2023-01-01T00:00:00Z')`),
-				decls.UnaryBinding(identity)),
+				unaryBinding(overloads.BoolToBool)),
 			decls.Overload(overloads.IntToTimestamp, argTypes(types.IntType), types.TimestampType,
 				decls.OverloadExamples(`timestamp(1) // timestamp('1970-01-01T00:00:01Z')`), // Epoch seconds to Timestamp
-				decls.UnaryBinding(convertToType(types.TimestampType))),
+				unaryBinding(overloads.IntToTimestamp)),
 			decls.Overload(overloads.StringToTimestamp, argTypes(types.StringType), types.TimestampType,
 				decls.OverloadExamples(`timestamp('2025-01-01T12:34:56Z') // timestamp('2025-01-01T12:34:56Z')`),
-				decls.UnaryBinding(convertToType(types.TimestampType)))),
+				unaryBinding(overloads.IntToTimestamp))),
 
 		// Uint conversions
 		function(overloads.TypeConvertUint,
 			decls.FunctionDocs(`convert a value to a uint`),
 			decls.Overload(overloads.UintToUint, argTypes(types.UintType), types.UintType,
 				decls.OverloadExamples(`uint(123u) // 123u`),
-				decls.UnaryBinding(identity)),
+				unaryBinding(overloads.BoolToBool)),
 			decls.Overload(overloads.DoubleToUint, argTypes(types.DoubleType), types.UintType,
 				decls.OverloadExamples(`uint(123.45) // 123u`),
-				decls.UnaryBinding(convertToType(types.UintType))),
+				unaryBinding(overloads.DoubleToUint)),
 			decls.Overload(overloads.IntToUint, argTypes(types.IntType), types.UintType,
 				decls.OverloadExamples(`uint(123) // 123u`),
-				decls.UnaryBinding(convertToType(types.UintType))),
+				unaryBinding(overloads.DoubleToUint)),
 			decls.Overload(overloads.StringToUint, argTypes(types.StringType), types.UintType,
 				decls.OverloadExamples(`uint('123') // 123u`),
-				decls.UnaryBinding(convertToType(types.UintType)))),
+				unaryBinding(overloads.DoubleToUint))),
 
 		// String functions
 		function(overloads.Contains,
@@ -721,7 +640,7 @@ func initStandard() {
 				decls.OverloadExamples(
 					`'hello world'.contains('o w') // true`,
 					`'hello world'.contains('goodbye') // false`),
-				decls.BinaryBinding(types.StringContains)),
+				binaryBinding(overloads.ContainsString)),
 			decls.DisableTypeGuards(true)),
 		function(overloads.EndsWith,
 			decls.FunctionDocs(`test whether a string ends with a substring suffix`),
@@ -730,7 +649,7 @@ func initStandard() {
 				decls.OverloadExamples(
 					`'hello world'.endsWith('world') // true`,
 					`'hello world'.endsWith('hello') // false`),
-				decls.BinaryBinding(types.StringEndsWith)),
+				binaryBinding(overloads.EndsWithString)),
 			decls.DisableTypeGuards(true)),
 		function(overloads.StartsWith,
 			decls.FunctionDocs(`test whether a string starts with a substring prefix`),
@@ -739,7 +658,7 @@ func initStandard() {
 				decls.OverloadExamples(
 					`'hello world'.startsWith('hello') // true`,
 					`'hello world'.startsWith('world') // false`),
-				decls.BinaryBinding(types.StringStartsWith)),
+				binaryBinding(overloads.StartsWithString)),
 			decls.DisableTypeGuards(true)),
 		function(overloads.Matches,
 			decls.FunctionDocs(`test whether a string matches an RE2 regular expression`),
@@ -752,9 +671,7 @@ func initStandard() {
 				decls.OverloadExamples(
 					`'123-456'.matches('^[0-9]+(-[0-9]+)?$') // true`,
 					`'hello'.matches('^h.*o$') // true`)),
-			decls.SingletonBinaryBinding(func(str, pat ref.Val) ref.Val {
-				return str.(traits.Matcher).Match(pat)
-			}, traits.MatcherType)),
+			singletonBinaryBinding(overloads.Matches)),
 
 		// Timestamp / duration functions
 		function(overloads.TimeGetFullYear,
@@ -762,145 +679,125 @@ func initStandard() {
 			decls.MemberOverload(overloads.TimestampToYear,
 				argTypes(types.TimestampType), types.IntType,
 				decls.OverloadExamples(`timestamp('2023-07-14T10:30:45.123Z').getFullYear() // 2023`),
-				decls.UnaryBinding(func(ts ref.Val) ref.Val {
-					return timestampGetFullYear(ts, utcTZ)
-				})),
+				unaryBinding(overloads.TimestampToYear)),
 			decls.MemberOverload(overloads.TimestampToYearWithTz,
 				argTypes(types.TimestampType, types.StringType), types.IntType,
 				decls.OverloadExamples(`timestamp('2023-01-01T05:30:00Z').getFullYear('-08:00') // 2022`),
-				decls.BinaryBinding(timestampGetFullYear))),
+				binaryBinding(overloads.TimestampToYearWithTz))),
 
 		function(overloads.TimeGetMonth,
 			decls.FunctionDocs(`get the 0-based month from a timestamp, UTC unless an IANA timezone is specified.`),
 			decls.MemberOverload(overloads.TimestampToMonth,
 				argTypes(types.TimestampType), types.IntType,
 				decls.OverloadExamples(`timestamp('2023-07-14T10:30:45.123Z').getMonth() // 6`), // July is month 6
-				decls.UnaryBinding(func(ts ref.Val) ref.Val {
-					return timestampGetMonth(ts, utcTZ)
-				})),
+				unaryBinding(overloads.TimestampToMonth)),
 			decls.MemberOverload(overloads.TimestampToMonthWithTz,
 				argTypes(types.TimestampType, types.StringType), types.IntType,
 				decls.OverloadExamples(`timestamp('2023-01-01T05:30:00Z').getMonth('America/Los_Angeles') // 11`), // December is month 11
-				decls.BinaryBinding(timestampGetMonth))),
+				binaryBinding(overloads.TimestampToMonthWithTz))),
 
 		function(overloads.TimeGetDayOfYear,
 			decls.FunctionDocs(`get the 0-based day of the year from a timestamp, UTC unless an IANA timezone is specified.`),
 			decls.MemberOverload(overloads.TimestampToDayOfYear,
 				argTypes(types.TimestampType), types.IntType,
 				decls.OverloadExamples(`timestamp('2023-01-02T00:00:00Z').getDayOfYear() // 1`),
-				decls.UnaryBinding(func(ts ref.Val) ref.Val {
-					return timestampGetDayOfYear(ts, utcTZ)
-				})),
+				unaryBinding(overloads.TimestampToDayOfYear)),
 			decls.MemberOverload(overloads.TimestampToDayOfYearWithTz,
 				argTypes(types.TimestampType, types.StringType), types.IntType,
 				decls.OverloadExamples(`timestamp('2023-01-01T05:00:00Z').getDayOfYear('America/Los_Angeles') // 364`),
-				decls.BinaryBinding(timestampGetDayOfYear))),
+				binaryBinding(overloads.TimestampToDayOfYearWithTz))),
 
 		function(overloads.TimeGetDayOfMonth,
 			decls.FunctionDocs(`get the 0-based day of the month from a timestamp, UTC unless an IANA timezone is specified.`),
 			decls.MemberOverload(overloads.TimestampToDayOfMonthZeroBased,
 				argTypes(types.TimestampType), types.IntType,
 				decls.OverloadExamples(`timestamp('2023-07-14T10:30:45.123Z').getDayOfMonth() // 13`),
-				decls.UnaryBinding(func(ts ref.Val) ref.Val {
-					return timestampGetDayOfMonthZeroBased(ts, utcTZ)
-				})),
+				unaryBinding(overloads.TimestampToDayOfMonthZeroBased)),
 			decls.MemberOverload(overloads.TimestampToDayOfMonthZeroBasedWithTz,
 				argTypes(types.TimestampType, types.StringType), types.IntType,
 				decls.OverloadExamples(`timestamp('2023-07-01T05:00:00Z').getDayOfMonth('America/Los_Angeles') // 29`),
-				decls.BinaryBinding(timestampGetDayOfMonthZeroBased))),
+				binaryBinding(overloads.TimestampToDayOfMonthZeroBasedWithTz))),
 
 		function(overloads.TimeGetDate,
 			decls.FunctionDocs(`get the 1-based day of the month from a timestamp, UTC unless an IANA timezone is specified.`),
 			decls.MemberOverload(overloads.TimestampToDayOfMonthOneBased,
 				argTypes(types.TimestampType), types.IntType,
 				decls.OverloadExamples(`timestamp('2023-07-14T10:30:45.123Z').getDate() // 14`),
-				decls.UnaryBinding(func(ts ref.Val) ref.Val {
-					return timestampGetDayOfMonthOneBased(ts, utcTZ)
-				})),
+				unaryBinding(overloads.TimestampToDayOfMonthOneBased)),
 			decls.MemberOverload(overloads.TimestampToDayOfMonthOneBasedWithTz,
 				argTypes(types.TimestampType, types.StringType), types.IntType,
 				decls.OverloadExamples(`timestamp('2023-07-01T05:00:00Z').getDate('America/Los_Angeles') // 30`),
-				decls.BinaryBinding(timestampGetDayOfMonthOneBased))),
+				binaryBinding(overloads.TimestampToDayOfMonthOneBasedWithTz))),
 
 		function(overloads.TimeGetDayOfWeek,
 			decls.FunctionDocs(`get the 0-based day of the week from a timestamp, UTC unless an IANA timezone is specified.`),
 			decls.MemberOverload(overloads.TimestampToDayOfWeek,
 				argTypes(types.TimestampType), types.IntType,
 				decls.OverloadExamples(`timestamp('2023-07-14T10:30:45.123Z').getDayOfWeek() // 5`), // Friday is day 5
-				decls.UnaryBinding(func(ts ref.Val) ref.Val {
-					return timestampGetDayOfWeek(ts, utcTZ)
-				})),
+				unaryBinding(overloads.TimestampToDayOfWeek)),
 			decls.MemberOverload(overloads.TimestampToDayOfWeekWithTz,
 				argTypes(types.TimestampType, types.StringType), types.IntType,
 				decls.OverloadExamples(`timestamp('2023-07-16T05:00:00Z').getDayOfWeek('America/Los_Angeles') // 6`), // Saturday is day 6
-				decls.BinaryBinding(timestampGetDayOfWeek))),
+				binaryBinding(overloads.TimestampToDayOfWeekWithTz))),
 
 		function(overloads.TimeGetHours,
 			decls.FunctionDocs(`get the hours portion from a timestamp, or convert a duration to hours`),
 			decls.MemberOverload(overloads.TimestampToHours,
 				argTypes(types.TimestampType), types.IntType,
 				decls.OverloadExamples(`timestamp('2023-07-14T10:30:45.123Z').getHours() // 10`),
-				decls.UnaryBinding(func(ts ref.Val) ref.Val {
-					return timestampGetHours(ts, utcTZ)
-				})),
+				unaryBinding(overloads.TimestampToHours)),
 			decls.MemberOverload(overloads.TimestampToHoursWithTz,
 				argTypes(types.TimestampType, types.StringType), types.IntType,
 				decls.OverloadExamples(`timestamp('2023-07-14T10:30:45.123Z').getHours('America/Los_Angeles') // 2`),
-				decls.BinaryBinding(timestampGetHours)),
+				binaryBinding(overloads.TimestampToHoursWithTz)),
 			decls.MemberOverload(overloads.DurationToHours,
 				argTypes(types.DurationType), types.IntType,
 				decls.OverloadExamples(`duration('3723s').getHours() // 1`),
-				decls.UnaryBinding(types.DurationGetHours))),
+				unaryBinding(overloads.DurationToHours))),
 
 		function(overloads.TimeGetMinutes,
 			decls.FunctionDocs(`get the minutes portion from a timestamp, or convert a duration to minutes`),
 			decls.MemberOverload(overloads.TimestampToMinutes,
 				argTypes(types.TimestampType), types.IntType,
 				decls.OverloadExamples(`timestamp('2023-07-14T10:30:45.123Z').getMinutes() // 30`),
-				decls.UnaryBinding(func(ts ref.Val) ref.Val {
-					return timestampGetMinutes(ts, utcTZ)
-				})),
+				unaryBinding(overloads.TimestampToMinutes)),
 			decls.MemberOverload(overloads.TimestampToMinutesWithTz,
 				argTypes(types.TimestampType, types.StringType), types.IntType,
 				decls.OverloadExamples(`timestamp('2023-07-14T10:30:45.123Z').getMinutes('America/Los_Angeles') // 30`),
-				decls.BinaryBinding(timestampGetMinutes)),
+				binaryBinding(overloads.TimestampToMinutesWithTz)),
 			decls.MemberOverload(overloads.DurationToMinutes,
 				argTypes(types.DurationType), types.IntType,
 				decls.OverloadExamples(`duration('3723s').getMinutes() // 62`),
-				decls.UnaryBinding(types.DurationGetMinutes))),
+				unaryBinding(overloads.DurationToMinutes))),
 
 		function(overloads.TimeGetSeconds,
 			decls.FunctionDocs(`get the seconds portion from a timestamp, or convert a duration to seconds`),
 			decls.MemberOverload(overloads.TimestampToSeconds,
 				argTypes(types.TimestampType), types.IntType,
 				decls.OverloadExamples(`timestamp('2023-07-14T10:30:45.123Z').getSeconds() // 45`),
-				decls.UnaryBinding(func(ts ref.Val) ref.Val {
-					return timestampGetSeconds(ts, utcTZ)
-				})),
+				unaryBinding(overloads.TimestampToSeconds)),
 			decls.MemberOverload(overloads.TimestampToSecondsWithTz,
 				argTypes(types.TimestampType, types.StringType), types.IntType,
 				decls.OverloadExamples(`timestamp('2023-07-14T10:30:45.123Z').getSeconds('America/Los_Angeles') // 45`),
-				decls.BinaryBinding(timestampGetSeconds)),
+				binaryBinding(overloads.TimestampToSecondsWithTz)),
 			decls.MemberOverload(overloads.DurationToSeconds,
 				argTypes(types.DurationType), types.IntType,
 				decls.OverloadExamples(`duration('3723.456s').getSeconds() // 3723`),
-				decls.UnaryBinding(types.DurationGetSeconds))),
+				unaryBinding(overloads.DurationToSeconds))),
 
 		function(overloads.TimeGetMilliseconds,
 			decls.FunctionDocs(`get the milliseconds portion from a timestamp`),
 			decls.MemberOverload(overloads.TimestampToMilliseconds,
 				argTypes(types.TimestampType), types.IntType,
 				decls.OverloadExamples(`timestamp('2023-07-14T10:30:45.123Z').getMilliseconds() // 123`),
-				decls.UnaryBinding(func(ts ref.Val) ref.Val {
-					return timestampGetMilliseconds(ts, utcTZ)
-				})),
+				unaryBinding(overloads.TimestampToMilliseconds)),
 			decls.MemberOverload(overloads.TimestampToMillisecondsWithTz,
 				argTypes(types.TimestampType, types.StringType), types.IntType,
 				decls.OverloadExamples(`timestamp('2023-07-14T10:30:45.123Z').getMilliseconds('America/Los_Angeles') // 123`),
-				decls.BinaryBinding(timestampGetMilliseconds)),
+				binaryBinding(overloads.TimestampToMillisecondsWithTz)),
 			decls.MemberOverload(overloads.DurationToMilliseconds,
 				argTypes(types.DurationType), types.IntType,
-				decls.UnaryBinding(types.DurationGetMilliseconds))),
+				unaryBinding(overloads.DurationToMilliseconds))),
 	}
 }
 
@@ -916,20 +813,6 @@ func Types() []*decls.VariableDecl {
 	return stdTypes
 }
 
-func notStrictlyFalse(value ref.Val) ref.Val {
-	if types.IsBool(value) {
-		return value
-	}
-	return types.True
-}
-
-func inAggregate(lhs ref.Val, rhs ref.Val) ref.Val {
-	if rhs.Type().HasTrait(traits.ContainerType) {
-		return rhs.(traits.Container).Contains(lhs)
-	}
-	return types.ValOrErr(rhs, "no such overload")
-}
-
 func function(name string, opts ...decls.FunctionOpt) *decls.FunctionDecl {
 	fn, err := decls.NewFunction(name, opts...)
 	if err != nil {
@@ -942,146 +825,25 @@ func argTypes(args ...*types.Type) []*types.Type {
 	return args
 }
 
-func noBinaryOverrides(rhs, lhs ref.Val) ref.Val {
-	return types.NoSuchOverloadErr()
+func unaryBinding(id string) decls.OverloadOpt {
+	return decls.UnaryBinding(bindings.Lookup(id).Unary)
 }
 
-func isNaN(val ref.Val) bool {
-	d, ok := val.(types.Double)
-	return ok && math.IsNaN(float64(d))
+func binaryBinding(id string) decls.OverloadOpt {
+	return decls.BinaryBinding(bindings.Lookup(id).Binary)
 }
 
-func noFunctionOverrides(args ...ref.Val) ref.Val {
-	return types.NoSuchOverloadErr()
+func singletonUnaryBinding(op string) decls.FunctionOpt {
+	b := bindings.Lookup(op)
+	return decls.SingletonUnaryBinding(b.Unary, b.OperandTrait)
 }
 
-func identity(val ref.Val) ref.Val {
-	return val
+func singletonBinaryBinding(op string) decls.FunctionOpt {
+	b := bindings.Lookup(op)
+	return decls.SingletonBinaryBinding(b.Binary, b.OperandTrait)
 }
 
-func convertToType(t ref.Type) functions.UnaryOp {
-	return func(val ref.Val) ref.Val {
-		return val.ConvertToType(t)
-	}
-}
-
-func timestampGetFullYear(ts, tz ref.Val) ref.Val {
-	t, err := inTimeZone(ts, tz)
-	if err != nil {
-		return types.NewErrFromString(err.Error())
-	}
-	return types.Int(t.Year())
-}
-
-func timestampGetMonth(ts, tz ref.Val) ref.Val {
-	t, err := inTimeZone(ts, tz)
-	if err != nil {
-		return types.NewErrFromString(err.Error())
-	}
-	// CEL spec indicates that the month should be 0-based, but the Time value
-	// for Month() is 1-based.
-	return types.Int(t.Month() - 1)
-}
-
-func timestampGetDayOfYear(ts, tz ref.Val) ref.Val {
-	t, err := inTimeZone(ts, tz)
-	if err != nil {
-		return types.NewErrFromString(err.Error())
-	}
-	return types.Int(t.YearDay() - 1)
-}
-
-func timestampGetDayOfMonthZeroBased(ts, tz ref.Val) ref.Val {
-	t, err := inTimeZone(ts, tz)
-	if err != nil {
-		return types.NewErrFromString(err.Error())
-	}
-	return types.Int(t.Day() - 1)
-}
-
-func timestampGetDayOfMonthOneBased(ts, tz ref.Val) ref.Val {
-	t, err := inTimeZone(ts, tz)
-	if err != nil {
-		return types.NewErrFromString(err.Error())
-	}
-	return types.Int(t.Day())
-}
-
-func timestampGetDayOfWeek(ts, tz ref.Val) ref.Val {
-	t, err := inTimeZone(ts, tz)
-	if err != nil {
-		return types.NewErrFromString(err.Error())
-	}
-	return types.Int(t.Weekday())
-}
-
-func timestampGetHours(ts, tz ref.Val) ref.Val {
-	t, err := inTimeZone(ts, tz)
-	if err != nil {
-		return types.NewErrFromString(err.Error())
-	}
-	return types.Int(t.Hour())
-}
-
-func timestampGetMinutes(ts, tz ref.Val) ref.Val {
-	t, err := inTimeZone(ts, tz)
-	if err != nil {
-		return types.NewErrFromString(err.Error())
-	}
-	return types.Int(t.Minute())
-}
-
-func timestampGetSeconds(ts, tz ref.Val) ref.Val {
-	t, err := inTimeZone(ts, tz)
-	if err != nil {
-		return types.NewErrFromString(err.Error())
-	}
-	return types.Int(t.Second())
-}
-
-func timestampGetMilliseconds(ts, tz ref.Val) ref.Val {
-	t, err := inTimeZone(ts, tz)
-	if err != nil {
-		return types.NewErrFromString(err.Error())
-	}
-	return types.Int(t.Nanosecond() / 1000000)
-}
-
-func inTimeZone(ts, tz ref.Val) (time.Time, error) {
-	t := ts.(types.Timestamp)
-	val := string(tz.(types.String))
-	before, after, ok := strings.Cut(val, ":")
-	if !ok {
-		loc, err := time.LoadLocation(val)
-		if err != nil {
-			return time.Time{}, err
-		}
-		return t.In(loc), nil
-	}
-
-	// If the input is not the name of a timezone (for example, 'US/Central'), it should be a numerical offset from UTC
-	// in the format ^(+|-)([01]\d|2[0-3]):[0-5][0-9]$. The numerical input is parsed in terms of hours and minutes.
-	hr, err := strconv.Atoi(string(before))
-	if err != nil {
-		return time.Time{}, err
-	}
-	min, err := strconv.Atoi(string(after))
-	if err != nil {
-		return time.Time{}, err
-	}
-	if hr < -23 || hr > 23 {
-		return time.Time{}, fmt.Errorf("timezone offset hours out of range [-23, 23]: %s", val)
-	}
-	if min < 0 || min > 59 {
-		return time.Time{}, fmt.Errorf("timezone offset minutes out of range [0, 59]: %s", val)
-	}
-	var offset int
-	if string(val[0]) == "-" {
-		offset = hr*60 - min
-	} else {
-		offset = hr*60 + min
-	}
-	secondsEastOfUTC := int((time.Duration(offset) * time.Minute).Seconds())
-	timezone := time.FixedZone("", secondsEastOfUTC)
-	return t.In(timezone), nil
+func singletonFunctionBinding(op string) decls.FunctionOpt {
+	b := bindings.Lookup(op)
+	return decls.SingletonFunctionBinding(b.Function, b.OperandTrait)
 }
