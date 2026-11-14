@@ -133,7 +133,10 @@ func (opt *constantFoldingOptimizer) Optimize(ctx *OptimizerContext, a *ast.AST)
 	// one last time. In this case, there's no guarantee they'll run, so we only update the
 	// target comprehension node with the literal value if the evaluation succeeds.
 	for _, compre := range ast.MatchDescendants(root, ast.KindMatcher(ast.ComprehensionKind)) {
-		opt.tryFold(ctx, a, compre)
+		if err := opt.tryFold(ctx, a, compre); err != nil && !errors.Is(err, errCannotFold) {
+			ctx.ReportErrorAtID(compre.ID(), "constant-folding evaluation failed: %v", err.Error())
+			return a
+		}
 	}
 
 	// If the output is a list, map, or struct which contains optional entries, then prune it

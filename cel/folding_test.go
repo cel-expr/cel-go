@@ -2103,17 +2103,24 @@ func TestConstantFoldingOptimizer_CostLimit(t *testing.T) {
 		expr     string
 		opts     []ConstantFoldingOption
 		wantFold string
+		wantErr  string
 	}{
 		{
-			name:     "default_cost_limit_skips_expensive_comprehension",
-			expr:     nestedMapExpr + `.size() + (1 + 2)`,
-			wantFold: nestedMapExpr + `.size() + 3`,
+			name:    "default_cost_limit_halts_expensive_comprehension",
+			expr:    nestedMapExpr + `.size() + (1 + 2)`,
+			wantErr: "actual cost limit exceeded",
 		},
 		{
-			name:     "low_cost_limit_skips_comprehension",
-			expr:     `[1, 2, 3, 4, 5].map(i, i * 2).size() + (1 + 2)`,
-			opts:     []ConstantFoldingOption{ConstantFoldCostLimit(5)},
-			wantFold: `[1, 2, 3, 4, 5].map(i, i * 2).size() + 3`,
+			name:    "low_cost_limit_halts_comprehension",
+			expr:    `[1, 2, 3, 4, 5].map(i, i * 2).size() + (1 + 2)`,
+			opts:    []ConstantFoldingOption{ConstantFoldCostLimit(5)},
+			wantErr: "actual cost limit exceeded",
+		},
+		{
+			name:    "final_comprehension_pass_enforces_cost_limit",
+			expr:    `[1, 2, 3, 4, 5].map(i, i * 2)`,
+			opts:    []ConstantFoldingOption{MaxConstantFoldIterations(0), ConstantFoldCostLimit(5)},
+			wantErr: "actual cost limit exceeded",
 		},
 		{
 			name:     "sufficient_cost_limit_folds_comprehension",
@@ -2137,9 +2144,16 @@ func TestConstantFoldingOptimizer_CostLimit(t *testing.T) {
 				t.Fatalf("NewStaticOptimizer() failed: %v", err)
 			}
 			optimized, iss := opt.Optimize(env, checked)
+			if tc.wantErr != "" {
+				if iss.Err() == nil || !strings.Contains(iss.Err().Error(), tc.wantErr) {
+					t.Fatalf("Optimize() got err %v, wanted error containing %q", iss.Err(), tc.wantErr)
+				}
+				return
+			}
 			if iss.Err() != nil {
 				t.Fatalf("Optimize() failed: %v", iss.Err())
 			}
+			assertNormalizedIDs(t, optimized)
 			got, err := AstToString(optimized)
 			if err != nil {
 				t.Fatalf("AstToString() failed: %v", err)
