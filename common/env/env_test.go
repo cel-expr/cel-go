@@ -1501,6 +1501,76 @@ func TestExtensionGetVersion(t *testing.T) {
 	}
 }
 
+func TestExtensionValidate(t *testing.T) {
+	tests := []struct {
+		name string
+		ext  *Extension
+		want error
+	}{
+		{
+			name: "nil extension",
+			ext:  nil,
+			want: errors.New("invalid extension: nil"),
+		},
+		{
+			name: "missing name",
+			ext:  &Extension{},
+			want: errors.New("missing name"),
+		},
+		{
+			name: "invalid version",
+			ext:  &Extension{Name: "strings", Version: "1.0"},
+			want: errors.New("invalid syntax"),
+		},
+		{
+			name: "invalid subset",
+			ext: NewExtension("strings", 1).SetSubset(
+				NewLibrarySubset().AddIncludedMacros("has").AddExcludedMacros("exists"),
+			),
+			want: errors.New("invalid subset"),
+		},
+		{
+			name: "valid extension with config and subset",
+			ext: NewExtension("strings", 3).
+				SetConfig(map[string]any{"locale": "en_US"}).
+				SetSubset(NewLibrarySubset().AddExcludedFunctions(&Function{Name: "format"})),
+		},
+	}
+
+	for _, tst := range tests {
+		tc := tst
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.ext.Validate()
+			if err == nil && tc.want == nil {
+				return
+			}
+			if err == nil && tc.want != nil {
+				t.Fatalf("ext.Validate() got valid, wanted error %v", tc.want)
+			}
+			if err != nil && tc.want == nil {
+				t.Fatalf("ext.Validate() got error %v, wanted nil error", err)
+			}
+			if !strings.Contains(err.Error(), tc.want.Error()) {
+				t.Errorf("ext.Validate() got error %v, wanted %v", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestExtensionConfigValue(t *testing.T) {
+	var e *Extension
+	if _, found := e.ConfigValue("locale"); found {
+		t.Error("e.ConfigValue() got value from nil extension")
+	}
+	e = NewExtension("strings", 3).SetConfig(map[string]any{"locale": "en_US"})
+	if _, found := e.ConfigValue("absent"); found {
+		t.Error("e.ConfigValue() found absent key")
+	}
+	if val, found := e.ConfigValue("locale"); !found || val != "en_US" {
+		t.Errorf("e.ConfigValue() got %v, %t -- wanted en_US, true", val, found)
+	}
+}
+
 func TestValidatorValidate(t *testing.T) {
 	tests := []struct {
 		name string

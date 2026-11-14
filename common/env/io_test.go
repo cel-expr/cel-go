@@ -171,6 +171,24 @@ extensions:
       version: "1"
 `,
 		},
+		{
+			name: "extension with config and subset",
+			confIn: NewConfig("foo").AddExtensions(
+				NewExtension("strings", 3).
+					SetConfig(map[string]any{"locale": "en_US"}).
+					SetSubset(NewLibrarySubset().AddExcludedFunctions(&Function{Name: "format"})),
+			),
+			yamlOut: `name: foo
+extensions:
+    - name: strings
+      version: "3"
+      config:
+        locale: en_US
+      subset:
+        exclude_functions:
+            - name: format
+`,
+		},
 	}
 
 	for _, tc := range tcs {
@@ -450,6 +468,33 @@ func TestConfigToJSON(t *testing.T) {
     {
       "name": "strings",
       "version": "1"
+    }
+  ]
+}`,
+		},
+		{
+			name: "extension with config and subset",
+			confIn: NewConfig("foo").AddExtensions(
+				NewExtension("strings", 3).
+					SetConfig(map[string]any{"locale": "en_US"}).
+					SetSubset(NewLibrarySubset().AddExcludedFunctions(&Function{Name: "format"})),
+			),
+			jsonOut: `{
+  "name": "foo",
+  "extensions": [
+    {
+      "name": "strings",
+      "version": "3",
+      "config": {
+        "locale": "en_US"
+      },
+      "subset": {
+        "excludeFunctions": [
+          {
+            "name": "format"
+          }
+        ]
+      }
     }
   ]
 }`,

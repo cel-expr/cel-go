@@ -491,12 +491,44 @@ type Extension struct {
 
 	// Version may either be an unsigned long value or the string 'latest'. If empty, the value is treated as '0'.
 	Version string `yaml:"version,omitempty" json:"version,omitempty" jsonschema_description:"Extension version number or 'latest'"`
+
+	// Config represents an optional map-based configuration object for the extension library.
+	//
+	// Note: the map-keys must directly correspond to the configuration options understood by the
+	// extension factory, and should only use primitive scalar types as values at this time.
+	Config map[string]any `yaml:"config,omitempty" json:"config,omitempty" jsonschema_description:"Extension-specific configuration key-value pairs"`
+
+	// Subset indicates a subset of the macros and functions supported by the extension library.
+	Subset *LibrarySubset `yaml:"subset,omitempty" json:"subset,omitempty" jsonschema_description:"Extension library macro and function subset configuration"`
 }
 
 // Validate validates the extension configuration is well-formed.
 func (e *Extension) Validate() error {
-	_, err := e.VersionNumber()
-	return err
+	if _, err := e.VersionNumber(); err != nil {
+		return err
+	}
+	return e.Subset.Validate()
+}
+
+// SetConfig sets the map key-value pairs associated with this extension's configuration.
+func (e *Extension) SetConfig(config map[string]any) *Extension {
+	e.Config = config
+	return e
+}
+
+// ConfigValue retrieves the value associated with the config key name, if one exists.
+func (e *Extension) ConfigValue(name string) (any, bool) {
+	if e == nil {
+		return nil, false
+	}
+	value, found := e.Config[name]
+	return value, found
+}
+
+// SetSubset configures the LibrarySubset for this extension.
+func (e *Extension) SetSubset(subset *LibrarySubset) *Extension {
+	e.Subset = subset
+	return e
 }
 
 // VersionNumber returns the parsed version string, or an error if the version cannot be parsed.
