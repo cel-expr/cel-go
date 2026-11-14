@@ -352,6 +352,9 @@ func (t *asyncCallStateTracker) launch(ctx context.Context, acs *asyncCallState,
 	}
 	go func() {
 		defer func() {
+			if r := recover(); r != nil {
+				acs.SetResult(types.NewErr("internal error: %v", r))
+			}
 			if observer != nil {
 				observer.OnCallFinished(acs.callID, acs.function, acs.overload, acs.ResultOrUnknown())
 			}

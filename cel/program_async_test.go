@@ -1194,3 +1194,103 @@ func TestConcurrentEvalMemoryTrackingAcrossPasses(t *testing.T) {
 		t.Errorf("EvalDetails.PeakMemory() got %d, wanted 6", *peak)
 	}
 }
+
+func TestConcurrentEvalAsyncPanicRecovery(t *testing.T) {
+	badCallOpt := cel.Function("bad_call",
+		cel.Overload("global_bad_call", []*cel.Type{}, cel.BoolType,
+			cel.AsyncBinding(func(ctx context.Context, args ...ref.Val) ref.Val {
+				panic("async boom")
+			}),
+		),
+	)
+	badTimeoutCallOpt := cel.Function("bad_timeout_call",
+		cel.Overload("global_bad_timeout_call", []*cel.Type{}, cel.BoolType,
+			async.TimeoutBinding(func(ctx context.Context, args ...ref.Val) ref.Val {
+				panic("timeout boom")
+			}, time.Second),
+		),
+	)
+	slowTrueOpt := cel.Function("slow_true",
+		cel.Overload("global_slow_true", []*cel.Type{}, cel.BoolType,
+			cel.AsyncBinding(func(ctx context.Context, args ...ref.Val) ref.Val {
+				time.Sleep(20 * time.Millisecond)
+				return types.True
+			}),
+		),
+	)
+	slowFalseOpt := cel.Function("slow_false",
+		cel.Overload("global_slow_false", []*cel.Type{}, cel.BoolType,
+			cel.AsyncBinding(func(ctx context.Context, args ...ref.Val) ref.Val {
+				time.Sleep(20 * time.Millisecond)
+				return types.False
+			}),
+		),
+	)
+
+	tests := []struct {
+		name      string
+		expr      string
+		wantVal   ref.Val
+		wantErr   string
+		wantCalls int32
+	}{
+		{
+			name:      "panic_returns_error",
+			expr:      `bad_call()`,
+			wantErr:   "internal error: async boom",
+			wantCalls: 1,
+		},
+		{
+			name:      "or_true_graceful_degradation",
+			expr:      `bad_call() || slow_true()`,
+			wantVal:   types.True,
+			wantCalls: 2,
+		},
+		{
+			name:      "and_false_graceful_degradation",
+			expr:      `bad_call() && slow_false()`,
+			wantVal:   types.False,
+			wantCalls: 2,
+		},
+		{
+			name:      "timeout_panic_returns_error",
+			expr:      `bad_timeout_call()`,
+			wantErr:   "internal error: timeout boom",
+			wantCalls: 1,
+		},
+		{
+			name:      "timeout_or_true_graceful_degradation",
+			expr:      `bad_timeout_call() || slow_true()`,
+			wantVal:   types.True,
+			wantCalls: 2,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				obs := &countingObserver{}
+				prg := mustProgram(t, tc.expr, badCallOpt, badTimeoutCallOpt, slowTrueOpt, slowFalseOpt, cel.AsyncCallObserver(obs))
+				res := awaitEval(context.Background(), t, prg, cel.NoVars())
+				if tc.wantErr != "" {
+					if res.Err == nil {
+						t.Fatalf("ConcurrentEval() got nil error, wanted %q", tc.wantErr)
+					}
+					if !strings.Contains(res.Err.Error(), tc.wantErr) {
+						t.Errorf("ConcurrentEval() error = %q, wanted substring %q", res.Err.Error(), tc.wantErr)
+					}
+				} else {
+					if res.Err != nil {
+						t.Fatalf("ConcurrentEval() unexpected error: %v", res.Err)
+					}
+					if res.Val != tc.wantVal {
+						t.Errorf("ConcurrentEval() val = %v, wanted %v", res.Val, tc.wantVal)
+					}
+				}
+				if obs.started.Load() != tc.wantCalls || obs.finished.Load() != tc.wantCalls {
+					t.Errorf("observer counts: started=%d finished=%d, wanted %d/%d", obs.started.Load(), obs.finished.Load(), tc.wantCalls, tc.wantCalls)
+				}
+			})
+		})
+	}
+}

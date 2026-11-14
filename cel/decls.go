@@ -365,6 +365,10 @@ func LateFunctionBinding() OverloadOpt {
 // ignores cancellation will leak its goroutine and hold a concurrency slot (see
 // AsyncMaxConcurrency) until it returns on its own. For functions that may hang or that are not
 // under your control, wrap them with async.TimeoutBinding to bound their runtime.
+//
+// Panic handling: unlike synchronous bindings (where a panic halts evaluation), panics in
+// asynchronous functions are recovered and converted into CEL errors, allowing short-circuiting
+// operators (such as `||` and `&&`) to degrade gracefully.
 func AsyncBinding(fn functions.BlockingAsyncOp) OverloadOpt {
 	return decls.AsyncBinding(fn)
 }
