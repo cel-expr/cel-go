@@ -797,8 +797,9 @@ const (
 	// iteration in which it was observed.
 	//
 	// The records of the EvalState returned from EvalDetails.State() are available from
-	// interpreter.TraceRecords. Combine with OptExhaustiveEval to observe every iteration rather
-	// than only the iterations evaluated before the result was determined.
+	// interpreter.TraceRecords, and the evaluation may be explained with ExplainEval. Combine with
+	// OptExhaustiveEval to observe every iteration rather than only the iterations evaluated before
+	// the result was determined.
 	//
 	// Tracing is intended for diagnosing an evaluation result, e.g. re-evaluating an input which
 	// failed a policy, and adds overhead proportional to the number of observed values.
