@@ -930,6 +930,38 @@ func TestCostEstimateAndTracking(t *testing.T) {
 			wantTrack: trackPtr(3),
 		},
 		{
+			// The size of a presence test is that of the bool it yields, not of the field it
+			// tests, so comparing two presence tests costs the same whatever the fields' sizes.
+			name: "select: field test comparison ignores field size",
+			expr: `has(input.single_string) == has(input.single_bytes)`,
+			vars: []*decls.VariableDecl{decls.NewVariable("input", allTypes)},
+			hints: map[string]uint64{
+				"input.single_string": 1_000_000,
+				"input.single_bytes":  1_000_000,
+			},
+			in: map[string]any{
+				"input": &proto3pb.TestAllTypes{SingleString: "a", SingleBytes: []byte("b")},
+			},
+			wantEst:   new(cost.CostEstimate{Min: 5, Max: 5}),
+			wantTrack: trackPtr(5),
+		},
+		{
+			name: "select: nested field test comparison ignores field size",
+			expr: `has(input.testAttr.nestedAttr) != has(input.testAttr.otherAttr)`,
+			vars: []*decls.VariableDecl{decls.NewVariable("input", nestedMapStr)},
+			hints: map[string]uint64{
+				"input.testAttr.nestedAttr": 1_000_000,
+				"input.testAttr.otherAttr":  1_000_000,
+			},
+			in: map[string]any{
+				"input": map[string]any{
+					"testAttr": map[string]any{"nestedAttr": "0"},
+				},
+			},
+			wantEst:   new(cost.CostEstimate{Min: 7, Max: 7}),
+			wantTrack: trackPtr(7),
+		},
+		{
 			name:      "estimated function call",
 			expr:      `input.getFullYear()`,
 			vars:      []*decls.VariableDecl{decls.NewVariable("input", types.TimestampType)},
