@@ -186,6 +186,26 @@ func TestValidateRegexLiterals(t *testing.T) {
 		{
 			expr: `'hello'.matches(x)`,
 		},
+		{
+			expr: `matches('(', 'a')`,
+		},
+		{
+			expr: `matches('hello', 'x++')`,
+			iss: `
+			ERROR: <input>:1:18: invalid matches argument
+             | matches('hello', 'x++')
+             | .................^`,
+		},
+		{
+			expr: `matches(x, '(')`,
+			iss: `
+			ERROR: <input>:1:12: invalid matches argument
+             | matches(x, '(')
+             | ...........^`,
+		},
+		{
+			expr: `matches('hello', x)`,
+		},
 	}
 	for _, tst := range tests {
 		tc := tst
