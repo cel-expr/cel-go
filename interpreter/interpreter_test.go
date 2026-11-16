@@ -104,6 +104,56 @@ func testData(t testing.TB) []testCase {
 			out:  types.False,
 		},
 		{
+			name: "double_nan_lt_int",
+			expr: `0.0/0.0 < 1`,
+			out:  types.False,
+		},
+		{
+			name: "uint_lt_double_nan",
+			expr: `1u < 0.0/0.0`,
+			out:  types.False,
+		},
+		{
+			name: "double_nan_lt_string",
+			expr: `dyn(0.0/0.0) < dyn('foo')`,
+			err:  "no such overload",
+		},
+		{
+			name: "string_lt_double_nan",
+			expr: `dyn('foo') < dyn(0.0/0.0)`,
+			err:  "no such overload",
+		},
+		{
+			name: "double_nan_le_string",
+			expr: `dyn(0.0/0.0) <= dyn('foo')`,
+			err:  "no such overload",
+		},
+		{
+			name: "string_le_double_nan",
+			expr: `dyn('foo') <= dyn(0.0/0.0)`,
+			err:  "no such overload",
+		},
+		{
+			name: "double_nan_gt_string",
+			expr: `dyn(0.0/0.0) > dyn('foo')`,
+			err:  "no such overload",
+		},
+		{
+			name: "string_gt_double_nan",
+			expr: `dyn('foo') > dyn(0.0/0.0)`,
+			err:  "no such overload",
+		},
+		{
+			name: "double_nan_ge_string",
+			expr: `dyn(0.0/0.0) >= dyn('foo')`,
+			err:  "no such overload",
+		},
+		{
+			name: "string_ge_double_nan",
+			expr: `dyn('foo') >= dyn(0.0/0.0)`,
+			err:  "no such overload",
+		},
+		{
 			name: "and_false_1st",
 			expr: `false && true`,
 			out:  types.False,

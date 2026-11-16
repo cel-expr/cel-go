@@ -102,6 +102,21 @@ func TestDoubleCompare(t *testing.T) {
 			out: NewErr("NaN values cannot be ordered"),
 		},
 		{
+			a:   Double(math.NaN()),
+			b:   Int(204),
+			out: NewErr("NaN values cannot be ordered"),
+		},
+		{
+			a:   Double(math.NaN()),
+			b:   Uint(204),
+			out: NewErr("NaN values cannot be ordered"),
+		},
+		{
+			a:   Double(math.NaN()),
+			b:   String("foo"),
+			out: NewErr("no such overload"),
+		},
+		{
 			a:   Double(204),
 			b:   Double(-1300),
 			out: IntOne,
