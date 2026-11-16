@@ -1040,6 +1040,10 @@ func FunctionBinding(binding functions.FunctionOp) OverloadOpt {
 //
 // This follows the same pattern used by gRPC-Go and other major Go frameworks where user
 // code is synchronous and the framework manages concurrency.
+//
+// Panic handling: unlike synchronous bindings (where a panic halts evaluation), panics in
+// asynchronous functions are recovered and converted into CEL errors, allowing short-circuiting
+// operators (such as `||` and `&&`) to degrade gracefully.
 func AsyncBinding(fn functions.BlockingAsyncOp) OverloadOpt {
 	return func(o *OverloadDecl) (*OverloadDecl, error) {
 		if o.HasBinding() {
