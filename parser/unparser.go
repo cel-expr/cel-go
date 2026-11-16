@@ -334,6 +334,15 @@ func (un *unparser) visitConstVal(val ref.Val) error {
 	case types.Double:
 		// represent the float using the minimum required digits
 		d := strconv.FormatFloat(float64(val), 'g', -1, 64)
+		if math.IsNaN(float64(val)) || math.IsInf(float64(val), 0) {
+			// CEL has no literal for a non-finite double, so the value is
+			// written as the conversion of its text, which parses back to
+			// the same value.
+			un.str.WriteString("double(")
+			un.str.WriteString(strconv.Quote(d))
+			un.str.WriteString(")")
+			break
+		}
 		un.str.WriteString(d)
 		if !strings.ContainsAny(d, ".eE") {
 			un.str.WriteString(".0")
