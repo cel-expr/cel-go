@@ -15,6 +15,8 @@
 package types
 
 import (
+	"encoding/json"
+	"reflect"
 	"testing"
 
 	"cel.dev/cel-go/common/types/ref"
@@ -46,5 +48,24 @@ func TestType_ConvertToType(t *testing.T) {
 func TestType_Type(t *testing.T) {
 	if TypeType.Type() != TypeType {
 		t.Error("type of type is not type.")
+	}
+}
+
+func TestType_JSONError(t *testing.T) {
+	if _, err := IntType.ConvertToNative(JSONValueType); err == nil {
+		t.Error("IntType.ConvertToNative(JSONValueType) succeeded, wanted error")
+	}
+	if _, err := json.Marshal(IntType); err == nil {
+		t.Error("json.Marshal(IntType) succeeded, wanted error")
+	}
+	nt, err := newNativeType(reflect.TypeFor[struct{ Name string }](), NativeTypeOptions{})
+	if err != nil {
+		t.Fatalf("newNativeType() failed: %v", err)
+	}
+	if _, err := nt.ConvertToNative(JSONValueType); err == nil {
+		t.Error("NativeType.ConvertToNative(JSONValueType) succeeded, wanted error")
+	}
+	if _, err := json.Marshal(nt); err == nil {
+		t.Error("json.Marshal(NativeType) succeeded, wanted error")
 	}
 }

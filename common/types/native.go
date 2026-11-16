@@ -255,6 +255,11 @@ func (t *NativeType) ConvertToNative(typeDesc reflect.Type) (any, error) {
 	return nil, fmt.Errorf("type conversion error for type to '%v'", typeDesc)
 }
 
+// MarshalJSON implements json.Marshaler to ensure type values do not participate in JSON encoding.
+func (t *NativeType) MarshalJSON() ([]byte, error) {
+	return nil, fmt.Errorf("type conversion not supported for 'type'")
+}
+
 // ConvertToType implements ref.Val.ConvertToType.
 func (t *NativeType) ConvertToType(typeVal ref.Type) ref.Val {
 	switch typeVal {
