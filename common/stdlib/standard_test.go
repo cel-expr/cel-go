@@ -22,6 +22,10 @@ import (
 )
 
 func TestBindingsMatchFunctions(t *testing.T) {
+	// Ensure there is no drift between the `bindings/bindings.go` file which only provides
+	// implementations of the standard lib functions and the `standard.go` file which provides
+	// declarations and binding references together - this helps break the checker dependency
+	// for the runtime.
 	want := map[string]*functions.Overload{}
 	for _, fn := range Functions() {
 		bs, err := fn.Bindings()
