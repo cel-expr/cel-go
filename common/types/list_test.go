@@ -397,6 +397,14 @@ func TestConcatListConvertToNative_Json(t *testing.T) {
 	if !reflect.DeepEqual(outList, []any{1.0, 2.0, "100s"}) {
 		t.Errorf("got json '%v', expected %v", outList, []any{1.0, 2.0, "100s"})
 	}
+	// Type values must not convert to JSON.
+	listTypes := NewDynamicList(reg, []*Type{IntType})
+	if _, err := listTypes.Add(listA).ConvertToNative(JSONValueType); err == nil {
+		t.Error("listTypes.Add(listA).ConvertToNative(JSONValueType) succeeded, wanted error")
+	}
+	if _, err := listA.Add(listTypes).ConvertToNative(JSONValueType); err == nil {
+		t.Error("listA.Add(listTypes).ConvertToNative(JSONValueType) succeeded, wanted error")
+	}
 }
 
 func TestConcatListConvertToNativeListInterface(t *testing.T) {

@@ -2417,3 +2417,39 @@ type mockProtoVal struct {
 	ref.Val
 	*proto3pb.TestAllTypes
 }
+
+func TestJSONEncodeTypeError(t *testing.T) {
+	env, err := cel.NewEnv(Encoders())
+	if err != nil {
+		t.Fatalf("cel.NewEnv() failed: %v", err)
+	}
+	errorExprs := []string{
+		`json.encode(int)`,
+		`json.encode([int])`,
+		`json.encode([int, 1])`,
+		`json.encode([int] + dyn([1]))`,
+		`json.encode(dyn([1]) + dyn([int]))`,
+		`json.encode({'a': int})`,
+		`json.encode({int: 'a'})`,
+		`yaml.encode(int)`,
+		`yaml.encode([int] + dyn([1]))`,
+		`yaml.encode(dyn([1]) + dyn([int]))`,
+	}
+	for _, expr := range errorExprs {
+		t.Run(expr, func(t *testing.T) {
+			ast, iss := env.Compile(expr)
+			if iss.Err() != nil {
+				t.Fatalf("env.Compile(%q) failed: %v", expr, iss.Err())
+			}
+			prg, err := env.Program(ast)
+			if err != nil {
+				t.Fatalf("env.Program(%q) failed: %v", expr, err)
+			}
+			out, _, err := prg.Eval(cel.NoVars())
+			if err == nil {
+				t.Fatalf("prg.Eval(%q) got %v, wanted error", expr, out)
+			}
+		})
+	}
+}
+
