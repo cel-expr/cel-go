@@ -89,7 +89,9 @@ func (af *appendingFormatterV2) format(arg ref.Val) error {
 		if !ok {
 			return fmt.Errorf("type conversion error from '%s' to '%s'", arg.Type(), types.BytesType)
 		}
-		af.buf = append(af.buf, argBytes...)
+		// Format as if string(value) was performed, replacing each run of
+		// invalid UTF-8 sequences with a single replacement character.
+		af.buf = append(af.buf, strings.ToValidUTF8(string(argBytes), "\ufffd")...)
 		return nil
 	case types.StringType:
 		argStr, ok := arg.Value().(string)

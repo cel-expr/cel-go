@@ -415,6 +415,24 @@ func TestStringFormatV2(t *testing.T) {
 			expectedEstimatedCost: cost.FixedCostEstimate(12),
 		},
 		{
+			name:           "bytes support for string with invalid utf-8 sequences",
+			format:         "%s",
+			formatArgs:     `b"\xF0abc\x8C\xF0xyz"`,
+			expectedOutput: "\ufffdabc\ufffdxyz",
+		},
+		{
+			name:           "bytes support for string with only invalid utf-8 sequences",
+			format:         "%s",
+			formatArgs:     `b"\xF0\x8C\xF0"`,
+			expectedOutput: "\ufffd",
+		},
+		{
+			name:           "bytes support for string with invalid utf-8 in list",
+			format:         "%s",
+			formatArgs:     `[b"a\xffb"]`,
+			expectedOutput: "[a\ufffdb]",
+		},
+		{
 			name:                  "type() support for string",
 			format:                "type is %s",
 			formatArgs:            `type("test string")`,
