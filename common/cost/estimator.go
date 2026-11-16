@@ -379,6 +379,11 @@ func (c *coster) costSelect(e ast.Expr) CostEstimate {
 	}
 	sum = sum.Add(c.cost(sel.Operand()))
 	sum = sum.Add(c.relativeAttributeCost(sel.Operand()))
+	if sel.IsTestOnly() {
+		// A presence test yields a bool, not the field it tests, so it must not carry the field's
+		// path: an Estimator would otherwise report the field's size as the size of the bool.
+		return sum
+	}
 	targetPath := c.getPath(sel.Operand())
 	if len(targetPath) > 0 {
 		c.addPath(e, append(targetPath, sel.FieldName()))
