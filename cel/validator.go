@@ -303,11 +303,16 @@ func (v formatValidator) Validate(e *Env, _ ValidatorConfig, a *ast.AST, iss *Is
 	root := ast.NavigateAST(a)
 	funcCalls := ast.MatchDescendants(root, ast.FunctionMatcher(v.funcName))
 	for _, call := range funcCalls {
-		callArgs := call.AsCall().Args()
-		if len(callArgs) <= v.argNum {
+		c := call.AsCall()
+		argNum := v.argNum
+		if v.funcName == overloads.Matches && !c.IsMemberFunction() {
+			argNum++
+		}
+		callArgs := c.Args()
+		if len(callArgs) <= argNum {
 			continue
 		}
-		litArg := callArgs[v.argNum]
+		litArg := callArgs[argNum]
 		if litArg.Kind() != ast.LiteralKind {
 			continue
 		}
