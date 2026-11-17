@@ -190,10 +190,14 @@ func negateDurationChecked(x time.Duration) (time.Duration, error) {
 	return time.Duration(val), nil
 }
 
-// addDurationChecked performs addition with overflow detection of a time.Time and time.Duration.
+// addTimeDurationChecked performs addition with overflow detection of a time.Time and time.Duration.
 //
 // If the operation fails due to overflow the error return value will be non-nil.
 func addTimeDurationChecked(x time.Time, y time.Duration) (time.Time, error) {
+	return offsetTimeDurationChecked(x, y, false)
+}
+
+func offsetTimeDurationChecked(x time.Time, y time.Duration, subtract bool) (time.Time, error) {
 	// This is tricky. A time is represented as (int64, int32) where the first is seconds and second
 	// is nanoseconds. A duration is int64 representing nanoseconds. We cannot normalize time to int64
 	// as it could potentially overflow. The only way to proceed is to break time and duration into
@@ -207,13 +211,18 @@ func addTimeDurationChecked(x time.Time, y time.Duration) (time.Time, error) {
 	sec2 := int64(y) / int64(time.Second)  // Truncate to seconds.
 	nsec2 := int64(y) % int64(time.Second) // Get remainder.
 
-	// Add seconds first, detecting any overflow.
-	sec, err := addInt64Checked(sec1, sec2)
+	var sec, nsec int64
+	var err error
+	if subtract {
+		sec, err = subtractInt64Checked(sec1, sec2)
+		nsec = nsec1 - nsec2
+	} else {
+		sec, err = addInt64Checked(sec1, sec2)
+		nsec = nsec1 + nsec2
+	}
 	if err != nil {
 		return time.Time{}, err
 	}
-	// Nanoseconds cannot overflow as time.Time normalizes them to [0, 999999999].
-	nsec := nsec1 + nsec2
 
 	// We need to normalize nanoseconds to be positive and carry extra nanoseconds to seconds.
 	// Adapted from time.Unix(int64, int64).
@@ -287,13 +296,7 @@ func subtractTimeChecked(x, y time.Time) (time.Duration, error) {
 //
 // If the operation fails due to overflow the error return value will be non-nil.
 func subtractTimeDurationChecked(x time.Time, y time.Duration) (time.Time, error) {
-	// The easiest way to implement this is to negate y and add them.
-	// x - y = x + -y
-	val, err := negateDurationChecked(y)
-	if err != nil {
-		return time.Time{}, err
-	}
-	return addTimeDurationChecked(x, val)
+	return offsetTimeDurationChecked(x, y, true)
 }
 
 // doubleToInt64Checked converts a double to an int64 value.
