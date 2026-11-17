@@ -938,7 +938,7 @@ func TestCostEstimateAndTracking(t *testing.T) {
 			in: map[string]any{
 				"input": &proto3pb.TestAllTypes{SingleString: "a", SingleBytes: []byte("b")},
 			},
-			wantEst:   new(cost.CostEstimate{Min: 5, Max: 5}),
+			wantEst:   estPtr(cost.CostEstimate{Min: 5, Max: 5}),
 			wantTrack: trackPtr(5),
 		},
 		{
@@ -954,7 +954,7 @@ func TestCostEstimateAndTracking(t *testing.T) {
 					"testAttr": map[string]any{"nestedAttr": "0"},
 				},
 			},
-			wantEst:   new(cost.CostEstimate{Min: 7, Max: 7}),
+			wantEst:   estPtr(cost.CostEstimate{Min: 7, Max: 7}),
 			wantTrack: trackPtr(7),
 		},
 		{
