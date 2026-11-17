@@ -316,7 +316,7 @@ func initStandard() {
 				argTypes(types.DurationType, types.DurationType), types.BoolType,
 				decls.OverloadExamples(`duration('1ms') < duration('1s') // true`)),
 			decls.SingletonBinaryBinding(func(lhs, rhs ref.Val) ref.Val {
-				if isNaN(lhs) || isNaN(rhs) {
+				if isNaNComparison(lhs, rhs) {
 					return types.False
 				}
 				cmp := lhs.(traits.Comparer).Compare(rhs)
@@ -376,7 +376,7 @@ func initStandard() {
 				argTypes(types.DurationType, types.DurationType), types.BoolType,
 				decls.OverloadExamples(`duration('1ms') <= duration('1s') // true`)),
 			decls.SingletonBinaryBinding(func(lhs, rhs ref.Val) ref.Val {
-				if isNaN(lhs) || isNaN(rhs) {
+				if isNaNComparison(lhs, rhs) {
 					return types.False
 				}
 				cmp := lhs.(traits.Comparer).Compare(rhs)
@@ -436,7 +436,7 @@ func initStandard() {
 				argTypes(types.DurationType, types.DurationType), types.BoolType,
 				decls.OverloadExamples(`duration('1ms') > duration('1us') // true`)),
 			decls.SingletonBinaryBinding(func(lhs, rhs ref.Val) ref.Val {
-				if isNaN(lhs) || isNaN(rhs) {
+				if isNaNComparison(lhs, rhs) {
 					return types.False
 				}
 				cmp := lhs.(traits.Comparer).Compare(rhs)
@@ -496,7 +496,7 @@ func initStandard() {
 				argTypes(types.DurationType, types.DurationType), types.BoolType,
 				decls.OverloadExamples(`duration('60s') >= duration('1m') // true`)),
 			decls.SingletonBinaryBinding(func(lhs, rhs ref.Val) ref.Val {
-				if isNaN(lhs) || isNaN(rhs) {
+				if isNaNComparison(lhs, rhs) {
 					return types.False
 				}
 				cmp := lhs.(traits.Comparer).Compare(rhs)
@@ -949,6 +949,19 @@ func noBinaryOverrides(rhs, lhs ref.Val) ref.Val {
 func isNaN(val ref.Val) bool {
 	d, ok := val.(types.Double)
 	return ok && math.IsNaN(float64(d))
+}
+
+func isNumeric(val ref.Val) bool {
+	switch val.(type) {
+	case types.Double, types.Int, types.Uint:
+		return true
+	default:
+		return false
+	}
+}
+
+func isNaNComparison(lhs, rhs ref.Val) bool {
+	return (isNaN(lhs) && isNumeric(rhs)) || (isNumeric(lhs) && isNaN(rhs))
 }
 
 func noFunctionOverrides(args ...ref.Val) ref.Val {

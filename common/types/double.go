@@ -51,18 +51,21 @@ func (d Double) Add(other ref.Val) ref.Val {
 
 // Compare implements traits.Comparer.Compare.
 func (d Double) Compare(other ref.Val) ref.Val {
-	if math.IsNaN(float64(d)) {
-		return NewErr("NaN values cannot be ordered")
-	}
 	switch ov := other.(type) {
 	case Double:
-		if math.IsNaN(float64(ov)) {
+		if math.IsNaN(float64(d)) || math.IsNaN(float64(ov)) {
 			return NewErr("NaN values cannot be ordered")
 		}
 		return compareResult(compareDouble(d, ov))
 	case Int:
+		if math.IsNaN(float64(d)) {
+			return NewErr("NaN values cannot be ordered")
+		}
 		return compareResult(compareDoubleInt(d, ov))
 	case Uint:
+		if math.IsNaN(float64(d)) {
+			return NewErr("NaN values cannot be ordered")
+		}
 		return compareResult(compareDoubleUint(d, ov))
 	default:
 		return MaybeNoSuchOverloadErr(other)
