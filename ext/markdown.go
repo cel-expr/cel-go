@@ -12,6 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Unlike CommonMark rendering parsers such as github.com/yuin/goldmark, this implementation is
+// inspection-based, prioritizing content extraction (frontmatter, links, images, code blocks, and
+// exact character/byte spans) over full document tree structure. Keeping the parser purpose-built
+// also avoids adding external dependency overhead to cel-go.
+
 package ext
 
 import (
@@ -177,7 +182,9 @@ func (*markdownLib) LibraryName() string {
 
 // CompileOptions implements the cel.Library interface method.
 func (*markdownLib) CompileOptions() []cel.EnvOption {
-	var adapt types.Adapter = types.DefaultTypeAdapter
+	adapt := func() types.Adapter {
+		return types.DefaultTypeAdapter
+	}
 	return []cel.EnvOption{
 		func(env *cel.Env) (*cel.Env, error) {
 			if !env.HasLibrary("cel.lib.optional") {
@@ -192,7 +199,7 @@ func (*markdownLib) CompileOptions() []cel.EnvOption {
 				types.NativeTypeFor[MarkdownCodeBlock](types.NativeTypeAlias("markdown.CodeBlock"), types.ParseStructTags(true)),
 				types.NativeTypeFor[MarkdownSection](types.NativeTypeAlias("markdown.Section"), types.ParseStructTags(true)),
 			)
-			adapt = a
+			adapt = env.CELTypeAdapter
 			env, _ = cel.CustomTypeAdapter(a)(env)
 			return cel.CustomTypeProvider(p)(env)
 		},
@@ -209,7 +216,7 @@ func (*markdownLib) CompileOptions() []cel.EnvOption {
 					if err != nil {
 						return types.OptionalNone
 					}
-					return types.OptionalOf(adapt.NativeToValue(doc))
+					return types.OptionalOf(adapt().NativeToValue(doc))
 				})),
 			cel.Overload(markdownParseBytesOverload,
 				[]*cel.Type{cel.BytesType},
@@ -227,7 +234,7 @@ func (*markdownLib) CompileOptions() []cel.EnvOption {
 					if err != nil {
 						return types.OptionalNone
 					}
-					return types.OptionalOf(adapt.NativeToValue(doc))
+					return types.OptionalOf(adapt().NativeToValue(doc))
 				})),
 		),
 		cel.CostModel(
@@ -375,22 +382,36 @@ func (ix *mdTextIndex) spanFromBytes(start, stop int) MarkdownSpan {
 }
 
 var (
-	mdListItemRE    = regexp.MustCompile(`^(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)`)
-	mdHeadingRE     = regexp.MustCompile(`^ {0,3}(#{1,6})(?:[ \t]+(.*?))?[ \t#]*$`)
-	mdImagePat      = `!\[([^\[\]\n]*)\]\(\s*<?([^\s)>]*)>?(?:\s+["']([^"'\n]*)["'])?\s*\)`
-	mdLinkedImageRE = regexp.MustCompile(`\[\s*(` + mdImagePat + `)\s*\]\(\s*<?([^\s)>]*)>?(?:\s+["'][^"'\n]*["'])?\s*\)`)
-	mdLinkRE        = regexp.MustCompile(`(!?)\[([^\[\]\n]*)\]\(\s*<?([^\s)>]*)>?(?:\s+["']([^"'\n]*)["'])?\s*\)`)
-	mdAutoRE        = regexp.MustCompile(`<([a-zA-Z][a-zA-Z0-9+.-]*:[^\s<>]*)>`)
-	mdRefDefRE      = regexp.MustCompile(`(?m)^ {0,3}\[([^\]\n]+)\]:[ \t]*<?([^\s>]*)>?.*$`)
-	mdHTMLImgRE     = regexp.MustCompile(`(?i)<img\b[^>]*>`)
-	mdHTMLARE       = regexp.MustCompile(`(?i)<a\b[^>]*>`)
-	mdSrcRE         = regexp.MustCompile(`(?i)\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))`)
-	mdHrefRE        = regexp.MustCompile(`(?i)\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))`)
-	mdAltRE         = regexp.MustCompile(`(?i)\balt\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))`)
-	mdTitleRE       = regexp.MustCompile(`(?i)\btitle\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))`)
-	mdBareURLRE     = regexp.MustCompile("(?i)\\b(?:https?://|www\\.)[^\\s<>()\\[\\]\"'`]+")
-	mdInlineCodeRE  = regexp.MustCompile("`[^`\n]+`")
+	mdListItemRE     = regexp.MustCompile(`^(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)`)
+	mdHeadingRE      = regexp.MustCompile(`^ {0,3}(#{1,6})(?:[ \t]+(.*?))?[ \t#]*$`)
+	mdInnerImgPat    = `!\[([^\[\]\r\n]*)\](?:\(\s*<?([^\s)>]*)>?(?:\s+["']([^"'\r\n]*)["'])?\s*\)|\[([^\[\]\r\n]*)\])?`
+	mdLinkedImageRE  = regexp.MustCompile(`\[\s*(` + mdInnerImgPat + `)\s*\](?:\(\s*<?([^\s)>]*)>?(?:\s+["']([^"'\r\n]*)["'])?\s*\)|\[([^\[\]\r\n]*)\])`)
+	mdLinkRE         = regexp.MustCompile(`(!?)\[([^\[\]\r\n]*)\]\(\s*<?([^\s)>]*)>?(?:\s+["']([^"'\r\n]*)["'])?\s*\)`)
+	mdRefLinkFullRE  = regexp.MustCompile(`(!?)\[([^\[\]\r\n]*)\]\[([^\[\]\r\n]*)\]`)
+	mdRefLinkShortRE = regexp.MustCompile(`(!?)\[([^\[\]\r\n]+)\]`)
+	mdAutoRE         = regexp.MustCompile(`<([a-zA-Z][a-zA-Z0-9+.-]*:[^\s<>]*)>`)
+	mdRefDefRE       = regexp.MustCompile(`(?m)^ {0,3}\[([^\[\]\r\n]+)\]:[ \t]*(?:\r?\n[ \t]*)?(?:<([^<>\r\n]*)>|([^\s<>]+))(?:(?:[ \t]+|\r?\n[ \t]*)(?:"([^"\r\n]*)"|'([^'\r\n]*)'|\(([^)\r\n]*)\)))?[ \t]*\r?$`)
+	mdHTMLImgRE      = regexp.MustCompile(`(?i)<img\b[^>]*>`)
+	mdHTMLARE        = regexp.MustCompile(`(?i)<a\b[^>]*>`)
+	mdSrcRE          = regexp.MustCompile(`(?i)\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))`)
+	mdHrefRE         = regexp.MustCompile(`(?i)\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))`)
+	mdAltRE          = regexp.MustCompile(`(?i)\balt\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))`)
+	mdTitleRE        = regexp.MustCompile(`(?i)\btitle\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))`)
+	mdBareURLRE      = regexp.MustCompile("(?i)\\b(?:https?://|www\\.)[^\\s<>()\\[\\]\"'`]+")
+	mdInlineCodeRE   = regexp.MustCompile("`[^`\n]+`")
 )
+
+type mdRefDef struct {
+	label string
+	url   string
+	title string
+	span  []int
+	used  bool
+}
+
+func mdNormRefLabel(s string) string {
+	return strings.Join(strings.Fields(strings.ToLower(s)), " ")
+}
 
 type mdExtractor struct {
 	body       string
@@ -510,15 +531,70 @@ func (x *mdExtractor) extractInline() {
 	for _, m := range mdInlineCodeRE.FindAllStringIndex(body, -1) {
 		mdMark(x.code, m[0], m[1])
 	}
+	defs := map[string]*mdRefDef{}
+	var refDefs []*mdRefDef
+	for _, m := range mdRefDefRE.FindAllStringSubmatchIndex(body, -1) {
+		label := body[m[2]:m[3]]
+		key := mdNormRefLabel(label)
+		if key == "" {
+			continue
+		}
+		stop := m[1]
+		if stop > m[0] && body[stop-1] == '\r' {
+			stop--
+		}
+		span := []int{m[0], stop}
+		if x.claim(span, false) {
+			url := mdGroup(body, m, 3)
+			if m[4] >= 0 {
+				url = body[m[4]:m[5]]
+			}
+			title := cmp.Or(mdGroup(body, m, 4), mdGroup(body, m, 5), mdGroup(body, m, 6))
+			d := &mdRefDef{label: label, url: url, title: title, span: span}
+			refDefs = append(refDefs, d)
+			if defs[key] == nil {
+				defs[key] = d
+			}
+		}
+	}
 	for _, m := range mdLinkedImageRE.FindAllStringSubmatchIndex(body, -1) {
+		var url, outerTitle string
+		var outerDef, innerDef *mdRefDef
+		if m[12] >= 0 {
+			url, outerTitle = body[m[12]:m[13]], mdGroup(body, m, 7)
+		} else {
+			outerDef = defs[mdNormRefLabel(body[m[16]:m[17]])]
+			if outerDef == nil {
+				continue
+			}
+			url, outerTitle = outerDef.url, outerDef.title
+		}
+		alt := body[m[4]:m[5]]
+		var src, imgTitle string
+		if m[6] >= 0 {
+			src, imgTitle = body[m[6]:m[7]], mdGroup(body, m, 4)
+		} else {
+			imgKey := alt
+			if m[10] >= 0 && m[11] > m[10] {
+				imgKey = body[m[10]:m[11]]
+			}
+			innerDef = defs[mdNormRefLabel(imgKey)]
+			if innerDef == nil {
+				continue
+			}
+			src, imgTitle = innerDef.url, innerDef.title
+		}
 		if x.claim(m, false) {
-			alt := body[m[4]:m[5]]
-			url := body[m[10]:m[11]]
-			src := body[m[6]:m[7]]
+			if outerDef != nil {
+				outerDef.used = true
+			}
+			if innerDef != nil {
+				innerDef.used = true
+			}
 			x.addLink(m, url, alt)
-			x.addImage(m[2:], src, alt, mdGroup(body, m, 4))
+			x.addImage(m[2:4], src, alt, imgTitle)
 			if mdIsImageURL(url) && url != src {
-				x.addImage(m, url, alt, "")
+				x.addImage(m, url, alt, outerTitle)
 			}
 		}
 	}
@@ -549,12 +625,59 @@ func (x *mdExtractor) extractInline() {
 			}
 		}
 	}
-	for _, m := range mdRefDefRE.FindAllStringSubmatchIndex(body, -1) {
-		if x.claim(m, false) {
-			url, text := body[m[4]:m[5]], body[m[2]:m[3]]
-			x.addLink(m, url, text)
-			if mdIsImageURL(url) {
-				x.addImage(m, url, text, "")
+	for pos := 0; pos < len(body); {
+		loc := mdRefLinkFullRE.FindStringSubmatchIndex(body[pos:])
+		if loc == nil {
+			break
+		}
+		m := make([]int, len(loc))
+		for i, v := range loc {
+			if v >= 0 {
+				m[i] = pos + v
+			} else {
+				m[i] = -1
+			}
+		}
+		text, ref := body[m[4]:m[5]], body[m[6]:m[7]]
+		def := defs[mdNormRefLabel(cmp.Or(ref, text))]
+		if def == nil || !x.claim(m, false) {
+			pos = m[5] + 1
+			continue
+		}
+		def.used = true
+		if m[3] > m[2] {
+			x.addImage(m, def.url, text, def.title)
+		} else {
+			x.addLink(m, def.url, text)
+			if mdIsImageURL(def.url) {
+				x.addImage(m, def.url, text, def.title)
+			}
+		}
+		pos = m[1]
+	}
+	for _, m := range mdRefLinkShortRE.FindAllStringSubmatchIndex(body, -1) {
+		if m[1] < len(body) && body[m[1]] == '[' {
+			continue
+		}
+		text := body[m[4]:m[5]]
+		def := defs[mdNormRefLabel(text)]
+		if def != nil && x.claim(m, false) {
+			def.used = true
+			if m[3] > m[2] {
+				x.addImage(m, def.url, text, def.title)
+			} else {
+				x.addLink(m, def.url, text)
+				if mdIsImageURL(def.url) {
+					x.addImage(m, def.url, text, def.title)
+				}
+			}
+		}
+	}
+	for _, d := range refDefs {
+		if !d.used {
+			x.addLink(d.span, d.url, d.label)
+			if mdIsImageURL(d.url) {
+				x.addImage(d.span, d.url, d.label, d.title)
 			}
 		}
 	}

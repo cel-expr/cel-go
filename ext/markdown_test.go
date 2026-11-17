@@ -24,6 +24,7 @@ import (
 	"cel.dev/cel-go/checker"
 	"cel.dev/cel-go/common/env"
 	"cel.dev/cel-go/common/types"
+	"cel.dev/cel-go/common/types/ref"
 )
 
 func TestMarkdownParse(t *testing.T) {
@@ -280,6 +281,140 @@ func TestMarkdownCostUnbounded(t *testing.T) {
 			}
 			if det.ActualCost() == nil || *det.ActualCost() != math.MaxUint64 {
 				t.Errorf("ActualCost(%q) got %v, wanted %d", expr, det.ActualCost(), uint64(math.MaxUint64))
+			}
+		})
+	}
+}
+
+type mdCountingAdapter struct {
+	types.Adapter
+	calls int
+}
+
+func (a *mdCountingAdapter) NativeToValue(value any) ref.Val {
+	a.calls++
+	return a.Adapter.NativeToValue(value)
+}
+
+func TestMarkdownLateAdapter(t *testing.T) {
+	wrapper := &mdCountingAdapter{}
+	celEnv, err := cel.NewEnv(
+		cel.OptionalTypes(),
+		Markdown(),
+		func(e *cel.Env) (*cel.Env, error) {
+			wrapper.Adapter = e.CELTypeAdapter()
+			return cel.CustomTypeAdapter(wrapper)(e)
+		},
+	)
+	if err != nil {
+		t.Fatalf("cel.NewEnv() failed: %v", err)
+	}
+	for _, expr := range []string{
+		"markdown.parse('# Hello').value().sections[0].title == 'Hello'",
+		"markdown.parse(b'# Hello').value().sections[0].title == 'Hello'",
+	} {
+		ast, iss := celEnv.Compile(expr)
+		if iss.Err() != nil {
+			t.Fatalf("Compile(%q) failed: %v", expr, iss.Err())
+		}
+		prg, err := celEnv.Program(ast)
+		if err != nil {
+			t.Fatalf("Program(%q) failed: %v", expr, err)
+		}
+		out, _, err := prg.Eval(cel.NoVars())
+		if err != nil || out != types.True {
+			t.Fatalf("Eval(%q) = %v (%v), want true", expr, out, err)
+		}
+	}
+	if wrapper.calls < 2 {
+		t.Fatalf("late CustomTypeAdapter got %d calls, want >= 2", wrapper.calls)
+	}
+}
+
+func TestMarkdownReferenceLinks(t *testing.T) {
+	celEnv, err := cel.NewEnv(
+		cel.OptionalTypes(),
+		Bindings(),
+		Strings(),
+		Markdown(),
+		cel.Variable("md", cel.StringType),
+	)
+	if err != nil {
+		t.Fatalf("cel.NewEnv() failed: %v", err)
+	}
+
+	doc := "[link][rel-link]\r\n" +
+		"Also [Custom][REL   LINK], [Collapsed][], and [Shortcut].\r\n" +
+		"Images: ![Diagram][img-ref], ![ImgShort], and [![Badge][badge-svg]][badge-link].\r\n" +
+		"InlineImgRefLink: [![Inline](https://cel.dev/in.svg)][badge-link] and [![Badge][badge-svg]](https://cel.dev/direct.png \"Direct\").\r\n" +
+		"Unresolved outer/inner: [![Badge](https://cel.dev/only.svg)][missing] and [![missing-img]][badge-link].\r\n" +
+		"Chained brackets: [undef][mid][rel-link] and [rel-link][undef].\r\n" +
+		"Linked image URL ref: [Banner][banner-ref].\r\n" +
+		"Code ignored: `[ignored][rel-link]`.\r\n" +
+		"\r\n" +
+		"[   ]: https://cel.dev/blank-label\r\n" +
+		"[rel-link]: /docs/guide\r\n" +
+		"[rel link]:\r\n" +
+		"  <https://cel.dev/multi>\r\n" +
+		"  \"Multi Title\"\r\n" +
+		"[collapsed]: https://cel.dev/collapsed 'Collapsed Title'\r\n" +
+		"[shortcut]: https://cel.dev/shortcut (Shortcut Title)\r\n" +
+		"[img-ref]: https://cel.dev/diagram.png \"Diagram Title\"\r\n" +
+		"[imgshort]: https://cel.dev/short.png 'Short Img'\r\n" +
+		"[badge-svg]: https://cel.dev/badge.svg \"Badge SVG\"\r\n" +
+		"[badge-link]: https://cel.dev/badge-target.png \"Badge Target\"\r\n" +
+		"[banner-ref]: https://cel.dev/banner.webp \"Banner Title\"\r\n" +
+		"[unused-ref]: https://cel.dev/unused\r\n" +
+		"[unused-img]: https://cel.dev/unused.png \"Unused Img\"\r\n" +
+		"[rel-link]: https://cel.dev/shadowed\r\n"
+
+	exprs := []string{
+		// Simple '[link][rel-link]' resolves cleanly without duplicating the definition
+		"markdown.parse('[link][rel-link]\\n\\n[rel-link]: https://cel.dev/full').value().links.size() == 1",
+		"markdown.parse('[link][rel-link]\\n\\n[rel-link]: https://cel.dev/full').value().links[0].url == 'https://cel.dev/full'",
+		"markdown.parse('[link][rel-link]\\n\\n[rel-link]: https://cel.dev/full').value().links[0].text == 'link'",
+		"cel.bind(d, markdown.parse('[link][rel-link]\\n\\n[rel-link]: https://cel.dev/full').value(), d.body.substring(d.links[0].span.start, d.links[0].span.stop) == '[link][rel-link]')",
+		// Relative path resolution via reference definition
+		"markdown.parse(md).value().links.exists(l, l.text == 'link' && l.url == '/docs/guide')",
+		// Case-insensitive + whitespace-collapsed multiline reference definition
+		"markdown.parse(md).value().links.exists(l, l.text == 'Custom' && l.url == 'https://cel.dev/multi')",
+		// Collapsed and shortcut reference links
+		"markdown.parse(md).value().links.exists(l, l.text == 'Collapsed' && l.url == 'https://cel.dev/collapsed')",
+		"markdown.parse(md).value().links.exists(l, l.text == 'Shortcut' && l.url == 'https://cel.dev/shortcut')",
+		// Full and shortcut reference images with titles
+		"markdown.parse(md).value().images.exists(i, i.alt == 'Diagram' && i.src == 'https://cel.dev/diagram.png' && i.title == 'Diagram Title')",
+		"markdown.parse(md).value().images.exists(i, i.alt == 'ImgShort' && i.src == 'https://cel.dev/short.png' && i.title == 'Short Img')",
+		// Linked reference images (both ref+ref, inline+ref, and ref+inline)
+		"markdown.parse(md).value().links.exists(l, l.text == 'Badge' && l.url == 'https://cel.dev/badge-target.png')",
+		"markdown.parse(md).value().images.exists(i, i.alt == 'Badge' && i.src == 'https://cel.dev/badge.svg' && i.title == 'Badge SVG')",
+		"markdown.parse(md).value().images.exists(i, i.alt == 'Inline' && i.src == 'https://cel.dev/in.svg')",
+		"markdown.parse(md).value().images.exists(i, i.alt == 'only' || i.src == 'https://cel.dev/only.svg')",
+		// Chained brackets '[undef][mid][rel-link]' resolves '[mid][rel-link]', while '[rel-link][undef]' does not emit shortcut 'rel-link'
+		"markdown.parse(md).value().links.exists(l, l.text == 'mid' && l.url == '/docs/guide')",
+		"!markdown.parse(md).value().links.exists(l, l.text == 'rel-link' && l.url == '/docs/guide')",
+		// Reference link pointing to an image URL populates both links and images
+		"markdown.parse(md).value().images.exists(i, i.alt == 'Banner' && i.src == 'https://cel.dev/banner.webp' && i.title == 'Banner Title')",
+		// Code spans are ignored
+		"!markdown.parse(md).value().links.exists(l, l.text == 'ignored')",
+		// Unreferenced definitions and shadowed duplicate definitions still surface
+		"markdown.parse(md).value().links.exists(l, l.text == 'unused-ref' && l.url == 'https://cel.dev/unused')",
+		"markdown.parse(md).value().images.exists(i, i.alt == 'unused-img' && i.src == 'https://cel.dev/unused.png' && i.title == 'Unused Img')",
+		"markdown.parse(md).value().links.exists(l, l.text == 'rel-link' && l.url == 'https://cel.dev/shadowed')",
+	}
+
+	for _, expr := range exprs {
+		t.Run(expr, func(t *testing.T) {
+			ast, iss := celEnv.Compile(expr)
+			if iss.Err() != nil {
+				t.Fatalf("Compile(%q) failed: %v", expr, iss.Err())
+			}
+			prg, err := celEnv.Program(ast)
+			if err != nil {
+				t.Fatalf("Program(%q) failed: %v", expr, err)
+			}
+			out, _, err := prg.Eval(map[string]any{"md": doc})
+			if err != nil || out != types.True {
+				t.Fatalf("Eval(%q) = %v (%v), want true", expr, out, err)
 			}
 		})
 	}
