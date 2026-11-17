@@ -43,12 +43,18 @@ type costGolden struct {
 }
 
 // costGoldenV0Accepted lists the deliberate departures from v0.32.0 at version 0, keyed by test
-// name and then by the kind of cost, "estimate" or "actual cost". These fixed a cost which let an
-// unbounded operation run for less than it costs, so version 0 does not restore them.
+// name and then by the kind of cost, "estimate" or "actual cost". Each either fixes a cost which
+// let an unbounded operation run for less than it costs, or restores the cost of a release before
+// v0.32.0 that callers pinned to version 0 recorded their estimates under.
 var costGoldenV0Accepted = map[string]map[string]string{
 	"TestEncodersCosts/json_encode_dyn": {
 		"actual cost": "json.encode traverses its argument without the cost tracker observing it; " +
 			"v0.32.0 charged 1, and #1430 charges math.MaxUint64 at every version",
+	},
+	"TestListsCosts/list_distinct_var_v3": {
+		"estimate": "lists v3 estimated distinct at a flat factor of 2 per pair through v0.30.0, which " +
+			"Kubernetes 1.37 pinned; #1352 gave the v0.31.0 legacy estimator the string factor of sort, " +
+			"and version 0 restores the flat factor",
 	},
 }
 

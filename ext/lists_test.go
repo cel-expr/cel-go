@@ -994,9 +994,11 @@ func TestListsCosts(t *testing.T) {
 			in:            map[string]any{"x": []string{"hello", "hello"}},
 			hints:         map[string]uint64{"x": 3},
 			estimatedCost: cost.RangedCostEstimate(23, 42),
-			actualCost:    32,
-			actualCostV0:  actualV0(31),
-			version:       3,
+			// Version 0 charges the flat factor of 2 per pair of lists v3 through v0.30.0.
+			estimatedCostV0: costV0(23, 41),
+			actualCost:      32,
+			actualCostV0:    actualV0(31),
+			version:         3,
 		},
 		{
 			name:            "list_distinct_var_v4_no_item_hint",

@@ -562,11 +562,6 @@ const (
 	// the actual single-level flatten falls below.
 	defectL4 = "L4: flatten estimates a fixed cost for a variable depth"
 
-	// L7: the v3 flatten result size is the size of the *input* list rather than the flattened
-	// length, so a comprehension over the result iterates more elements than were estimated.
-	// Note that correcting it raises an estimated Max at the version Kubernetes pins.
-	defectL7 = "L7: lists v3 flatten result size is the input length, not the flattened length"
-
 	// S1: the result is sized as one character per element plus separators, ignoring element
 	// length entirely.
 	defectS1 = "S1: join sizes the result as one character per element"
@@ -606,21 +601,21 @@ func listsCostAllowlistV0(label string, version uint32) costBoundsAllowlist {
 	add(allow, defectL3, `lists.range(2 + 2)`, `lists.range(d)`)
 	add(allow, defectL4, `ll.flatten(d)`)
 	if version == 3 {
-		// The legacy estimator rounds the shared 2.1 factor up where the tracker truncates, so
-		// every self-comparison is estimated one unit above what it charges.
+		// The legacy estimator rounds the shared 2.1 factor of sort and sortBy up where the tracker
+		// truncates, so those self-comparisons are estimated one unit above what they charge.
+		// distinct estimates the flat factor of 2 it had through v0.30.0, which matches the
+		// truncated charge for these short lists but falls below the tracker's 2.1 per pair once
+		// the list is long enough for the extra 0.1 to add up to a unit.
 		add(allow, defectL1,
 			`l.sort()`,
 			`l1.sort()`,
 			`['c', 'a', 'b'].sort()`,
 			`l.sortBy(i, i)`,
 			`l1.sortBy(i, i)`,
-			`l.distinct()`,
 			`l1.distinct()`,
-			`['a', 'bb', 'ccc'].distinct()`,
 			`l.distinct().exists(i, i.contains('z'))`,
 			`l1.distinct().exists(i, i.contains('z'))`,
 		)
-		add(allow, defectL7, `ll.flatten().exists(i, i.contains('z'))`)
 		return allow
 	}
 	// From v4 the estimate scales by the element equality cost, which rounds to 1 for elements of
