@@ -196,7 +196,7 @@ func DurationGetHours(val ref.Val) ref.Val {
 	if !ok {
 		return MaybeNoSuchOverloadErr(val)
 	}
-	return Int(dur.Hours())
+	return Int(dur.Duration / time.Hour)
 }
 
 // DurationGetMinutes returns duration in minutes.
@@ -205,7 +205,7 @@ func DurationGetMinutes(val ref.Val) ref.Val {
 	if !ok {
 		return MaybeNoSuchOverloadErr(val)
 	}
-	return Int(dur.Minutes())
+	return Int(dur.Duration / time.Minute)
 }
 
 // DurationGetSeconds returns duration in seconds.
@@ -214,7 +214,7 @@ func DurationGetSeconds(val ref.Val) ref.Val {
 	if !ok {
 		return MaybeNoSuchOverloadErr(val)
 	}
-	return Int(dur.Seconds())
+	return Int(dur.Duration / time.Second)
 }
 
 // DurationGetMilliseconds returns duration in milliseconds.
