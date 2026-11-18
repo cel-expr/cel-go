@@ -99,12 +99,11 @@ func (af *appendingFormatterV2) format(arg ref.Val) error {
 		af.buf = append(af.buf, argStr...)
 		return nil
 	case types.DurationType:
-		argDur, ok := arg.Value().(time.Duration)
-		if !ok {
-			return fmt.Errorf("type conversion error from '%s' to '%s'", arg.Type(), types.DurationType)
+		argStrVal := arg.ConvertToType(types.StringType)
+		if types.IsError(argStrVal) {
+			return argStrVal.(*types.Err)
 		}
-		af.buf = strconv.AppendFloat(af.buf, argDur.Seconds(), 'f', -1, 64)
-		af.buf = append(af.buf, "s"...)
+		af.buf = append(af.buf, string(argStrVal.(types.String))...)
 		return nil
 	case types.TimestampType:
 		argTime, ok := arg.Value().(time.Time)
