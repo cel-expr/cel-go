@@ -16,6 +16,11 @@ name: "limits"
 extensions:
   - name: "strings"
     version: latest
+    config:
+      locale: "en_US"
+    subset:
+      exclude_functions:
+        - name: "charAt"
 variables:
   - name: "now"
     type:

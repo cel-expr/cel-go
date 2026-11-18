@@ -9,6 +9,20 @@
     {
       "name": "math",
       "version": "latest"
+    },
+    {
+      "name": "strings",
+      "version": "3",
+      "config": {
+        "locale": "en_US"
+      },
+      "subset": {
+        "excludeFunctions": [
+          {
+            "name": "format"
+          }
+        ]
+      }
     }
   ],
   "variables": [

@@ -40,7 +40,12 @@ extensions:
   - name: "protos"
   - name: "sets"
   - name: "strings"
-    version: 1`,
+    version: 1
+    config:
+      locale: "en_US"
+    subset:
+      exclude_functions:
+        - name: "charAt"`,
 		`
 functions:
   - name: "coalesce"
