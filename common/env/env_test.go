@@ -79,6 +79,9 @@ func TestConfig(t *testing.T) {
 				AddExtensions(
 					NewExtension("optional", 2),
 					NewExtension("math", math.MaxUint32),
+					NewExtension("strings", 3).
+						SetConfig(map[string]any{"locale": "en_US"}).
+						SetSubset(NewLibrarySubset().AddExcludedFunctions(&Function{Name: "format"})),
 				).AddVariables(
 				NewVariableWithDoc("msg",
 					NewTypeDesc("google.expr.proto3.test.TestAllTypes"),
@@ -145,6 +148,9 @@ func TestConfig(t *testing.T) {
 				AddExtensions(
 					NewExtension("optional", 2),
 					NewExtension("math", math.MaxUint32),
+					NewExtension("strings", 3).
+						SetConfig(map[string]any{"locale": "en_US"}).
+						SetSubset(NewLibrarySubset().AddExcludedFunctions(&Function{Name: "format"})),
 				).AddVariables(
 				NewVariableWithDoc("msg",
 					NewTypeDesc("google.expr.proto3.test.TestAllTypes"),
@@ -1568,6 +1574,23 @@ func TestExtensionConfigValue(t *testing.T) {
 	}
 	if val, found := e.ConfigValue("locale"); !found || val != "en_US" {
 		t.Errorf("e.ConfigValue() got %v, %t -- wanted en_US, true", val, found)
+	}
+}
+
+func TestExtensionSetSubset(t *testing.T) {
+	initial := NewLibrarySubset().AddExcludedFunctions(&Function{Name: "format"})
+	e := NewExtension("strings", 3).SetSubset(initial)
+	if !reflect.DeepEqual(e.Subset, initial) {
+		t.Fatalf("e.Subset got %v, wanted %v", e.Subset, initial)
+	}
+	override := NewLibrarySubset().AddIncludedFunctions(&Function{Name: "charAt"})
+	e.SetSubset(override)
+	if !reflect.DeepEqual(e.Subset, override) {
+		t.Fatalf("e.Subset after override got %v, wanted %v", e.Subset, override)
+	}
+	e.SetSubset(nil)
+	if e.Subset != nil {
+		t.Fatalf("e.Subset after reset got %v, wanted nil", e.Subset)
 	}
 }
 

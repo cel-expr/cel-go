@@ -19,6 +19,13 @@ extensions:
     version: "2"
   - name: "math"
     version: "latest"
+  - name: "strings"
+    version: "3"
+    config:
+      locale: "en_US"
+    subset:
+      exclude_functions:
+        - name: "format"
 variables:
   - name: "msg"
     type_name: "google.expr.proto3.test.TestAllTypes"
