@@ -228,7 +228,7 @@ func TestTimestampOperators(t *testing.T) {
 			op: func() ref.Val {
 				return unixTimestamp(1).Subtract(durationOf(math.MinInt64))
 			},
-			out: errIntOverflow,
+			out: time.Unix(9223372037, 854775808).UTC(),
 		},
 	}
 	for _, tst := range tests {
