@@ -83,6 +83,11 @@ go_deps.gazelle_override(
 )
 go_deps.from_file(go_mod = "//:go.mod")
 go_deps.module(
+    path = "github.com/blang/semver/v4",
+    sum = "h1:1PFHFE6yCCTv8C1TeyNNarDzntLi7wMI5i/pzqYIsAM=",
+    version = "v4.0.0",
+)
+go_deps.module(
     path = "github.com/chzyer/readline",
     sum = "h1:upd/6fQk4src78LMRzh5vItIt361/o4uq553V8B5sGI=",
     version = "v1.5.1",
@@ -95,6 +100,7 @@ go_deps.module(
 use_repo(
     go_deps,
     "com_github_antlr4_go_antlr_v4",
+    "com_github_blang_semver_v4",
     "com_github_chzyer_readline",
     "com_github_google_go_cmp",
     "in_yaml_go_yaml_v3",
