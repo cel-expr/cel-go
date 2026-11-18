@@ -24,8 +24,6 @@ import (
 	"cel.dev/cel-go/common/overloads"
 	"cel.dev/cel-go/common/stdlib/bindings"
 	"cel.dev/cel-go/common/types"
-	"cel.dev/cel-go/common/types/ref"
-	"cel.dev/cel-go/common/types/traits"
 )
 
 var (
@@ -288,19 +286,7 @@ func initStandard() {
 			decls.Overload(overloads.LessDuration,
 				argTypes(types.DurationType, types.DurationType), types.BoolType,
 				decls.OverloadExamples(`duration('1ms') < duration('1s') // true`)),
-			decls.SingletonBinaryBinding(func(lhs, rhs ref.Val) ref.Val {
-				if isNaNComparison(lhs, rhs) {
-					return types.False
-				}
-				cmp := lhs.(traits.Comparer).Compare(rhs)
-				if cmp == types.IntNegOne {
-					return types.True
-				}
-				if cmp == types.IntOne || cmp == types.IntZero {
-					return types.False
-				}
-				return cmp
-			}, traits.ComparerType)),
+			singletonBinaryBinding(operators.Less)),
 
 		function(operators.LessEquals,
 			decls.FunctionDocs(
@@ -348,19 +334,7 @@ func initStandard() {
 			decls.Overload(overloads.LessEqualsDuration,
 				argTypes(types.DurationType, types.DurationType), types.BoolType,
 				decls.OverloadExamples(`duration('1ms') <= duration('1s') // true`)),
-			decls.SingletonBinaryBinding(func(lhs, rhs ref.Val) ref.Val {
-				if isNaNComparison(lhs, rhs) {
-					return types.False
-				}
-				cmp := lhs.(traits.Comparer).Compare(rhs)
-				if cmp == types.IntNegOne || cmp == types.IntZero {
-					return types.True
-				}
-				if cmp == types.IntOne {
-					return types.False
-				}
-				return cmp
-			}, traits.ComparerType)),
+			singletonBinaryBinding(operators.LessEquals)),
 
 		function(operators.Greater,
 			decls.FunctionDocs(
@@ -408,19 +382,7 @@ func initStandard() {
 			decls.Overload(overloads.GreaterDuration,
 				argTypes(types.DurationType, types.DurationType), types.BoolType,
 				decls.OverloadExamples(`duration('1ms') > duration('1us') // true`)),
-			decls.SingletonBinaryBinding(func(lhs, rhs ref.Val) ref.Val {
-				if isNaNComparison(lhs, rhs) {
-					return types.False
-				}
-				cmp := lhs.(traits.Comparer).Compare(rhs)
-				if cmp == types.IntOne {
-					return types.True
-				}
-				if cmp == types.IntNegOne || cmp == types.IntZero {
-					return types.False
-				}
-				return cmp
-			}, traits.ComparerType)),
+			singletonBinaryBinding(operators.Greater)),
 
 		function(operators.GreaterEquals,
 			decls.FunctionDocs(
@@ -468,19 +430,7 @@ func initStandard() {
 			decls.Overload(overloads.GreaterEqualsDuration,
 				argTypes(types.DurationType, types.DurationType), types.BoolType,
 				decls.OverloadExamples(`duration('60s') >= duration('1m') // true`)),
-			decls.SingletonBinaryBinding(func(lhs, rhs ref.Val) ref.Val {
-				if isNaNComparison(lhs, rhs) {
-					return types.False
-				}
-				cmp := lhs.(traits.Comparer).Compare(rhs)
-				if cmp == types.IntOne || cmp == types.IntZero {
-					return types.True
-				}
-				if cmp == types.IntNegOne {
-					return types.False
-				}
-				return cmp
-			}, traits.ComparerType)),
+			singletonBinaryBinding(operators.GreaterEquals)),
 
 		// Indexing
 		function(operators.Index,
@@ -881,23 +831,6 @@ func unaryBinding(id string) decls.OverloadOpt {
 
 func binaryBinding(id string) decls.OverloadOpt {
 	return decls.BinaryBinding(bindings.Lookup(id).Binary)
-}
-
-func isNumeric(val ref.Val) bool {
-	switch val.(type) {
-	case types.Double, types.Int, types.Uint:
-		return true
-	default:
-		return false
-	}
-}
-
-func isNaNComparison(lhs, rhs ref.Val) bool {
-	return (isNaN(lhs) && isNumeric(rhs)) || (isNumeric(lhs) && isNaN(rhs))
-}
-
-func noFunctionOverrides(args ...ref.Val) ref.Val {
-	return types.NoSuchOverloadErr()
 }
 
 func singletonUnaryBinding(op string) decls.FunctionOpt {

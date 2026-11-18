@@ -117,7 +117,7 @@ func initBindings() {
 			Operator:     operators.Less,
 			OperandTrait: traits.ComparerType,
 			Binary: func(lhs, rhs ref.Val) ref.Val {
-				if isNaN(lhs) || isNaN(rhs) {
+				if isNaNComparison(lhs, rhs) {
 					return types.False
 				}
 				cmp := lhs.(traits.Comparer).Compare(rhs)
@@ -134,7 +134,7 @@ func initBindings() {
 			Operator:     operators.LessEquals,
 			OperandTrait: traits.ComparerType,
 			Binary: func(lhs, rhs ref.Val) ref.Val {
-				if isNaN(lhs) || isNaN(rhs) {
+				if isNaNComparison(lhs, rhs) {
 					return types.False
 				}
 				cmp := lhs.(traits.Comparer).Compare(rhs)
@@ -151,7 +151,7 @@ func initBindings() {
 			Operator:     operators.Greater,
 			OperandTrait: traits.ComparerType,
 			Binary: func(lhs, rhs ref.Val) ref.Val {
-				if isNaN(lhs) || isNaN(rhs) {
+				if isNaNComparison(lhs, rhs) {
 					return types.False
 				}
 				cmp := lhs.(traits.Comparer).Compare(rhs)
@@ -168,7 +168,7 @@ func initBindings() {
 			Operator:     operators.GreaterEquals,
 			OperandTrait: traits.ComparerType,
 			Binary: func(lhs, rhs ref.Val) ref.Val {
-				if isNaN(lhs) || isNaN(rhs) {
+				if isNaNComparison(lhs, rhs) {
 					return types.False
 				}
 				cmp := lhs.(traits.Comparer).Compare(rhs)
@@ -372,6 +372,19 @@ func isNaN(val ref.Val) bool {
 		return false
 	}
 	return math.IsNaN(float64(d))
+}
+
+func isNumeric(val ref.Val) bool {
+	switch val.(type) {
+	case types.Double, types.Int, types.Uint:
+		return true
+	default:
+		return false
+	}
+}
+
+func isNaNComparison(lhs, rhs ref.Val) bool {
+	return (isNaN(lhs) && isNumeric(rhs)) || (isNumeric(lhs) && isNaN(rhs))
 }
 
 func noFunctionOverrides(args ...ref.Val) ref.Val {
