@@ -69,6 +69,26 @@ type testCase struct {
 func testData(t testing.TB) []testCase {
 	return []testCase{
 		{
+			name: "negate_dyn_duration",
+			expr: `-dyn(duration('1s'))`,
+			err:  "no such overload",
+		},
+		{
+			name: "negate_dyn_bool",
+			expr: `-dyn(true)`,
+			err:  "no such overload",
+		},
+		{
+			name: "negate_dyn_int",
+			expr: `-dyn(5)`,
+			out:  types.Int(-5),
+		},
+		{
+			name: "negate_dyn_double",
+			expr: `-dyn(2.5)`,
+			out:  types.Double(-2.5),
+		},
+		{
 			name: "double_ne_nan",
 			expr: `0.0/0.0 == 0.0/0.0`,
 			out:  types.False,

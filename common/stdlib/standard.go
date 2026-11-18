@@ -231,7 +231,7 @@ func initStandard() {
 			decls.Overload(overloads.NegateInt64, argTypes(types.IntType), types.IntType,
 				decls.OverloadExamples(`-(5) // -5`)),
 			decls.SingletonUnaryBinding(func(val ref.Val) ref.Val {
-				if types.IsBool(val) {
+				if t := val.Type(); t != types.IntType && t != types.DoubleType {
 					return types.MaybeNoSuchOverloadErr(val)
 				}
 				return val.(traits.Negater).Negate()
