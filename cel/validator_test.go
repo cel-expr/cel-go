@@ -44,19 +44,19 @@ func TestValidateDurationLiterals(t *testing.T) {
 	}{
 		{
 			expr: `duration('1')`,
-			iss: `ERROR: <input>:1:10: invalid duration argument
+			iss: `ERROR: <input>:1:10: invalid duration argument: type conversion error from 'string' to 'google.protobuf.Duration'
 			| duration('1')
 			| .........^`,
 		},
 		{
 			expr: `duration('1d')`,
-			iss: `ERROR: <input>:1:10: invalid duration argument
+			iss: `ERROR: <input>:1:10: invalid duration argument: type conversion error from 'string' to 'google.protobuf.Duration'
 			| duration('1d')
 			| .........^`,
 		},
 		{
 			expr: "duration('1us')\n < duration('1nns')",
-			iss: `ERROR: <input>:2:13: invalid duration argument
+			iss: `ERROR: <input>:2:13: invalid duration argument: type conversion error from 'string' to 'google.protobuf.Duration'
 			|  < duration('1nns')
 			| ............^`,
 		},
@@ -101,13 +101,13 @@ func TestValidateTimestampLiterals(t *testing.T) {
 	}{
 		{
 			expr: `timestamp('1000-00-00T00:00:00Z')`,
-			iss: `ERROR: <input>:1:11: invalid timestamp argument
+			iss: `ERROR: <input>:1:11: invalid timestamp argument: invalid RFC 3339 timestamp "1000-00-00T00:00:00Z"
 			| timestamp('1000-00-00T00:00:00Z')
 			| ..........^`,
 		},
 		{
 			expr: `timestamp('1000-01-01T00:00:00ZZ')`,
-			iss: `ERROR: <input>:1:11: invalid timestamp argument
+			iss: `ERROR: <input>:1:11: invalid timestamp argument: invalid RFC 3339 timestamp "1000-01-01T00:00:00ZZ"
 			| timestamp('1000-01-01T00:00:00ZZ')
 			| ..........^`,
 		},
@@ -119,7 +119,7 @@ func TestValidateTimestampLiterals(t *testing.T) {
 		},
 		{
 			expr: `timestamp(-62135596801)`,
-			iss: `ERROR: <input>:1:11: invalid timestamp argument
+			iss: `ERROR: <input>:1:11: invalid timestamp argument: timestamp overflow
 			| timestamp(-62135596801)
 			| ..........^`,
 		},
@@ -165,21 +165,21 @@ func TestValidateRegexLiterals(t *testing.T) {
 		{
 			expr: `'hello'.matches('x++')`,
 			iss: `
-			ERROR: <input>:1:17: invalid matches argument
+			ERROR: <input>:1:17: invalid matches argument: error parsing regexp: invalid nested repetition operator: ` + "`++`" + `
              | 'hello'.matches('x++')
              | ................^`,
 		},
 		{
 			expr: `'hello'.matches('(?<name%>el*)')`,
 			iss: `
-			ERROR: <input>:1:17: invalid matches argument
+			ERROR: <input>:1:17: invalid matches argument: error parsing regexp: invalid named capture: ` + "`(?<name%>`" + `
 			 | 'hello'.matches('(?<name%>el*)')
 			 | ................^`,
 		},
 		{
 			expr: `'hello'.matches('??el*')`,
 			iss: `
-			ERROR: <input>:1:17: invalid matches argument
+			ERROR: <input>:1:17: invalid matches argument: error parsing regexp: missing argument to repetition operator: ` + "`??`" + `
              | 'hello'.matches('??el*')
              | ................^`,
 		},
@@ -192,14 +192,14 @@ func TestValidateRegexLiterals(t *testing.T) {
 		{
 			expr: `matches('hello', 'x++')`,
 			iss: `
-			ERROR: <input>:1:18: invalid matches argument
+			ERROR: <input>:1:18: invalid matches argument: error parsing regexp: invalid nested repetition operator: ` + "`++`" + `
              | matches('hello', 'x++')
              | .................^`,
 		},
 		{
 			expr: `matches(x, '(')`,
 			iss: `
-			ERROR: <input>:1:12: invalid matches argument
+			ERROR: <input>:1:12: invalid matches argument: error parsing regexp: missing closing ): ` + "`(`" + `
              | matches(x, '(')
              | ...........^`,
 		},
@@ -648,13 +648,13 @@ func TestExtendedValidations(t *testing.T) {
 			ERROR: <input>:1:16: expected type 'string' but found 'int'
              | x in ['hello', 0] 
              | ...............^
-            ERROR: <input>:2:30: invalid duration argument
+            ERROR: <input>:2:30: invalid duration argument: type conversion error from 'string' to 'google.protobuf.Duration'
              |    && duration(x) < duration('1d') 
              | .............................^
-            ERROR: <input>:3:33: invalid timestamp argument
+            ERROR: <input>:3:33: invalid timestamp argument: invalid RFC 3339 timestamp "1000-01-00T00:00:00Z"
              |    && timestamp(x) != timestamp('1000-01-00T00:00:00Z')
              | ................................^
-            ERROR: <input>:4:17: invalid matches argument
+            ERROR: <input>:4:17: invalid matches argument: error parsing regexp: invalid nested repetition operator: ` + "`++`" + `
              |    && x.matches('x++')
              | ................^`,
 		},
