@@ -705,6 +705,31 @@ Examples:
     optional.unwrap([optional.of(1), optional.none(), optional.of(2)]) == [1, 2]
     [optional.of(1), optional.none()].unwrapOpt() == [1]
 
+## Maps
+
+Extended functions for map manipulation.
+
+CEL has no operator for combining two maps: the `+` operator concatenates
+strings, bytes, and lists, but is not defined for maps.
+
+### PutAll
+
+Returns a new map containing the entries of both maps. When a key is
+present in both, the value from the argument wins. Neither input is
+modified.
+
+The copy is shallow: a value that is itself a map is replaced rather than
+combined recursively.
+
+    <map(K, V)>.putAll(<map(K, V)>) -> <map(K, V)>
+
+Examples:
+
+    {}.putAll({}) // {}
+    {'a': 1}.putAll({'b': 2}) // {'a': 1, 'b': 2}
+    {'a': 1}.putAll({'a': 2}) // {'a': 2}
+    {'a': {'x': 1}}.putAll({'a': {'y': 2}}) // {'a': {'y': 2}}
+
 ## Lists
 
 Extended functions for list manipulation. As a general note, all indices are

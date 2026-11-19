@@ -55,6 +55,12 @@ func TestCostSoundnessBySizingStrategy(t *testing.T) {
 		`['abc', 'déf'].hasExactly(['déf', 'abc'])`,
 		`sets.contains(['abc', 'déf'], ['déf'])`,
 		`math.greatest([1, 5, 3]) == 5`,
+		// putAll over keys which collide, so that the result holds fewer entries than its inputs
+		// and a replaced value may be smaller than the one it replaces, and over list values.
+		`{'a': 'abcdefgh', 'b': 'ijklmnop'}.putAll({'b': 'q', 'c': 'r'}).exists(k, k == 'x')`,
+		`{'a': 'abcdefgh'}.putAll({'a': ''}).all(k, k == 'a')`,
+		`{'a': 'abcdefgh'}.putAll({'a': ''})['a'].contains('x')`,
+		`'x' in {'a': ['abc', 'def']}.putAll({'b': ['ghi']})['a']`,
 		// Other string functions over multi-byte text.
 		`'héllo wörld ñandú'.substring(2, 10).contains('x')`,
 		`'héllo wörld ñandú'.substring(5).contains('x')`,
@@ -104,7 +110,7 @@ func TestCostSoundnessBySizingStrategy(t *testing.T) {
 	}
 	for name, strategy := range strategies {
 		env, err := cel.NewEnv(
-			cel.OptionalTypes(), Lists(), Strings(), Regex(), Bindings(), Sets(), Math(), Encoders(),
+			cel.OptionalTypes(), Lists(), Maps(), Strings(), Regex(), Bindings(), Sets(), Math(), Encoders(),
 			cel.CostSizingStrategy(strategy),
 			cel.CostModelVersion(1),
 		)
