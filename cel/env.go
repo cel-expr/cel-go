@@ -313,7 +313,11 @@ func (e *Env) ToConfig(name string) (*env.Config, error) {
 		if versionLib, isVersioned := lib.(LibraryVersioner); isVersioned {
 			version = versionLib.LibraryVersion()
 		}
-		conf.AddExtensions(env.NewExtension(libName, version))
+		ext := env.NewExtension(libName, version)
+		if canSubset {
+			ext.SetSubset(subsetLib.LibrarySubset())
+		}
+		conf.AddExtensions(ext)
 	}
 
 	// If this is a custom environment without the standard env, mark the stdlib as disabled.
