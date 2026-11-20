@@ -22,6 +22,7 @@ import (
 	"cel.dev/cel-go/cel"
 	"cel.dev/cel-go/common/ast"
 	"cel.dev/cel-go/common/cost"
+	"cel.dev/cel-go/common/env"
 	"cel.dev/cel-go/common/types"
 	"cel.dev/cel-go/common/types/ref"
 	"cel.dev/cel-go/common/types/traits"
@@ -402,13 +403,27 @@ func MathVersion(version uint32) MathOption {
 	}
 }
 
+// MathSubset configures the math library to use a subset of its functions and macros.
+func MathSubset(subset *env.LibrarySubset) MathOption {
+	return func(lib *mathLib) *mathLib {
+		lib.subset = subset
+		return lib
+	}
+}
+
 type mathLib struct {
 	version uint32
+	subset  *env.LibrarySubset
 }
 
 // LibraryName implements the SingletonLibrary interface method.
 func (*mathLib) LibraryName() string {
 	return "cel.lib.ext.math"
+}
+
+// LibrarySubset returns the env.LibrarySubset definition associated with the library.
+func (lib *mathLib) LibrarySubset() *env.LibrarySubset {
+	return lib.subset
 }
 
 // CompileOptions implements the Library interface method.

@@ -19,6 +19,7 @@ import (
 
 	"cel.dev/cel-go/cel"
 	"cel.dev/cel-go/common/ast"
+	"cel.dev/cel-go/common/env"
 )
 
 // Protos returns a cel.EnvOption to configure extended macros and functions for
@@ -70,6 +71,14 @@ func ProtosVersion(version uint32) ProtosOption {
 	}
 }
 
+// ProtosSubset configures the protos library to use a subset of its functions and macros.
+func ProtosSubset(subset *env.LibrarySubset) ProtosOption {
+	return func(lib *protoLib) *protoLib {
+		lib.subset = subset
+		return lib
+	}
+}
+
 var (
 	protoNamespace = "proto"
 	hasExtension   = "hasExt"
@@ -78,11 +87,17 @@ var (
 
 type protoLib struct {
 	version uint32
+	subset  *env.LibrarySubset
 }
 
 // LibraryName implements the SingletonLibrary interface method.
 func (protoLib) LibraryName() string {
 	return "cel.lib.ext.protos"
+}
+
+// LibrarySubset returns the env.LibrarySubset definition associated with the library.
+func (lib protoLib) LibrarySubset() *env.LibrarySubset {
+	return lib.subset
 }
 
 // CompileOptions implements the Library interface method.

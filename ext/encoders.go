@@ -28,6 +28,7 @@ import (
 
 	"cel.dev/cel-go/cel"
 	"cel.dev/cel-go/common/cost"
+	"cel.dev/cel-go/common/env"
 	"cel.dev/cel-go/common/types"
 	"cel.dev/cel-go/common/types/ref"
 	"cel.dev/cel-go/common/types/traits"
@@ -173,12 +174,26 @@ func EncodersVersion(version uint32) EncodersOption {
 	}
 }
 
+// EncodersSubset configures the encoders library to use a subset of its functions and macros.
+func EncodersSubset(subset *env.LibrarySubset) EncodersOption {
+	return func(lib *encoderLib) *encoderLib {
+		lib.subset = subset
+		return lib
+	}
+}
+
 type encoderLib struct {
 	version uint32
+	subset  *env.LibrarySubset
 }
 
 func (*encoderLib) LibraryName() string {
 	return "cel.lib.ext.encoders"
+}
+
+// LibrarySubset returns the env.LibrarySubset definition associated with the library.
+func (lib *encoderLib) LibrarySubset() *env.LibrarySubset {
+	return lib.subset
 }
 
 func (lib *encoderLib) CompileOptions() []cel.EnvOption {

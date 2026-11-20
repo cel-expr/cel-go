@@ -1202,6 +1202,49 @@ func TestEnvFromConfigErrors(t *testing.T) {
 	}
 }
 
+func TestEnvOptionalExtensionSubset(t *testing.T) {
+	subset := env.NewLibrarySubset().
+		AddExcludedMacros("optFlatMap").
+		AddExcludedFunctions(&env.Function{Name: "last"})
+	conf := env.NewConfig("optional-subset").
+		AddExtensions(env.NewExtension("optional", 2).SetSubset(subset))
+
+	e, err := NewCustomEnv(FromConfig(conf))
+	if err != nil {
+		t.Fatalf("NewCustomEnv(FromConfig()) failed: %v", err)
+	}
+	if _, iss := e.Compile(`optional.of(1).hasValue()`); iss.Err() != nil {
+		t.Fatalf("Compile(optional.of(1).hasValue()) failed: %v", iss.Err())
+	}
+	if _, iss := e.Compile(`[1, 2].first()`); iss.Err() != nil {
+		t.Fatalf("Compile([1, 2].first()) failed: %v", iss.Err())
+	}
+	if _, iss := e.Compile(`[1, 2].last()`); iss.Err() == nil {
+		t.Fatalf("Compile([1, 2].last()) succeeded, wanted error for excluded function")
+	}
+	if _, iss := e.Compile(`optional.of(1).optFlatMap(x, optional.of(x))`); iss.Err() == nil {
+		t.Fatalf("Compile(optFlatMap) succeeded, wanted error for excluded macro")
+	}
+
+	gotCfg, err := e.ToConfig("optional-subset")
+	if err != nil {
+		t.Fatalf("e.ToConfig() failed: %v", err)
+	}
+	if len(gotCfg.Extensions) != 1 || !reflect.DeepEqual(gotCfg.Extensions[0].Subset, subset) {
+		t.Fatalf("ToConfig().Extensions = %v, wanted subset %v", gotCfg.Extensions, subset)
+	}
+
+	disabledConf := env.NewConfig("optional-disabled").
+		AddExtensions(env.NewExtension("optional", 2).SetSubset(env.NewLibrarySubset().SetDisabled(true)))
+	eDisabled, err := NewCustomEnv(FromConfig(disabledConf))
+	if err != nil {
+		t.Fatalf("NewCustomEnv(FromConfig(disabled)) failed: %v", err)
+	}
+	if eDisabled.HasLibrary("cel.lib.optional") {
+		t.Fatalf("eDisabled.HasLibrary('cel.lib.optional') = true, wanted false")
+	}
+}
+
 func TestEnvVariableValidation(t *testing.T) {
 	tcs := []struct {
 		name    string

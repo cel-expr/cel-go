@@ -18,6 +18,7 @@ import (
 	"cel.dev/cel-go/cel"
 	"cel.dev/cel-go/common/ast"
 	"cel.dev/cel-go/common/cost"
+	"cel.dev/cel-go/common/env"
 	"cel.dev/cel-go/common/operators"
 	"cel.dev/cel-go/common/types"
 	"cel.dev/cel-go/common/types/ref"
@@ -93,13 +94,27 @@ func SetsVersion(version uint32) SetsOption {
 	}
 }
 
+// SetsSubset configures the sets library to use a subset of its functions and macros.
+func SetsSubset(subset *env.LibrarySubset) SetsOption {
+	return func(lib *setsLib) *setsLib {
+		lib.subset = subset
+		return lib
+	}
+}
+
 type setsLib struct {
 	version uint32
+	subset  *env.LibrarySubset
 }
 
 // LibraryName implements the SingletonLibrary interface method.
 func (setsLib) LibraryName() string {
 	return "cel.lib.ext.sets"
+}
+
+// LibrarySubset returns the env.LibrarySubset definition associated with the library.
+func (lib setsLib) LibrarySubset() *env.LibrarySubset {
+	return lib.subset
 }
 
 // CompileOptions implements the Library interface method.

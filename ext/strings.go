@@ -29,6 +29,7 @@ import (
 
 	"cel.dev/cel-go/cel"
 	"cel.dev/cel-go/common/cost"
+	"cel.dev/cel-go/common/env"
 	"cel.dev/cel-go/common/types"
 	"cel.dev/cel-go/common/types/ref"
 	"cel.dev/cel-go/common/types/traits"
@@ -327,11 +328,17 @@ type stringLib struct {
 	locale       string
 	version      uint32
 	maxPrecision int
+	subset       *env.LibrarySubset
 }
 
 // LibraryName implements the SingletonLibrary interface method.
 func (*stringLib) LibraryName() string {
 	return "cel.lib.ext.strings"
+}
+
+// LibrarySubset returns the env.LibrarySubset definition associated with the library.
+func (lib *stringLib) LibrarySubset() *env.LibrarySubset {
+	return lib.subset
 }
 
 // StringsOption is a functional interface for configuring the strings library.
@@ -381,6 +388,14 @@ func StringsValidateFormatCalls(value bool) StringsOption {
 func StringsMaxPrecision(limit int) StringsOption {
 	return func(lib *stringLib) *stringLib {
 		lib.maxPrecision = limit
+		return lib
+	}
+}
+
+// StringsSubset configures the strings library to use a subset of its functions and macros.
+func StringsSubset(subset *env.LibrarySubset) StringsOption {
+	return func(lib *stringLib) *stringLib {
+		lib.subset = subset
 		return lib
 	}
 }
