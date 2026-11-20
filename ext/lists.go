@@ -24,6 +24,7 @@ import (
 	"cel.dev/cel-go/common/ast"
 	"cel.dev/cel-go/common/cost"
 	"cel.dev/cel-go/common/decls"
+	"cel.dev/cel-go/common/env"
 	"cel.dev/cel-go/common/types"
 	"cel.dev/cel-go/common/types/ref"
 	"cel.dev/cel-go/common/types/traits"
@@ -236,11 +237,17 @@ const defaultMaxRangeSize = 1_000_000
 type listsLib struct {
 	version      uint32
 	maxRangeSize int64
+	subset       *env.LibrarySubset
 }
 
 // LibraryName implements the SingletonLibrary interface method.
 func (listsLib) LibraryName() string {
 	return "cel.lib.ext.lists"
+}
+
+// LibrarySubset returns the env.LibrarySubset definition associated with the library.
+func (lib listsLib) LibrarySubset() *env.LibrarySubset {
+	return lib.subset
 }
 
 // ListsOption is a functional interface for configuring the strings library.
@@ -268,6 +275,14 @@ func ListsVersion(version uint32) ListsOption {
 func ListsMaxRangeSize(size int64) ListsOption {
 	return func(lib *listsLib) *listsLib {
 		lib.maxRangeSize = size
+		return lib
+	}
+}
+
+// ListsSubset configures the lists library to use a subset of its functions and macros.
+func ListsSubset(subset *env.LibrarySubset) ListsOption {
+	return func(lib *listsLib) *listsLib {
+		lib.subset = subset
 		return lib
 	}
 }

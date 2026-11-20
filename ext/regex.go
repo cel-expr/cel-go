@@ -24,6 +24,7 @@ import (
 
 	"cel.dev/cel-go/cel"
 	"cel.dev/cel-go/common/cost"
+	"cel.dev/cel-go/common/env"
 	"cel.dev/cel-go/common/types"
 	"cel.dev/cel-go/common/types/ref"
 )
@@ -120,13 +121,27 @@ func RegexVersion(version uint32) RegexOptions {
 	}
 }
 
+// RegexSubset configures the regex library to use a subset of its functions and macros.
+func RegexSubset(subset *env.LibrarySubset) RegexOptions {
+	return func(lib *regexLib) *regexLib {
+		lib.subset = subset
+		return lib
+	}
+}
+
 type regexLib struct {
 	version uint32
+	subset  *env.LibrarySubset
 }
 
 // LibraryName implements that SingletonLibrary interface method.
 func (r *regexLib) LibraryName() string {
 	return "cel.lib.ext.regex"
+}
+
+// LibrarySubset returns the env.LibrarySubset definition associated with the library.
+func (r *regexLib) LibrarySubset() *env.LibrarySubset {
+	return r.subset
 }
 
 // CompileOptions implements the cel.Library interface method.

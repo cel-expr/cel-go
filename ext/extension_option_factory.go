@@ -80,48 +80,51 @@ func initExtFactories() {
 			if err := validateAllowedConfigKeys(ext); err != nil {
 				return nil, err
 			}
-			return Bindings(BindingsVersion(version)), nil
+			return Bindings(BindingsVersion(version), BindingsSubset(ext.Subset)), nil
 		},
 		"cel.lib.ext.encoders": func(version uint32, ext *env.Extension) (cel.EnvOption, error) {
 			if err := validateAllowedConfigKeys(ext); err != nil {
 				return nil, err
 			}
-			return Encoders(EncodersVersion(version)), nil
+			return Encoders(EncodersVersion(version), EncodersSubset(ext.Subset)), nil
 		},
 		"cel.lib.ext.lists": listsExtensionFactory,
 		"cel.lib.ext.math": func(version uint32, ext *env.Extension) (cel.EnvOption, error) {
 			if err := validateAllowedConfigKeys(ext); err != nil {
 				return nil, err
 			}
-			return Math(MathVersion(version)), nil
+			return Math(MathVersion(version), MathSubset(ext.Subset)), nil
 		},
 		"cel.lib.ext.protos": func(version uint32, ext *env.Extension) (cel.EnvOption, error) {
 			if err := validateAllowedConfigKeys(ext); err != nil {
 				return nil, err
 			}
-			return Protos(ProtosVersion(version)), nil
+			return Protos(ProtosVersion(version), ProtosSubset(ext.Subset)), nil
 		},
 		"cel.lib.ext.sets": func(version uint32, ext *env.Extension) (cel.EnvOption, error) {
 			if err := validateAllowedConfigKeys(ext); err != nil {
 				return nil, err
 			}
-			return Sets(SetsVersion(version)), nil
+			return Sets(SetsVersion(version), SetsSubset(ext.Subset)), nil
 		},
 		"cel.lib.ext.strings": stringsExtensionFactory,
 		"cel.lib.ext.comprev2": func(version uint32, ext *env.Extension) (cel.EnvOption, error) {
 			if err := validateAllowedConfigKeys(ext); err != nil {
 				return nil, err
 			}
-			return TwoVarComprehensions(TwoVarComprehensionsVersion(version)), nil
+			return TwoVarComprehensions(TwoVarComprehensionsVersion(version), TwoVarComprehensionsSubset(ext.Subset)), nil
 		},
 		"cel.lib.ext.regex": func(version uint32, ext *env.Extension) (cel.EnvOption, error) {
 			if err := validateAllowedConfigKeys(ext); err != nil {
 				return nil, err
 			}
-			return Regex(RegexVersion(version)), nil
+			return Regex(RegexVersion(version), RegexSubset(ext.Subset)), nil
 		},
-		"cel.lib.ext.markdown": func(version uint32) cel.EnvOption {
-			return Markdown(MarkdownVersion(version))
+		"cel.lib.ext.markdown": func(version uint32, ext *env.Extension) (cel.EnvOption, error) {
+			if err := validateAllowedConfigKeys(ext); err != nil {
+				return nil, err
+			}
+			return Markdown(MarkdownVersion(version), MarkdownSubset(ext.Subset)), nil
 		},
 	}
 
@@ -143,7 +146,7 @@ func listsExtensionFactory(version uint32, ext *env.Extension) (cel.EnvOption, e
 	if err := validateAllowedConfigKeys(ext, "max_range_size"); err != nil {
 		return nil, err
 	}
-	opts := []ListsOption{ListsVersion(version)}
+	opts := []ListsOption{ListsVersion(version), ListsSubset(ext.Subset)}
 	if raw, found := ext.ConfigValue("max_range_size"); found {
 		size, err := extensionIntConfig(ext, "max_range_size", raw)
 		if err != nil {
@@ -161,7 +164,7 @@ func stringsExtensionFactory(version uint32, ext *env.Extension) (cel.EnvOption,
 	if err := validateAllowedConfigKeys(ext, "locale", "max_precision"); err != nil {
 		return nil, err
 	}
-	opts := []StringsOption{StringsVersion(version)}
+	opts := []StringsOption{StringsVersion(version), StringsSubset(ext.Subset)}
 	if raw, found := ext.ConfigValue("locale"); found {
 		locale, ok := raw.(string)
 		if !ok {

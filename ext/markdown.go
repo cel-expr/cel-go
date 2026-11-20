@@ -30,6 +30,7 @@ import (
 	"unicode/utf8"
 
 	"cel.dev/cel-go/cel"
+	"cel.dev/cel-go/common/env"
 	"cel.dev/cel-go/common/types"
 	"cel.dev/cel-go/common/types/ref"
 	"go.yaml.in/yaml/v3"
@@ -87,6 +88,14 @@ type MarkdownOption func(*markdownLib) *markdownLib
 func MarkdownVersion(version uint32) MarkdownOption {
 	return func(lib *markdownLib) *markdownLib {
 		lib.version = version
+		return lib
+	}
+}
+
+// MarkdownSubset configures the Markdown library to use a subset of its functions and macros.
+func MarkdownSubset(subset *env.LibrarySubset) MarkdownOption {
+	return func(lib *markdownLib) *markdownLib {
+		lib.subset = subset
 		return lib
 	}
 }
@@ -173,11 +182,17 @@ const (
 
 type markdownLib struct {
 	version uint32
+	subset  *env.LibrarySubset
 }
 
 // LibraryName implements the cel.SingletonLibrary interface method.
 func (*markdownLib) LibraryName() string {
 	return "cel.lib.ext.markdown"
+}
+
+// LibrarySubset returns the env.LibrarySubset definition associated with the library.
+func (lib *markdownLib) LibrarySubset() *env.LibrarySubset {
+	return lib.subset
 }
 
 // CompileOptions implements the cel.Library interface method.
