@@ -17,6 +17,7 @@ package cel
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -24,6 +25,7 @@ import (
 	"cel.dev/cel-go/common/operators"
 	"cel.dev/cel-go/common/types"
 	"cel.dev/cel-go/common/types/ref"
+	"cel.dev/cel-go/common/types/traits"
 	"cel.dev/cel-go/interpreter"
 	"cel.dev/cel-go/parser"
 )
@@ -373,6 +375,37 @@ func (e *Explanation) Result() ref.Val {
 	return val
 }
 
+// Violations returns the sub-expressions responsible for the expression not evaluating to true,
+// along with the comprehension iterations in which each was evaluated.
+//
+// Starting from the root, the analysis descends through logical operators, conditionals,
+// cel.bind() and cel.@block() to the operands which determined the result, and through all(),
+// exists(), and exists_one() macros to the individual iterations whose predicate determined the
+// result. For example, the violations of
+// `object.spec.containers.all(c, c.securityContext.privileged == false)` are the containers whose
+// predicate evaluated to false, identified by their list index. When a violation contains other
+// comprehensions, such as a filter() or map(), the iterations which produced their values are
+// reported instead, with the violation as their Context.
+//
+// An empty result indicates that the expression evaluated to true. Iterations which were not
+// evaluated because the result was already determined are not reported unless the program was
+// created with OptExhaustiveEval.
+func (e *Explanation) Violations() []Violation {
+	var out []Violation
+	e.blame(e.ast.Expr(), 0, true, &out)
+	return out
+}
+
+// String renders the result and violations of the evaluation.
+func (e *Explanation) String() string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "result: %s\n", formatExplainValue(e.Result()))
+	for _, v := range e.Violations() {
+		fmt.Fprintf(&sb, "  %s\n", v.String())
+	}
+	return sb.String()
+}
+
 // IterationRef identifies a single comprehension iteration.
 type IterationRef struct {
 	// ComprehensionID is the expression id of the comprehension.
@@ -428,6 +461,203 @@ func formatIterationPath(path []IterationRef) string {
 	return strings.Join(parts, " > ")
 }
 
+// Violation identifies a sub-expression which contributed to the expression not evaluating to
+// true, and the comprehension iterations in which it was evaluated.
+type Violation struct {
+	// Path lists the comprehension iterations, from outermost to innermost, in which the
+	// sub-expression was evaluated. The path is empty for sub-expressions outside of comprehensions.
+	Path []IterationRef
+
+	// ExprID is the expression id of the sub-expression.
+	ExprID int64
+
+	// Expr is the source text of the sub-expression.
+	Expr string
+
+	// Value is the value of the sub-expression within the iteration.
+	Value ref.Val
+
+	// Context is the enclosing expression whose value was derived from this iteration, when the
+	// violation was found by tracing the iterations of a filter(), map(), or other comprehension
+	// which does not itself produce a boolean, e.g. the `size() == 0` comparison of
+	// `items.filter(i, i.bad).size() == 0`. Context is nil when Expr itself determined the result.
+	Context *Violation
+}
+
+// PathString renders the iteration path of the violation, e.g. `object.spec.containers[1]`.
+func (v Violation) PathString() string {
+	return formatIterationPath(v.Path)
+}
+
+// String renders the violation.
+func (v Violation) String() string {
+	out := fmt.Sprintf("%s -> %s", v.Expr, formatExplainValue(v.Value))
+	if len(v.Path) != 0 {
+		out = v.PathString() + ": " + out
+	}
+	if v.Context != nil {
+		out += fmt.Sprintf(", in %s -> %s", v.Context.Expr, formatExplainValue(v.Context.Value))
+	}
+	return out
+}
+
+// blame appends the violations which explain why expr did not evaluate to want under the trace.
+func (e *Explanation) blame(expr celast.Expr, trace int, want bool, out *[]Violation) {
+	val, found := e.value(expr.ID(), trace)
+	if !found || val == types.Bool(want) {
+		return
+	}
+	before := len(*out)
+	if !e.blameOperands(expr, trace, want, out) {
+		e.blameLeaf(expr, trace, val, out)
+		return
+	}
+	if len(*out) == before {
+		*out = append(*out, e.violation(expr, trace, val))
+	}
+}
+
+// blameOperands blames the operands or iterations which determined the value of a logical operator,
+// conditional, cel.@block(), cel.bind(), or quantifier, and reports false for any other expression.
+func (e *Explanation) blameOperands(expr celast.Expr, trace int, want bool, out *[]Violation) bool {
+	switch expr.Kind() {
+	case celast.CallKind:
+		args := expr.AsCall().Args()
+		switch expr.AsCall().FunctionName() {
+		case operators.LogicalAnd, operators.LogicalOr:
+			// Operands which evaluated to want are skipped, so for a false `&&` only the false
+			// operands are blamed, while for a false `||` every operand is blamed.
+			for _, arg := range args {
+				e.blame(arg, trace, want, out)
+			}
+		case operators.LogicalNot:
+			before := len(*out)
+			e.blame(args[0], trace, !want, out)
+			// When the operand is itself the only violation, the negation is reported instead so
+			// the violation reads with the polarity of the source, e.g. `!has(x.y) -> false`.
+			if len(*out) == before+1 && (*out)[before].ExprID == args[0].ID() {
+				*out = (*out)[:before]
+			}
+		case operators.Conditional:
+			switch cond, _ := e.value(args[0].ID(), trace); cond {
+			case types.True:
+				e.blame(args[1], trace, want, out)
+			case types.False:
+				e.blame(args[2], trace, want, out)
+			}
+		case "cel.@block":
+			e.blame(args[1], trace, want, out)
+		default:
+			return false
+		}
+	case celast.ComprehensionKind:
+		shape := e.shapes[expr.ID()]
+		iters := e.iterations[traceKey{id: expr.ID(), parent: trace}]
+		switch shape.kind {
+		case compBind:
+			e.blame(expr.AsComprehension().Result(), trace, want, out)
+		case compAll, compExists:
+			// Each predicate value was combined into the result with `&&` or `||`, so each
+			// iteration whose predicate did not evaluate to want is blamed.
+			for _, iter := range iters {
+				e.blame(shape.pred, iter, want, out)
+			}
+		case compExistsOne:
+			// When no iteration matched, every iteration is responsible. Otherwise, the matching
+			// iterations are, either for being one too many or for being the single match.
+			matched := slices.DeleteFunc(slices.Clone(iters), func(iter int) bool {
+				v, _ := e.value(shape.pred.ID(), iter)
+				return v != types.True
+			})
+			if len(matched) == 0 {
+				for _, iter := range iters {
+					e.blame(shape.pred, iter, true, out)
+				}
+			}
+			for _, iter := range matched {
+				e.blame(shape.pred, iter, false, out)
+			}
+		default:
+			return false
+		}
+	default:
+		return false
+	}
+	return true
+}
+
+// blameLeaf reports expr as a violation. When expr contains comprehensions, such as the filter() in
+// `items.filter(i, i.bad).size() == 0`, the iterations which contributed to the comprehension
+// results are reported instead, with expr as their context.
+func (e *Explanation) blameLeaf(expr celast.Expr, trace int, val ref.Val, out *[]Violation) {
+	leaf := e.violation(expr, trace, val)
+	before := len(*out)
+	e.contributions(expr, trace, out)
+	if len(*out) == before {
+		*out = append(*out, leaf)
+		return
+	}
+	for i := before; i < len(*out); i++ {
+		if (*out)[i].Context == nil {
+			(*out)[i].Context = &leaf
+		}
+	}
+}
+
+// contributions appends the iterations which contributed to the value of each outermost
+// comprehension within expr, all of which were evaluated under the trace.
+func (e *Explanation) contributions(expr celast.Expr, trace int, out *[]Violation) {
+	if expr.Kind() != celast.ComprehensionKind {
+		for _, child := range celast.NavigateExpr(e.ast, expr).Children() {
+			e.contributions(child, trace, out)
+		}
+		return
+	}
+	val, found := e.value(expr.ID(), trace)
+	if !found {
+		return
+	}
+	shape := e.shapes[expr.ID()]
+	iters := e.iterations[traceKey{id: expr.ID(), parent: trace}]
+	switch shape.kind {
+	case compBind:
+		e.contributions(expr.AsComprehension().Result(), trace, out)
+	case compAll, compExists, compExistsOne:
+		// Explain the boolean value the quantifier produced.
+		e.blame(expr, trace, val != types.True, out)
+	case compFilter:
+		// The iterations whose predicate held were included in the result.
+		for _, iter := range iters {
+			e.blame(shape.pred, iter, false, out)
+		}
+	default:
+		// Every iteration, or every iteration whose filter predicate held, contributed to the
+		// result. An iteration is identified by the value of its element, or for unrecognized
+		// comprehensions and elements which were inserted into the result without being
+		// constructed, by its predicate or loop step.
+		for _, iter := range iters {
+			if shape.pred != nil {
+				if v, _ := e.value(shape.pred.ID(), iter); v != types.True {
+					continue
+				}
+			}
+			for _, x := range []celast.Expr{shape.elem, shape.pred, expr.AsComprehension().LoopStep()} {
+				if x == nil {
+					continue
+				}
+				if v, ok := e.value(x.ID(), iter); ok {
+					*out = append(*out, e.violation(x, iter, v))
+					break
+				}
+			}
+		}
+	}
+}
+
+func (e *Explanation) violation(expr celast.Expr, trace int, val ref.Val) Violation {
+	return Violation{Path: e.path(trace), ExprID: expr.ID(), Expr: e.exprText(expr.ID()), Value: val}
+}
+
 // quantifierPredicate returns the per-iteration predicate of an all() or exists() style
 // comprehension, whose loop step has the form `accu && pred` or `accu || pred`.
 func quantifierPredicate(comp celast.ComprehensionExpr) celast.Expr {
@@ -442,6 +672,42 @@ func quantifierPredicate(comp celast.ComprehensionExpr) celast.Expr {
 	return nil
 }
 
+// path returns the iterations enclosing and including the trace, from outermost to innermost.
+func (e *Explanation) path(trace int) []IterationRef {
+	var refs []IterationRef
+	for t := trace; t != 0; t = e.records[t-1].Parent {
+		refs = append(refs, e.iteration(t))
+	}
+	slices.Reverse(refs)
+	return refs
+}
+
+// iteration describes the iteration begun by the record numbered trace.
+func (e *Explanation) iteration(trace int) IterationRef {
+	rec := e.records[trace-1]
+	ref := IterationRef{ComprehensionID: rec.ID, Key: rec.Key}
+	expr, found := e.exprs[rec.ID]
+	if !found {
+		return ref
+	}
+	comp := expr.AsComprehension()
+	ref.Range = e.exprText(comp.IterRange().ID())
+	// The element of the iteration is not recorded, but is found from the iteration range, which
+	// is recorded before the iteration begins.
+	rangeVal, _ := e.value(comp.IterRange().ID(), rec.Parent)
+	if container, ok := rangeVal.(traits.Indexer); ok {
+		ref.Value = container.Get(rec.Key)
+	}
+	// The first variable of a single-variable comprehension over a map is bound to the key.
+	_, isList := rangeVal.(traits.Lister)
+	switch {
+	case comp.HasIterVar2():
+		ref.elemVar = comp.IterVar2()
+	case isList:
+		ref.elemVar = comp.IterVar()
+	}
+	return ref
+}
 
 func (e *Explanation) exprText(id int64) string {
 	if txt, found := e.text[id]; found {
@@ -455,4 +721,27 @@ func (e *Explanation) exprText(id int64) string {
 	}
 	e.text[id] = txt
 	return txt
+}
+
+// sameExplainValue reports whether two observations are indistinguishable when rendered, treating
+// errors with the same message as the same value.
+func sameExplainValue(a, b ref.Val) bool {
+	if aErr, ok := a.(*types.Err); ok {
+		bErr, ok := b.(*types.Err)
+		return ok && aErr.Error() == bErr.Error()
+	}
+	return a.Equal(b) == types.True
+}
+
+func formatExplainValue(val ref.Val) string {
+	switch v := val.(type) {
+	case nil:
+		return "<unobserved>"
+	case types.String:
+		return strconv.Quote(string(v))
+	case *types.Err:
+		return "error: " + v.Error()
+	default:
+		return fmt.Sprintf("%v", v)
+	}
 }
