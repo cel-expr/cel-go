@@ -98,7 +98,7 @@ func initBindings() {
 			Operator:     operators.Negate,
 			OperandTrait: traits.NegatorType,
 			Unary: func(val ref.Val) ref.Val {
-				if types.IsBool(val) {
+				if t := val.Type(); t != types.IntType && t != types.DoubleType {
 					return types.MaybeNoSuchOverloadErr(val)
 				}
 				return val.(traits.Negater).Negate()
