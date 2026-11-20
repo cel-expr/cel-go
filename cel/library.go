@@ -1028,10 +1028,15 @@ func (opt *evalOptionalOr) Exec(frame *interpreter.ExecutionFrame) ref.Val {
 		if val.HasValue() {
 			return optLHS
 		}
-		return opt.rhs.Exec(frame)
 	default:
 		return types.NoSuchOverloadErr()
 	}
+	optRHS := opt.rhs.Exec(frame)
+	switch optRHS.(type) {
+	case *types.Err, *types.Unknown, *types.Optional:
+		return optRHS
+	}
+	return types.NoSuchOverloadErr()
 }
 
 // Eval evaluates the left-hand side optional to determine whether it contains a value, else
