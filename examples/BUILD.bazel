@@ -22,6 +22,7 @@ go_test(
         "example_cel_custom_functions_test.go",
         "example_cel_custom_macros_test.go",
         "example_cel_execution_cost_test.go",
+        "example_cel_explain_test.go",
         "example_cel_logic_and_conditions_test.go",
         "example_cel_native_structs_test.go",
         "example_cel_operators_test.go",

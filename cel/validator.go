@@ -317,7 +317,7 @@ func (v formatValidator) Validate(e *Env, _ ValidatorConfig, a *ast.AST, iss *Is
 			continue
 		}
 		if err := v.check(e, call, litArg); err != nil {
-			iss.ReportErrorAtID(litArg.ID(), "invalid %s argument", v.funcName)
+			iss.ReportErrorAtID(litArg.ID(), "invalid %s argument: %v", v.funcName, err)
 		}
 	}
 }
