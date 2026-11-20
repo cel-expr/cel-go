@@ -102,13 +102,33 @@ type LibraryCataloguer interface {
 // and to be linked to each other.
 func Lib(l Library) EnvOption {
 	singleton, isSingleton := l.(SingletonLibrary)
+	subsetLib, canSubset := l.(LibrarySubsetter)
+	_, isStd := l.(*stdLibrary)
 	return func(e *Env) (*Env, error) {
+		var subset *env.LibrarySubset
+		if canSubset {
+			subset = subsetLib.LibrarySubset()
+			if err := subset.Validate(); err != nil {
+				return nil, err
+			}
+			if subset != nil && subset.Disabled {
+				return e, nil
+			}
+		}
 		if isSingleton {
 			if e.HasLibrary(singleton.LibraryName()) {
 				return e, nil
 			}
 			e.ensureMutableLibraries()
 			e.libraries[singleton.LibraryName()] = singleton
+		}
+		var prevFuncs map[string]*decls.FunctionDecl
+		prevMacroCount := len(e.macros)
+		if subset != nil && !isStd {
+			prevFuncs = make(map[string]*decls.FunctionDecl, len(e.functions))
+			for k, v := range e.functions {
+				prevFuncs[k] = v
+			}
 		}
 		var err error
 		for _, opt := range l.CompileOptions() {
@@ -117,9 +137,60 @@ func Lib(l Library) EnvOption {
 				return nil, err
 			}
 		}
+		if subset != nil && !isStd {
+			if err := applyLibrarySubset(e, subset, prevFuncs, prevMacroCount); err != nil {
+				return nil, err
+			}
+		}
 		e.progOpts = append(e.progOpts, l.ProgramOptions()...)
 		return e, nil
 	}
+}
+
+func applyLibrarySubset(e *Env, subset *env.LibrarySubset, prevFuncs map[string]*decls.FunctionDecl, prevMacroCount int) error {
+	if len(e.macros) > prevMacroCount {
+		filtered := e.macros[:prevMacroCount:prevMacroCount]
+		for _, m := range e.macros[prevMacroCount:] {
+			if subset.SubsetMacro(m.Function()) {
+				filtered = append(filtered, m)
+			}
+		}
+		e.macros = filtered
+	}
+	for fnName, curFn := range e.functions {
+		prevFn, existed := prevFuncs[fnName]
+		if !existed {
+			subFn, include := subset.SubsetFunction(curFn)
+			if !include || subFn == nil {
+				delete(e.functions, fnName)
+			} else {
+				e.functions[fnName] = subFn
+			}
+			continue
+		}
+		if prevFn == curFn {
+			continue
+		}
+		prevOverloadIDs := make([]string, 0, len(prevFn.OverloadDecls()))
+		for _, o := range prevFn.OverloadDecls() {
+			prevOverloadIDs = append(prevOverloadIDs, o.ID())
+		}
+		addedFn := curFn.Subset(decls.ExcludeOverloads(prevOverloadIDs...))
+		if addedFn == nil {
+			continue
+		}
+		subAddedFn, include := subset.SubsetFunction(addedFn)
+		if !include || subAddedFn == nil {
+			e.functions[fnName] = prevFn
+			continue
+		}
+		merged, err := prevFn.Merge(subAddedFn)
+		if err != nil {
+			return err
+		}
+		e.functions[fnName] = merged
+	}
+	return nil
 }
 
 // StdLibOption specifies a functional option for configuring the standard CEL library.
@@ -417,9 +488,10 @@ func OptionalTypes(opts ...OptionalTypesOption) EnvOption {
 
 type optionalLib struct {
 	version uint32
+	subset  *env.LibrarySubset
 }
 
-// OptionalTypesOption is a functional interface for configuring the strings library.
+// OptionalTypesOption is a functional interface for configuring the optional library.
 type OptionalTypesOption func(*optionalLib) *optionalLib
 
 // OptionalTypesVersion configures the version of the optional type library.
@@ -438,6 +510,14 @@ func OptionalTypesVersion(version uint32) OptionalTypesOption {
 	}
 }
 
+// OptionalTypesSubset configures the optional library to use a subset of its functions and macros.
+func OptionalTypesSubset(subset *env.LibrarySubset) OptionalTypesOption {
+	return func(lib *optionalLib) *optionalLib {
+		lib.subset = subset
+		return lib
+	}
+}
+
 // LibraryName implements the SingletonLibrary interface method.
 func (*optionalLib) LibraryName() string {
 	return "cel.lib.optional"
@@ -451,6 +531,11 @@ func (*optionalLib) LibraryAlias() string {
 // LibraryVersion returns the version of the library.
 func (lib *optionalLib) LibraryVersion() uint32 {
 	return lib.version
+}
+
+// LibrarySubset returns the env.LibrarySubset definition associated with the optional library.
+func (lib *optionalLib) LibrarySubset() *env.LibrarySubset {
+	return lib.subset
 }
 
 // CatalogSymbols implements the LibraryCataloguer interface method.
