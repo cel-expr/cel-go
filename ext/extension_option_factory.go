@@ -120,6 +120,9 @@ func initExtFactories() {
 			}
 			return Regex(RegexVersion(version)), nil
 		},
+		"cel.lib.ext.markdown": func(version uint32) cel.EnvOption {
+			return Markdown(MarkdownVersion(version))
+		},
 	}
 
 	extAliasesMap = map[string]string{
@@ -132,6 +135,7 @@ func initExtFactories() {
 		"strings":                "cel.lib.ext.strings",
 		"two-var-comprehensions": "cel.lib.ext.comprev2",
 		"regex":                  "cel.lib.ext.regex",
+		"markdown":               "cel.lib.ext.markdown",
 	}
 }
 
