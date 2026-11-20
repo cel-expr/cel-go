@@ -267,3 +267,61 @@ func TestDurationIsZeroValue(t *testing.T) {
 func duration(seconds, nanos int64) time.Duration {
 	return time.Duration(seconds)*time.Second + time.Duration(nanos)
 }
+
+func TestDurationPrecisionUnits(t *testing.T) {
+	tests := []struct {
+		name string
+		dur  time.Duration
+		fn   func(ref.Val) ref.Val
+		want Int
+	}{
+		{
+			name: "4097h-1ns",
+			dur:  4097*time.Hour - time.Nanosecond,
+			fn:   DurationGetHours,
+			want: 4096,
+		},
+		{
+			name: "2562047h-1ns",
+			dur:  2562047*time.Hour - time.Nanosecond,
+			fn:   DurationGetHours,
+			want: 2562046,
+		},
+		{
+			name: "-4097h+1ns",
+			dur:  -4097*time.Hour + time.Nanosecond,
+			fn:   DurationGetHours,
+			want: -4096,
+		},
+		{
+			name: "262145m-1ns",
+			dur:  262145*time.Minute - time.Nanosecond,
+			fn:   DurationGetMinutes,
+			want: 262144,
+		},
+		{
+			name: "2562047m-1ns",
+			dur:  2562047*time.Minute - time.Nanosecond,
+			fn:   DurationGetMinutes,
+			want: 2562046,
+		},
+		{
+			name: "16777217s-1ns",
+			dur:  16777217*time.Second - time.Nanosecond,
+			fn:   DurationGetSeconds,
+			want: 16777216,
+		},
+		{
+			name: "9223372036s-1ns",
+			dur:  9223372036*time.Second - time.Nanosecond,
+			fn:   DurationGetSeconds,
+			want: 9223372035,
+		},
+	}
+	for _, tc := range tests {
+		got := tc.fn(Duration{Duration: tc.dur})
+		if !got.Equal(tc.want).(Bool) {
+			t.Errorf("%s: got %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
