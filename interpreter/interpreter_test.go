@@ -853,6 +853,14 @@ func testData(t testing.TB) []testCase {
 			expr: `[1, 2, 3, 4, 5u, 1.0].exists(e, type(e) == uint)`,
 		},
 		{
+			name: "macro_exists_type_value",
+			expr: `[int, string].exists(t, t == string)`,
+		},
+		{
+			name: "macro_exists_type_value_shadows_type_name",
+			expr: `[string].all(int, int == string)`,
+		},
+		{
 			name: "macro_exists_nonstrict",
 			expr: `[0, 2, 4].exists(x, 4/x == 2 && 4/(4-x) == 2)`,
 		},
