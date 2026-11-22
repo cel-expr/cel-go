@@ -232,6 +232,12 @@ func (p *planBuilder) planCheckedIdent(id int64, identRef *ast.ReferenceInfo) (I
 		return NewConstValue(id, identRef.Value), nil
 	}
 
+	// A local variable, such as a comprehension or cel.bind variable, may hold a type value.
+	// Resolve it before the type name lookup so that it is never planned as a type name.
+	if localEval, ok := p.planLocalVar(id, identRef.Name); ok {
+		return localEval, nil
+	}
+
 	// Check to see whether the type map indicates this is a type name. All types should be
 	// registered with the provider.
 	cType := p.typeMap[id]
@@ -241,10 +247,6 @@ func (p *planBuilder) planCheckedIdent(id int64, identRef *ast.ReferenceInfo) (I
 			return nil, fmt.Errorf("reference to undefined type: %s", identRef.Name)
 		}
 		return NewConstValue(id, cVal), nil
-	}
-
-	if localEval, ok := p.planLocalVar(id, identRef.Name); ok {
-		return localEval, nil
 	}
 
 	// Otherwise, return the attribute for the resolved identifier name.
