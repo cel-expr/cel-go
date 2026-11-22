@@ -158,7 +158,7 @@ func TestTimestampOperators(t *testing.T) {
 			op: func() ref.Val {
 				return unixTimestamp(100).Subtract(unixTimestamp(1))
 			},
-			out: 99 * time.Second,
+			out: Duration{Seconds: 99},
 		},
 		{
 			name: "DateSubOneHour",
@@ -193,14 +193,14 @@ func TestTimestampOperators(t *testing.T) {
 			op: func() ref.Val {
 				return timestampOf(time.Unix(2, 1)).Subtract(timestampOf(time.Unix(0, 999_999_999)))
 			},
-			out: time.Second + 2*time.Nanosecond,
+			out: Duration{Seconds: 1, Nanos: 2},
 		},
 		{
 			name: "TimeWithNanosNegative",
 			op: func() ref.Val {
 				return timestampOf(time.Unix(1, 1)).Subtract(timestampOf(time.Unix(2, 999_999_999)))
 			},
-			out: -2*time.Second + 2*time.Nanosecond,
+			out: Duration{Seconds: -1, Nanos: -999_999_998},
 		},
 		{
 			name: "MinTimestampMinusOne",
@@ -210,18 +210,18 @@ func TestTimestampOperators(t *testing.T) {
 			out: errIntOverflow,
 		},
 		{
-			name: "DateMinusDateDurationOverflow",
+			name: "DateMinusDateDurationValid",
 			op: func() ref.Val {
 				return unixTimestamp(maxUnixTime).Subtract(unixTimestamp(minUnixTime))
 			},
-			out: errIntOverflow,
+			out: Duration{Seconds: maxUnixTime - minUnixTime},
 		},
 		{
 			name: "MinTimestampMinusOneViaNanosScaleOverflow",
 			op: func() ref.Val {
 				return timestampOf(time.Unix(math.MinInt64, 1)).Subtract(timestampOf(time.Unix(0, -999_999_999)))
 			},
-			out: errIntOverflow,
+			out: errDurationOverflow,
 		},
 		{
 			name: "DateSubMinDuration",

@@ -95,7 +95,7 @@ func TestCalculateSize(t *testing.T) {
 		},
 		{
 			name: "scalar_ref_val_duration",
-			val:  Duration{Duration: time.Second},
+			val:  Duration{Seconds: 1},
 			want: 1,
 		},
 		{

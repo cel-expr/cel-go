@@ -660,9 +660,13 @@ func (p *Registry) NativeToValue(value any) ref.Val {
 	case string:
 		return String(v)
 	case *dpb.Duration:
-		return Duration{Duration: v.AsDuration()}
+		d, err := normalizeDuration(v.GetSeconds(), int64(v.GetNanos()))
+		if err != nil {
+			return WrapErr(err)
+		}
+		return d
 	case time.Duration:
-		return Duration{Duration: v}
+		return durationOf(v)
 	case *tpb.Timestamp:
 		return Timestamp{Time: v.AsTime()}
 	case time.Time:

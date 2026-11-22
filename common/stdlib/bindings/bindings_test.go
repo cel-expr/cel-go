@@ -27,7 +27,7 @@ import (
 
 func TestBindingsDispatchAndHelpers(t *testing.T) {
 	ts := types.Timestamp{Time: time.Date(2025, 3, 15, 10, 30, 45, 123000000, time.UTC)}
-	dur := types.Duration{Duration: time.Hour + 2*time.Minute + 3*time.Second}
+	dur := types.Duration{Seconds: 3600 + 2*60 + 3}
 
 	// Timestamp / duration top-level dispatchers for unchecked ASTs.
 	tsCases := []struct {

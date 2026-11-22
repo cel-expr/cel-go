@@ -18,7 +18,6 @@ import (
 	"fmt"
 	"reflect"
 	"testing"
-	"time"
 
 	"google.golang.org/protobuf/encoding/prototext"
 	"google.golang.org/protobuf/proto"
@@ -675,7 +674,7 @@ func TestSourceInfoToProto(t *testing.T) {
 
 func TestReferenceInfoToProtoError(t *testing.T) {
 	out, err := ast.ReferenceInfoToProto(
-		ast.NewIdentReference("SECOND", types.Duration{Duration: time.Duration(1) * time.Second}))
+		ast.NewIdentReference("SECOND", types.Duration{Seconds: 1}))
 	if err == nil {
 		t.Errorf("ReferenceInfoToProto() got %v, wanted error", out)
 	}
@@ -714,7 +713,7 @@ func TestConvertVal(t *testing.T) {
 }
 
 func TestValToConstantError(t *testing.T) {
-	out, err := ast.ValToConstant(types.Duration{Duration: time.Duration(10)})
+	out, err := ast.ValToConstant(types.Duration{Nanos: 10})
 	if err == nil {
 		t.Errorf("ValToConstant() got %v, wanted error", out)
 	}

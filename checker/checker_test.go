@@ -18,7 +18,6 @@ import (
 	"fmt"
 	"strings"
 	"testing"
-	"time"
 
 	"cel.dev/cel-go/common"
 	"cel.dev/cel-go/common/ast"
@@ -2858,7 +2857,7 @@ func TestCheckInvalidOptSelectMissingArg(t *testing.T) {
 
 func TestCheckInvalidLiteral(t *testing.T) {
 	fac := ast.NewExprFactory()
-	durLiteral := fac.NewLiteral(1, types.Duration{Duration: time.Second})
+	durLiteral := fac.NewLiteral(1, types.Duration{Seconds: 1})
 	// This is not valid syntax, just for illustration purposes.
 	src := common.NewTextSource(`1s`)
 	parsed := ast.NewAST(durLiteral, ast.NewSourceInfo(src))

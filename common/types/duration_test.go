@@ -15,7 +15,6 @@
 package types
 
 import (
-	"math"
 	"reflect"
 	"testing"
 	"time"
@@ -34,8 +33,8 @@ func TestDurationOperators(t *testing.T) {
 	d := duration(7506, 567)
 	dSecond := duration(1, 0)
 	dNano := duration(0, 1)
-	dMax := duration(0, math.MaxInt64)
-	dMin := duration(0, math.MinInt64)
+	dMax := duration(maxDurationSeconds, 999_999_999)
+	dMin := duration(minDurationSeconds, -999_999_999)
 
 	tests := []struct {
 		name string
@@ -46,53 +45,53 @@ func TestDurationOperators(t *testing.T) {
 		{
 			name: "DurationAddSelf",
 			op: func() ref.Val {
-				return durationOf(d).Add(durationOf(d))
+				return d.Add(d)
 			},
-			out: d + d,
+			out: duration(15012, 1134),
 		},
 		{
 			name: "DurationMaxAddOneNanoOverflow",
 			op: func() ref.Val {
-				return durationOf(dMax).Add(durationOf(dNano))
+				return dMax.Add(dNano)
 			},
-			out: errIntOverflow,
+			out: errDurationOverflow,
 		},
 		{
 			name: "DurationMaxAddOneSecondOverflow",
 			op: func() ref.Val {
-				return durationOf(dMax).Add(durationOf(dSecond))
+				return dMax.Add(dSecond)
 			},
-			out: errIntOverflow,
+			out: errDurationOverflow,
 		},
 		{
 			name: "DurationMinAddMinusOneOverflow",
 			op: func() ref.Val {
-				return durationOf(dMin).Add(durationOf(-dSecond))
+				return dMin.Add(duration(-1, 0))
 			},
-			out: errIntOverflow,
+			out: errDurationOverflow,
 		},
 
 		// Subtraction tests.
 		{
 			name: "DurationSubSelf",
 			op: func() ref.Val {
-				return durationOf(d).Subtract(durationOf(d))
+				return d.Subtract(d)
 			},
 			out: duration(0, 0),
 		},
 		{
 			name: "DurationMaxSubMinusOneOverflow",
 			op: func() ref.Val {
-				return durationOf(dMax).Subtract(durationOf(-dNano))
+				return dMax.Subtract(duration(0, -1))
 			},
-			out: errIntOverflow,
+			out: errDurationOverflow,
 		},
 		{
 			name: "DurationMinSubOneOverflow",
 			op: func() ref.Val {
-				return durationOf(dMin).Subtract(durationOf(dNano))
+				return dMin.Subtract(dNano)
 			},
-			out: errIntOverflow,
+			out: errDurationOverflow,
 		},
 	}
 	for _, tst := range tests {
@@ -111,8 +110,8 @@ func TestDurationOperators(t *testing.T) {
 }
 
 func TestDurationCompare(t *testing.T) {
-	d := Duration{(&dpb.Duration{Seconds: 7506}).AsDuration()}
-	lt := Duration{(&dpb.Duration{Seconds: -10}).AsDuration()}
+	d := Duration{Seconds: 7506}
+	lt := Duration{Seconds: -10}
 	if d.Compare(lt).(Int) != IntOne {
 		t.Error("Larger duration was not considered greater than smaller one.")
 	}
@@ -128,7 +127,7 @@ func TestDurationCompare(t *testing.T) {
 }
 
 func TestDurationConvertToNative(t *testing.T) {
-	dur := Duration{Duration: duration(7506, 1000)}
+	dur := duration(7506, 1000)
 	val, err := dur.ConvertToNative(reflect.TypeFor[*dpb.Duration]())
 	if err != nil ||
 		!proto.Equal(val.(proto.Message), &dpb.Duration{Seconds: 7506, Nanos: 1000}) {
@@ -145,18 +144,24 @@ func TestDurationConvertToNative(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ConvertToNative() failed: %v", err)
 	}
-	if !reflect.DeepEqual(val, dur.Duration) {
-		t.Errorf("got value %v, wanted %v", val, dur.Duration)
+	wantTD := 7506*time.Second + 1000*time.Nanosecond
+	if !reflect.DeepEqual(val, wantTD) {
+		t.Errorf("got value %v, wanted %v", val, wantTD)
+	}
+	// Out of range for time.Duration
+	largeDur := Duration{Seconds: maxDurationSeconds}
+	if _, err := largeDur.ConvertToNative(reflect.TypeFor[time.Duration]()); err == nil {
+		t.Error("expected error converting large Duration to time.Duration, got nil")
 	}
 }
 
 func TestDurationConvertToNative_Any(t *testing.T) {
-	d := Duration{Duration: duration(7506, 1000)}
+	d := duration(7506, 1000)
 	val, err := d.ConvertToNative(anyValueType)
 	if err != nil {
 		t.Error(err)
 	}
-	want, err := anypb.New(dpb.New(d.Duration))
+	want, err := anypb.New(&dpb.Duration{Seconds: 7506, Nanos: 1000})
 	if err != nil {
 		t.Error(err)
 	}
@@ -166,7 +171,7 @@ func TestDurationConvertToNative_Any(t *testing.T) {
 }
 
 func TestDurationConvertToNative_Error(t *testing.T) {
-	val, err := Duration{Duration: duration(7506, 1000)}.ConvertToNative(JSONValueType)
+	val, err := duration(7506, 1000).ConvertToNative(JSONValueType)
 	if err != nil {
 		t.Errorf("Got error: '%v', expected value", err)
 	}
@@ -178,7 +183,7 @@ func TestDurationConvertToNative_Error(t *testing.T) {
 }
 
 func TestDurationConvertToNative_Json(t *testing.T) {
-	val, err := Duration{Duration: duration(7506, 1000)}.ConvertToNative(JSONValueType)
+	val, err := duration(7506, 1000).ConvertToNative(JSONValueType)
 	if err != nil {
 		t.Error(err)
 	}
@@ -189,7 +194,7 @@ func TestDurationConvertToNative_Json(t *testing.T) {
 }
 
 func TestDurationConvertToType_Identity(t *testing.T) {
-	d := Duration{Duration: duration(7506, 1000)}
+	d := duration(7506, 1000)
 	str := d.ConvertToType(StringType).(String)
 	if str != "7506.000001s" {
 		t.Errorf("Got '%v', wanted 7506.000001s", str)
@@ -210,21 +215,23 @@ func TestDurationConvertToType_Identity(t *testing.T) {
 }
 
 func TestDurationNegate(t *testing.T) {
-	neg := Duration{Duration: duration(1234, 1)}.Negate()
+	neg := duration(1234, 1).Negate()
 	want := duration(-1234, -1)
-	if neg.Value().(time.Duration) != want {
+	if neg.Value().(Duration) != want {
 		t.Errorf("Got %v, expected %v", neg, want)
 	}
-	if v := time.Duration(math.MinInt64); !IsError(durationOf(v).Negate()) {
-		t.Errorf("Expected negating %d to result in overflow.", v)
+	maxDur := Duration{Seconds: maxDurationSeconds, Nanos: 999_999_999}
+	minDur := Duration{Seconds: minDurationSeconds, Nanos: -999_999_999}
+	if !maxDur.Negate().Equal(minDur).(Bool) {
+		t.Errorf("Expected negating %v to yield %v, got %v", maxDur, minDur, maxDur.Negate())
 	}
-	if v := time.Duration(math.MaxInt64); !durationOf(v).Negate().Equal(durationOf(time.Duration(math.MinInt64 + 1))).(Bool) {
-		t.Errorf("Expected negating %d to yield %d", v, time.Duration(math.MinInt64+1))
+	if !minDur.Negate().Equal(maxDur).(Bool) {
+		t.Errorf("Expected negating %v to yield %v, got %v", minDur, maxDur, minDur.Negate())
 	}
 }
 
 func TestDurationGetHours(t *testing.T) {
-	d := Duration{Duration: duration(7506, 0)}
+	d := duration(7506, 0)
 	hr := d.Receive(overloads.TimeGetHours, overloads.DurationToHours, []ref.Val{})
 	if !hr.Equal(Int(2)).(Bool) {
 		t.Error("Expected 2 hours, got", hr)
@@ -232,38 +239,125 @@ func TestDurationGetHours(t *testing.T) {
 }
 
 func TestDurationGetMinutes(t *testing.T) {
-	d := Duration{Duration: duration(7506, 0)}
+	d := duration(7506, 0)
 	min := d.Receive(overloads.TimeGetMinutes, overloads.DurationToMinutes, []ref.Val{})
 	if !min.Equal(Int(125)).(Bool) {
-		t.Error("Expected 5 minutes, got", min)
+		t.Error("Expected 125 minutes, got", min)
 	}
 }
 
 func TestDurationGetSeconds(t *testing.T) {
-	d := Duration{Duration: duration(7506, 0)}
+	d := duration(7506, 0)
 	sec := d.Receive(overloads.TimeGetSeconds, overloads.DurationToSeconds, []ref.Val{})
 	if !sec.Equal(Int(7506)).(Bool) {
-		t.Error("Expected 6 seconds, got", sec)
+		t.Error("Expected 7506 seconds, got", sec)
 	}
 }
 
 func TestDurationGetMilliseconds(t *testing.T) {
-	d := Duration{Duration: duration(7506, 0)}
-	sec := d.Receive(overloads.TimeGetMilliseconds, overloads.DurationToMilliseconds, []ref.Val{})
-	if !sec.Equal(Int(7506000)).(Bool) {
-		t.Error("Expected 6 seconds, got", sec)
+	d := duration(7506, 0)
+	ms := d.Receive(overloads.TimeGetMilliseconds, overloads.DurationToMilliseconds, []ref.Val{})
+	if !ms.Equal(Int(7506000)).(Bool) {
+		t.Error("Expected 7506000 milliseconds, got", ms)
 	}
 }
 
 func TestDurationIsZeroValue(t *testing.T) {
-	if (&Duration{Duration: time.Duration(1)}).IsZeroValue() {
+	if (&Duration{Nanos: 1}).IsZeroValue() {
 		t.Error("Duration(1).IsZeroValue() returned true, wanted false.")
 	}
-	if !(&Duration{Duration: time.Duration(0)}).IsZeroValue() {
+	if !(&Duration{}).IsZeroValue() {
 		t.Error("Duration(0).IsZeroValue() returned false, wanted true")
 	}
 }
 
-func duration(seconds, nanos int64) time.Duration {
-	return time.Duration(seconds)*time.Second + time.Duration(nanos)
+func duration(seconds int64, nanos int32) Duration {
+	return Duration{Seconds: seconds, Nanos: nanos}
+}
+
+func TestDurationPrecisionUnits(t *testing.T) {
+	oneNano := Duration{Nanos: 1}
+	tests := []struct {
+		name string
+		dur  Duration
+		fn   func(ref.Val) ref.Val
+		want Int
+	}{
+		{
+			name: "4097h-1ns",
+			dur:  Duration{Seconds: 4097 * 3600}.Subtract(oneNano).(Duration),
+			fn:   DurationGetHours,
+			want: 4096,
+		},
+		{
+			name: "2562047h-1ns",
+			dur:  Duration{Seconds: 2562047 * 3600}.Subtract(oneNano).(Duration),
+			fn:   DurationGetHours,
+			want: 2562046,
+		},
+		{
+			name: "262145m-1ns",
+			dur:  Duration{Seconds: 262145 * 60}.Subtract(oneNano).(Duration),
+			fn:   DurationGetMinutes,
+			want: 262144,
+		},
+		{
+			name: "2562047m-1ns",
+			dur:  Duration{Seconds: 2562047 * 60}.Subtract(oneNano).(Duration),
+			fn:   DurationGetMinutes,
+			want: 2562046,
+		},
+		{
+			name: "16777217s-1ns",
+			dur:  Duration{Seconds: 16777217}.Subtract(oneNano).(Duration),
+			fn:   DurationGetSeconds,
+			want: 16777216,
+		},
+		{
+			name: "9223372036s-1ns",
+			dur:  Duration{Seconds: 9223372036}.Subtract(oneNano).(Duration),
+			fn:   DurationGetSeconds,
+			want: 9223372035,
+		},
+		{
+			name: "315576000000s-1ns",
+			dur:  Duration{Seconds: 315576000000}.Subtract(oneNano).(Duration),
+			fn:   DurationGetSeconds,
+			want: 315575999999,
+		},
+	}
+	for _, tc := range tests {
+		got := tc.fn(tc.dur)
+		if !got.Equal(tc.want).(Bool) {
+			t.Errorf("%s: got %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestDurationStringFormatting(t *testing.T) {
+	tests := []struct {
+		dur  Duration
+		want string
+	}{
+		{Duration{}, "0s"},
+		{Duration{Seconds: 5}, "5s"},
+		{Duration{Seconds: -5}, "-5s"},
+		{Duration{Nanos: 500_000_000}, "0.5s"},
+		{Duration{Nanos: -500_000_000}, "-0.5s"},
+		{Duration{Nanos: -1}, "-0.000000001s"},
+		{Duration{Seconds: -5, Nanos: -1}, "-5.000000001s"},
+		{Duration{Seconds: 360000000, Nanos: 1}, "360000000.000000001s"},
+		{Duration{Seconds: 10000000, Nanos: 1}, "10000000.000000001s"},
+		{Duration{Seconds: 9223372036, Nanos: 854_775_807}, "9223372036.854775807s"},
+		{Duration{Seconds: 315576000000, Nanos: 999_999_999}, "315576000000.999999999s"},
+	}
+	for _, tc := range tests {
+		got := string(tc.dur.ConvertToType(StringType).(String))
+		if got != tc.want {
+			t.Errorf("ConvertToType(StringType) for %v = %q, want %q", tc.dur, got, tc.want)
+		}
+		if tc.dur.String() != tc.want {
+			t.Errorf("%v.String() = %q, want %q", tc.dur, tc.dur.String(), tc.want)
+		}
+	}
 }
