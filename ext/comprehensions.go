@@ -20,6 +20,7 @@ import (
 
 	"cel.dev/cel-go/cel"
 	"cel.dev/cel-go/common/ast"
+	"cel.dev/cel-go/common/env"
 	"cel.dev/cel-go/common/operators"
 	"cel.dev/cel-go/common/types"
 	"cel.dev/cel-go/common/types/ref"
@@ -179,13 +180,27 @@ func TwoVarComprehensionsVersion(version uint32) TwoVarComprehensionsOption {
 	}
 }
 
+// TwoVarComprehensionsSubset configures the two-variable comprehensions library to use a subset of its functions and macros.
+func TwoVarComprehensionsSubset(subset *env.LibrarySubset) TwoVarComprehensionsOption {
+	return func(lib *compreV2Lib) *compreV2Lib {
+		lib.subset = subset
+		return lib
+	}
+}
+
 type compreV2Lib struct {
 	version uint32
+	subset  *env.LibrarySubset
 }
 
 // LibraryName implements that SingletonLibrary interface method.
 func (*compreV2Lib) LibraryName() string {
 	return "cel.lib.ext.comprev2"
+}
+
+// LibrarySubset returns the env.LibrarySubset definition associated with the library.
+func (lib *compreV2Lib) LibrarySubset() *env.LibrarySubset {
+	return lib.subset
 }
 
 // CompileOptions implements the cel.Library interface method.

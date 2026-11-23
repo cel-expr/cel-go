@@ -17,6 +17,7 @@ package ext
 import (
 	"fmt"
 	"math"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -267,4 +268,88 @@ func TestExtensionOptionFactoryConfigErrors(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestExtensionOptionFactorySubset(t *testing.T) {
+	t.Run("strings_exclude_function", func(t *testing.T) {
+		subset := env.NewLibrarySubset().AddExcludedFunctions(&env.Function{Name: "charAt"})
+		conf := env.NewConfig("strings-subset").
+			AddExtensions(env.NewExtension("strings", 3).SetSubset(subset))
+		en, err := cel.NewEnv(cel.FromConfig(conf, ExtensionOptionFactory))
+		if err != nil {
+			t.Fatalf("cel.NewEnv(FromConfig()) failed: %v", err)
+		}
+		if _, iss := en.Compile(`"hello".replace("l", "x")`); iss.Err() != nil {
+			t.Fatalf("Compile(replace) failed: %v", iss.Err())
+		}
+		if _, iss := en.Compile(`"hello".charAt(1)`); iss.Err() == nil {
+			t.Fatalf("Compile(charAt) succeeded, wanted error for excluded function")
+		}
+		gotCfg, err := en.ToConfig("strings-subset")
+		if err != nil {
+			t.Fatalf("en.ToConfig() failed: %v", err)
+		}
+		if len(gotCfg.Extensions) != 1 || !reflect.DeepEqual(gotCfg.Extensions[0].Subset, subset) {
+			t.Fatalf("ToConfig().Extensions = %v, wanted subset %v", gotCfg.Extensions, subset)
+		}
+	})
+
+	t.Run("math_exclude_macro", func(t *testing.T) {
+		subset := env.NewLibrarySubset().AddExcludedMacros("least")
+		conf := env.NewConfig("math-subset").
+			AddExtensions(env.NewExtension("math", math.MaxUint32).SetSubset(subset))
+		en, err := cel.NewEnv(cel.FromConfig(conf, ExtensionOptionFactory))
+		if err != nil {
+			t.Fatalf("cel.NewEnv(FromConfig()) failed: %v", err)
+		}
+		if _, iss := en.Compile(`math.greatest(1, 2)`); iss.Err() != nil {
+			t.Fatalf("Compile(math.greatest) failed: %v", iss.Err())
+		}
+		if _, iss := en.Compile(`math.least(1, 2)`); iss.Err() == nil {
+			t.Fatalf("Compile(math.least) succeeded, wanted error for excluded macro")
+		}
+	})
+
+	t.Run("lists_exclude_function", func(t *testing.T) {
+		subset := env.NewLibrarySubset().AddExcludedFunctions(&env.Function{Name: "lists.range"})
+		conf := env.NewConfig("lists-subset").
+			AddExtensions(env.NewExtension("lists", 2).SetSubset(subset))
+		en, err := cel.NewEnv(cel.FromConfig(conf, ExtensionOptionFactory))
+		if err != nil {
+			t.Fatalf("cel.NewEnv(FromConfig()) failed: %v", err)
+		}
+		if _, iss := en.Compile(`[[1], [2]].flatten()`); iss.Err() != nil {
+			t.Fatalf("Compile(flatten) failed: %v", iss.Err())
+		}
+		if _, iss := en.Compile(`lists.range(3)`); iss.Err() == nil {
+			t.Fatalf("Compile(lists.range) succeeded, wanted error for excluded function")
+		}
+	})
+
+	t.Run("disabled_extension", func(t *testing.T) {
+		conf := env.NewConfig("strings-disabled").
+			AddExtensions(env.NewExtension("strings", 3).SetSubset(env.NewLibrarySubset().SetDisabled(true)))
+		en, err := cel.NewEnv(cel.FromConfig(conf, ExtensionOptionFactory))
+		if err != nil {
+			t.Fatalf("cel.NewEnv(FromConfig()) failed: %v", err)
+		}
+		if en.HasLibrary("cel.lib.ext.strings") {
+			t.Fatalf("en.HasLibrary('cel.lib.ext.strings') = true, wanted false")
+		}
+		if _, iss := en.Compile(`"hello".charAt(1)`); iss.Err() == nil {
+			t.Fatalf("Compile(charAt) succeeded on disabled extension")
+		}
+	})
+
+	t.Run("invalid_subset", func(t *testing.T) {
+		subset := env.NewLibrarySubset().AddIncludedMacros("least").AddExcludedMacros("greatest")
+		e := env.NewExtension("math", math.MaxUint32).SetSubset(subset)
+		opt, ok := ExtensionOptionFactory(e)
+		if !ok {
+			t.Fatalf("ExtensionOptionFactory() returned false")
+		}
+		if _, err := cel.NewCustomEnv(opt); err == nil {
+			t.Fatalf("cel.NewCustomEnv() succeeded, wanted invalid subset error")
+		}
+	})
 }

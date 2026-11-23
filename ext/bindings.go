@@ -19,6 +19,7 @@ import (
 
 	"cel.dev/cel-go/cel"
 	"cel.dev/cel-go/common/ast"
+	"cel.dev/cel-go/common/env"
 	"cel.dev/cel-go/common/types"
 )
 
@@ -68,12 +69,26 @@ func BindingsVersion(version uint32) BindingsOption {
 	}
 }
 
+// BindingsSubset configures the bindings library to use a subset of its functions and macros.
+func BindingsSubset(subset *env.LibrarySubset) BindingsOption {
+	return func(lib *celBindings) *celBindings {
+		lib.subset = subset
+		return lib
+	}
+}
+
 type celBindings struct {
 	version uint32
+	subset  *env.LibrarySubset
 }
 
 func (*celBindings) LibraryName() string {
 	return "cel.lib.ext.cel.bindings"
+}
+
+// LibrarySubset returns the env.LibrarySubset definition associated with the library.
+func (lib *celBindings) LibrarySubset() *env.LibrarySubset {
+	return lib.subset
 }
 
 func (lib *celBindings) CompileOptions() []cel.EnvOption {

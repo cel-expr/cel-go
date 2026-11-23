@@ -731,7 +731,14 @@ func configToEnvOptions(config *env.Config, provider types.Provider, optFactorie
 		// version number has been validated by the call to `Validate`
 		ver, _ := ext.VersionNumber()
 		if ext.Name == "optional" {
-			envOpts = append(envOpts, OptionalTypes(OptionalTypesVersion(ver)))
+			if ext.Subset != nil && ext.Subset.Disabled {
+				continue
+			}
+			opts := []OptionalTypesOption{OptionalTypesVersion(ver)}
+			if ext.Subset != nil {
+				opts = append(opts, OptionalTypesSubset(ext.Subset))
+			}
+			envOpts = append(envOpts, OptionalTypes(opts...))
 		} else {
 			opt, handled := handleExtendedConfigOption(ext, optFactories)
 			if !handled {
