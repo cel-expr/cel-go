@@ -209,6 +209,11 @@ func TestExtensionOptionFactoryConfigErrors(t *testing.T) {
 			wantErr: `unknown key "foo"`,
 		},
 		{
+			name:    "unknown key on markdown",
+			ext:     env.NewExtension("markdown", 0).SetConfig(map[string]any{"foo": "bar"}),
+			wantErr: `unknown key "foo"`,
+		},
+		{
 			name:    "unknown key on strings",
 			ext:     env.NewExtension("strings", 3).SetConfig(map[string]any{"bad": 1}),
 			wantErr: `unknown key "bad"`,

@@ -120,8 +120,11 @@ func initExtFactories() {
 			}
 			return Regex(RegexVersion(version)), nil
 		},
-		"cel.lib.ext.markdown": func(version uint32) cel.EnvOption {
-			return Markdown(MarkdownVersion(version))
+		"cel.lib.ext.markdown": func(version uint32, ext *env.Extension) (cel.EnvOption, error) {
+			if err := validateAllowedConfigKeys(ext); err != nil {
+				return nil, err
+			}
+			return Markdown(MarkdownVersion(version)), nil
 		},
 	}
 
