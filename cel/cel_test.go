@@ -3953,11 +3953,23 @@ func TestOptionalValuesEvalErrorCases(t *testing.T) {
 			wantErr: "no such overload",
 		},
 		{
+			expr:    `optional.none().or(dyn(2))`,
+			wantErr: "no such overload",
+		},
+		{
+			expr:    `optional.none().or(dyn('hello'))`,
+			wantErr: "no such overload",
+		},
+		{
 			expr:    `dyn(1).orValue(2)`,
 			wantErr: "no such overload",
 		},
 		{
 			expr:    `optional.of(1/0).or(optional.of(2))`,
+			wantErr: "division by zero",
+		},
+		{
+			expr:    `optional.none().or(optional.of(1/0))`,
 			wantErr: "division by zero",
 		},
 		{
@@ -5329,6 +5341,33 @@ func TestOptionalOperatorsLegacyEval(t *testing.T) {
 			want: types.OptionalOf(types.True),
 		},
 		{
+			name: "optional or rhs mismatch",
+			expr: &evalOptionalOr{
+				id:  1,
+				lhs: interpreter.NewConstValue(2, types.OptionalNone),
+				rhs: interpreter.NewConstValue(3, types.False),
+			},
+			want: types.NoSuchOverloadErr(),
+		},
+		{
+			name: "optional or rhs err",
+			expr: &evalOptionalOr{
+				id:  1,
+				lhs: interpreter.NewConstValue(2, types.OptionalNone),
+				rhs: interpreter.NewConstValue(3, types.NewErr("rhs err")),
+			},
+			want: types.NewErr("rhs err"),
+		},
+		{
+			name: "optional or rhs unknown",
+			expr: &evalOptionalOr{
+				id:  1,
+				lhs: interpreter.NewConstValue(2, types.OptionalNone),
+				rhs: interpreter.NewConstValue(3, types.NewUnknown(1, nil)),
+			},
+			want: types.NewUnknown(1, nil),
+		},
+		{
 			name: "optional or value mismatch",
 			expr: &evalOptionalOrValue{
 				id:  4,
@@ -5341,10 +5380,19 @@ func TestOptionalOperatorsLegacyEval(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			got := tc.expr.Eval(NoVars())
-			if got.Equal(tc.want) != types.True && !types.IsError(got) {
-				t.Errorf("Eval() = %v, wanted %v", got, tc.want)
+			if types.IsError(tc.want) {
+				if !types.IsError(got) || got.(*types.Err).Error() != tc.want.(*types.Err).Error() {
+					t.Errorf("Eval() = %v, wanted %v", got, tc.want)
+				}
+				return
 			}
-			if types.IsError(got) && got.(*types.Err).Error() != tc.want.(*types.Err).Error() {
+			if types.IsUnknown(tc.want) {
+				if !types.IsUnknown(got) || !reflect.DeepEqual(got, tc.want) {
+					t.Errorf("Eval() = %v, wanted %v", got, tc.want)
+				}
+				return
+			}
+			if got.Equal(tc.want) != types.True {
 				t.Errorf("Eval() = %v, wanted %v", got, tc.want)
 			}
 		})
