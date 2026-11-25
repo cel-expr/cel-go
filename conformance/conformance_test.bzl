@@ -18,10 +18,18 @@ This module contains build rules for generating the conformance test targets.
 
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 
-# Converts the list of tests to skip from the format used by the original Go test runner to a single
-# flag value where each test is separated by a comma. It also performs expansion, for example
-# `foo/bar,baz` becomes two entries which are `foo/bar` and `foo/baz`.
-def _expand_tests_to_skip(tests_to_skip):
+def expand_tests_to_skip(tests_to_skip):
+    """Expands comma-suffixed skip entries into fully qualified test names.
+
+    Entries use the format of the original Go test runner, where `foo/bar,baz` expands into
+    `foo/bar` and `foo/baz`.
+
+    Args:
+        tests_to_skip: List of test names, optionally with comma-separated sibling suffixes.
+
+    Returns:
+        A list of fully qualified test names suitable for joining into a `--skip_tests` flag.
+    """
     result = []
     for test_to_skip in tests_to_skip:
         comma = test_to_skip.find(",")
@@ -39,7 +47,7 @@ def _expand_tests_to_skip(tests_to_skip):
 
 def _conformance_test_args(data, skip_tests, dashboard):
     args = []
-    args.append("--skip_tests={}".format(",".join(_expand_tests_to_skip(skip_tests))))
+    args.append("--skip_tests={}".format(",".join(expand_tests_to_skip(skip_tests))))
     args.append("--tests={}".format(",".join(["$(rlocationpath " + test + ")" for test in data])))
     if dashboard:
         args.append("--dashboard")

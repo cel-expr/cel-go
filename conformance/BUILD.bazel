@@ -5,6 +5,8 @@ package(
     licenses = ["notice"],  # Apache 2.0
 )
 
+exports_files(["conformance_test.sh"])
+
 _ALL_TESTS = [
     "@cel_conformance//tests/simple:testdata/basic.textproto",
     "@cel_conformance//tests/simple:testdata/bindings_ext.textproto",
