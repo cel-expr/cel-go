@@ -64,7 +64,7 @@ bazel_dep(
 )
 git_override(
     module_name = "cel-conformance",
-    commit = "0e0ce3eec8cbf69b582cb1b138d99c292cd16272",
+    commit = "048c37c7459149ee3d2ddda72dff97c9f6ab991f",
     remote = "https://github.com/cel-expr/cel-conformance",
 )
 
