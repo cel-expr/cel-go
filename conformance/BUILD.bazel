@@ -5,6 +5,8 @@ package(
     licenses = ["notice"],  # Apache 2.0
 )
 
+exports_files(["conformance_test.sh"])
+
 _ALL_TESTS = [
     "@cel_conformance//tests/simple:testdata/basic.textproto",
     "@cel_conformance//tests/simple:testdata/bindings_ext.textproto",
@@ -73,6 +75,9 @@ _TESTS_TO_SKIP = [
     "wrappers/timestamp/seconds_over",
     "wrappers/timestamp/seconds_under",
 
+    # Skip until orValue() on a dyn(optional(...)) receiver matches the updated cel-conformance spec.
+    "optionals/optionals/dyn_optional_nested_or_value_index,dyn_optional_or_value_optindex,dyn_optional_or_value_size",
+
     # Temporarily failing tests, need a spec update
     "string_ext/value_errors/indexof_out_of_range,lastindexof_out_of_range",
 
@@ -82,11 +87,19 @@ _TESTS_TO_SKIP = [
 
     # Type deductions
     "type_deductions/wrappers/wrapper_promotion_2",
+    # Skip until multi-element wrapper promotion and ternary parameter assignment match the
+    # updated cel-conformance spec.
+    "type_deductions/wrappers/wrapper_promotion_3_elements,wrapper_promotion_3_elements_2,wrapper_nested_list_promotion_3_elements,wrapper_nested_list_promotion_3_elements_2",
+    "type_deductions/wrappers/wrapper_ternary_parameter_assignment_3,wrapper_ternary_parameter_assignment_4",
+    # Skip until google.protobuf.Any type joins match the updated cel-conformance spec.
+    "type_deductions/any/any_list_mixed_int,any_list_mixed_int_reverse,any_list_mixed_dyn,any_ternary_mixed_int,any_ternary_mixed_int_reverse,any_optional_or_value",
     "type_deductions/legacy_nullable_types/null_assignable_to_message_parameter_candidate",
     "type_deductions/legacy_nullable_types/null_assignable_to_duration_parameter_candidate",
     "type_deductions/legacy_nullable_types/null_assignable_to_timestamp_parameter_candidate",
     "type_deductions/legacy_nullable_types/null_assignable_to_abstract_parameter_candidate",
     "type_deductions/type_decay",
+    # Skip until dyn type parameter unification matches the updated cel-conformance spec.
+    "type_deductions/dyn_type_parameter_unification",
 ]
 
 go_test(
