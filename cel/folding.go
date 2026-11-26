@@ -25,6 +25,7 @@ import (
 	"cel.dev/cel-go/common/types"
 	"cel.dev/cel-go/common/types/ref"
 	"cel.dev/cel-go/common/types/traits"
+	"cel.dev/cel-go/interpreter"
 )
 
 // ConstantFoldingOption defines a functional option for configuring constant folding.
@@ -36,6 +37,18 @@ type ConstantFoldingOption func(opt *constantFoldingOptimizer) (*constantFolding
 func MaxConstantFoldIterations(limit int) ConstantFoldingOption {
 	return func(opt *constantFoldingOptimizer) (*constantFoldingOptimizer, error) {
 		opt.maxFoldIterations = limit
+		return opt, nil
+	}
+}
+
+// ConstantFoldCostLimit limits the runtime evaluation cost permitted for folding a single
+// sub-expression during optimization. If the limit is exceeded, optimization halts and an
+// error is reported.
+//
+// Defaults to 1,000,000 if not set.
+func ConstantFoldCostLimit(limit uint64) ConstantFoldingOption {
+	return func(opt *constantFoldingOptimizer) (*constantFoldingOptimizer, error) {
+		opt.evalCostLimit = limit
 		return opt, nil
 	}
 }
@@ -62,6 +75,7 @@ func FoldKnownValues(knownValues Activation) ConstantFoldingOption {
 func NewConstantFoldingOptimizer(opts ...ConstantFoldingOption) (ASTOptimizer, error) {
 	folder := &constantFoldingOptimizer{
 		maxFoldIterations: defaultMaxConstantFoldIterations,
+		evalCostLimit:     defaultConstantFoldCostLimit,
 	}
 	var err error
 	for _, o := range opts {
@@ -75,6 +89,7 @@ func NewConstantFoldingOptimizer(opts ...ConstantFoldingOption) (ASTOptimizer, e
 
 type constantFoldingOptimizer struct {
 	maxFoldIterations int
+	evalCostLimit     uint64
 	knownValues       Activation
 }
 
@@ -118,7 +133,10 @@ func (opt *constantFoldingOptimizer) Optimize(ctx *OptimizerContext, a *ast.AST)
 	// one last time. In this case, there's no guarantee they'll run, so we only update the
 	// target comprehension node with the literal value if the evaluation succeeds.
 	for _, compre := range ast.MatchDescendants(root, ast.KindMatcher(ast.ComprehensionKind)) {
-		opt.tryFold(ctx, a, compre)
+		if err := opt.tryFold(ctx, a, compre); err != nil && !errors.Is(err, errCannotFold) {
+			ctx.ReportErrorAtID(compre.ID(), "constant-folding evaluation failed: %v", err.Error())
+			return a
+		}
 	}
 
 	// If the output is a list, map, or struct which contains optional entries, then prune it
@@ -156,7 +174,7 @@ func (opt *constantFoldingOptimizer) tryFold(ctx *OptimizerContext, a *ast.AST, 
 		activation = NoVars()
 	}
 	navExpr := expr.(ast.NavigableExpr)
-	out, err := evaluateExpr(ctx, a, navExpr, activation)
+	out, err := evaluateExpr(ctx, a, navExpr, activation, opt.evalCostLimit)
 	if err != nil {
 		return err
 	}
@@ -166,7 +184,7 @@ func (opt *constantFoldingOptimizer) tryFold(ctx *OptimizerContext, a *ast.AST, 
 	return nil
 }
 
-func evaluateExpr(ctx *OptimizerContext, a *ast.AST, navigableExpr ast.NavigableExpr, activation Activation) (ref.Val, error) {
+func evaluateExpr(ctx *OptimizerContext, a *ast.AST, navigableExpr ast.NavigableExpr, activation Activation, evalCostLimit uint64) (ref.Val, error) {
 	partialActivation, err := ctx.PartialVars(activation)
 	if err != nil {
 		return nil, err
@@ -174,7 +192,7 @@ func evaluateExpr(ctx *OptimizerContext, a *ast.AST, navigableExpr ast.Navigable
 	subAST := &Ast{
 		impl: ast.NewCheckedAST(ast.NewAST(navigableExpr, a.SourceInfo()), a.TypeMap(), a.ReferenceMap()),
 	}
-	prg, err := ctx.Program(subAST)
+	prg, err := ctx.Program(subAST, CostLimit(evalCostLimit))
 	if err != nil {
 		return nil, errCannotFold
 	}
@@ -184,6 +202,12 @@ func evaluateExpr(ctx *OptimizerContext, a *ast.AST, navigableExpr ast.Navigable
 	// `ContextEval` call paths.
 	resCh := prg.ConcurrentEval(context.Background(), partialActivation)
 	res := <-resCh
+	// Surface cost limit overruns so that optimization halts rather than continuing to fold
+	// the sub-expressions of an expensive expression.
+	var cancelErr interpreter.EvalCancelledError
+	if errors.As(res.Err, &cancelErr) && cancelErr.Cause == interpreter.CostLimitExceeded {
+		return nil, res.Err
+	}
 	if res.Err != nil || types.IsUnknown(res.Val) {
 		return nil, errCannotFold
 	}
@@ -820,4 +844,7 @@ var (
 
 const (
 	defaultMaxConstantFoldIterations = 100
+	// defaultConstantFoldCostLimit bounds the runtime evaluation cost of folding a single
+	// candidate sub-expression.
+	defaultConstantFoldCostLimit = 1_000_000
 )
