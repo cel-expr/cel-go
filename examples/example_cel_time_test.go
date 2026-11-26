@@ -51,9 +51,9 @@ func Example_cel_TimestampsAndDurations() {
 
 	// Output:
 	// timestamp("2024-01-15T10:30:45Z") -> 2024-01-15 10:30:45 +0000 UTC
-	// duration("1h30m") -> 1h30m0s
+	// duration("1h30m") -> 5400s
 	// timestamp("2024-01-15T10:30:45Z") + duration("1h") -> 2024-01-15 11:30:45 +0000 UTC
-	// timestamp("2024-01-15T10:30:45Z") - timestamp("2024-01-15T09:30:45Z") -> 1h0m0s
+	// timestamp("2024-01-15T10:30:45Z") - timestamp("2024-01-15T09:30:45Z") -> 3600s
 	// timestamp("2024-01-15T10:30:45Z").getFullYear() -> 2024
 	// timestamp("2024-01-15T10:30:45Z").getMonth() -> 0
 	// timestamp("2024-01-15T10:30:45Z").getDayOfMonth() -> 14
@@ -88,7 +88,7 @@ func Example_cel_Time() {
 	// Output:
 	// timestamp("2024-01-15T10:30:45Z").getHours("America/New_York") -> 5
 	// timestamp("2024-01-15T10:30:45Z").getDayOfWeek("UTC") -> 1
-	// duration("3600s") -> 1h0m0s
-	// duration("-500ms") -> -500ms
+	// duration("3600s") -> 3600s
+	// duration("-500ms") -> -0.5s
 	// timestamp(1705314645) -> 2024-01-15 10:30:45 +0000 UTC
 }

@@ -230,7 +230,7 @@ func (t Timestamp) Subtract(subtrahend ref.Val) ref.Val {
 	switch subtrahend.Type() {
 	case DurationType:
 		dur := subtrahend.(Duration)
-		val, err := subtractTimeDurationChecked(t.Time, dur.Duration)
+		val, err := subtractTimeDurationChecked(t.Time, dur)
 		if err != nil {
 			return WrapErr(err)
 		}
@@ -241,7 +241,7 @@ func (t Timestamp) Subtract(subtrahend ref.Val) ref.Val {
 		if err != nil {
 			return WrapErr(err)
 		}
-		return durationOf(val)
+		return val
 	}
 	return MaybeNoSuchOverloadErr(subtrahend)
 }

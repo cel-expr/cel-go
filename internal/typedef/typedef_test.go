@@ -801,7 +801,7 @@ func TestAspectConstructionPropertyAndDefensiveCopies(t *testing.T) {
 		"bytes_nil":   types.Bytes(nil),
 		"bytes_empty": types.Bytes{},
 		"string":      types.String("displayName"),
-		"duration":    types.Duration{Duration: 5 * time.Second},
+		"duration":    types.Duration{Seconds: 5},
 		"timestamp":   types.Timestamp{Time: time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)},
 	}
 	aspect := mustAspect(t, inProps)
@@ -841,7 +841,7 @@ func TestAspectConstructionPropertyAndDefensiveCopies(t *testing.T) {
 		"bytes_nil":   types.Bytes(nil),
 		"bytes_empty": types.Bytes{},
 		"string":      types.String("displayName"),
-		"duration":    types.Duration{Duration: 5 * time.Second},
+		"duration":    types.Duration{Seconds: 5},
 		"timestamp":   types.Timestamp{Time: time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)},
 	}
 	if diff := cmp.Diff(wantProps, aspect.Properties(), cmpOpts); diff != "" {
@@ -893,7 +893,7 @@ func TestFieldDefaultValues(t *testing.T) {
 		{name: "bytes_nil", val: types.Bytes(nil), wantHas: true},
 		{name: "bytes_empty", val: types.Bytes{}, wantHas: true},
 		{name: "string", val: types.String("hello"), wantHas: true},
-		{name: "duration", val: types.Duration{Duration: 90 * time.Second}, wantHas: true},
+		{name: "duration", val: types.Duration{Seconds: 90}, wantHas: true},
 		{name: "timestamp", val: types.Timestamp{Time: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)}, wantHas: true},
 	}
 

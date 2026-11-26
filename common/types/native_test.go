@@ -4157,7 +4157,7 @@ func TestNativeEmbeddedPointerExpressions(t *testing.T) {
 		// Populated embedded fields through pointer
 		{expr: "popObj.OuterField", want: "outer-val"},
 		{expr: "popObj.BoolVal", want: true},
-		{expr: "popObj.DurationVal", want: time.Second},
+		{expr: "popObj.DurationVal", want: types.Duration{Seconds: 1}},
 		{expr: "popObj.TimestampVal", want: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)},
 		{expr: "popObj.IntVal", want: int64(100)},
 		{expr: "popObj.Int32Val", want: int64(200)},
@@ -4174,7 +4174,7 @@ func TestNativeEmbeddedPointerExpressions(t *testing.T) {
 		{expr: "popObj.MapVal['k']", want: int64(1)},
 		{expr: "popObj.NestedVal.NestedCustomName", want: "sub-val"},
 		{expr: "popObj.BoolPtr", want: true},
-		{expr: "popObj.DurationPtr", want: time.Minute},
+		{expr: "popObj.DurationPtr", want: types.Duration{Seconds: 60}},
 		{expr: "popObj.TimestampPtr", want: time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)},
 		{expr: "popObj.IntPtr", want: int64(10)},
 		{expr: "popObj.Int32Ptr", want: int64(20)},
@@ -4226,7 +4226,7 @@ func TestNativeEmbeddedPointerExpressions(t *testing.T) {
 		// Zero values accessed directly through embedded pointer
 		{expr: "zeroObj.BoolVal", want: false},
 		{expr: "zeroObj.BoolPtr", want: false},
-		{expr: "zeroObj.DurationPtr", want: time.Duration(0)},
+		{expr: "zeroObj.DurationPtr", want: types.Duration{}},
 		{expr: "zeroObj.IntPtr", want: int64(0)},
 		{expr: "zeroObj.UintPtr", want: uint64(0)},
 		{expr: "zeroObj.Float32Ptr", want: float64(0)},
@@ -4234,7 +4234,7 @@ func TestNativeEmbeddedPointerExpressions(t *testing.T) {
 		{expr: "zeroObj.StringPtr", want: ""},
 		{expr: "zeroObj.TimestampPtr", want: time.Unix(0, 0)},
 		{expr: "zeroObj.NilTimePtr", want: time.Unix(0, 0)},
-		{expr: "zeroObj.NilDurPtr", want: time.Duration(0)},
+		{expr: "zeroObj.NilDurPtr", want: types.Duration{}},
 		// Nil embedded struct pointer
 		{expr: "has(nilEmbObj.BoolVal)", want: false},
 		{expr: "has(nilEmbObj.IntVal)", want: false},

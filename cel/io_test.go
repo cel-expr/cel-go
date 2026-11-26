@@ -43,7 +43,7 @@ func TestRefValueToValueRoundTrip(t *testing.T) {
 		{value: types.Bytes(make([]byte, 0, 5))},
 		{value: types.Int(0)},
 		{value: types.Uint(0)},
-		{value: types.Duration{Duration: time.Hour}},
+		{value: types.Duration{Seconds: 3600}},
 		{value: types.Timestamp{Time: time.Unix(0, 0)}},
 		{value: types.IntType},
 		{value: types.NewOpaqueType("CustomType")},

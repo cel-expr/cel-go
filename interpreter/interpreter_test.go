@@ -2411,7 +2411,7 @@ func TestInterpreter_TypeConversionOpt(t *testing.T) {
 		{in: `double("_123")`, err: true},
 		{in: `double("123.0")`, out: types.Double(123.0)},
 		{in: `duration('12hh3')`, err: true},
-		{in: `duration('12s')`, out: types.Duration{Duration: time.Duration(12) * time.Second}},
+		{in: `duration('12s')`, out: types.Duration{Seconds: 12}},
 		{in: `dyn(1u)`, out: types.Uint(1)},
 		{in: `int('11l')`, err: true},
 		{in: `int('11')`, out: types.Int(11)},

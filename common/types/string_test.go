@@ -143,7 +143,7 @@ func TestStringConvertToType(t *testing.T) {
 		t.Error("String could not be converted to timestamp")
 	}
 	if !String("1h5s").ConvertToType(DurationType).
-		Equal(Duration{Duration: time.Duration(3605) * time.Second}).(Bool) {
+		Equal(Duration{Seconds: 3605}).(Bool) {
 		t.Error("String could not be converted to duration")
 	}
 	if !String("2.5").ConvertToType(DoubleType).Equal(Double(2.5)).(Bool) {

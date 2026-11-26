@@ -1619,7 +1619,7 @@ func TestList_ComprehensiveCoverage(t *testing.T) {
 		testSliceListType(t, adapter, [][]byte{[]byte("a"), []byte("b")}, Bytes("a"), Bytes("z"), Bytes("a"), Bytes("a"))
 		now := time.Unix(1000, 0)
 		testSliceListType(t, adapter, []time.Time{now, now.Add(time.Second)}, Timestamp{Time: now}, Timestamp{Time: now.Add(time.Hour)}, Timestamp{Time: now}, Timestamp{Time: now})
-		testSliceListType(t, adapter, []time.Duration{time.Second, time.Minute}, Duration{Duration: time.Second}, Duration{Duration: time.Hour}, Duration{Duration: time.Second}, Duration{Duration: time.Second})
+		testSliceListType(t, adapter, []time.Duration{time.Second, time.Minute}, Duration{Seconds: 1}, Duration{Seconds: 3600}, Duration{Seconds: 1}, Duration{Seconds: 1})
 
 		// bool Contains mismatch with False on [true]
 		lBoolOnlyTrue := NewList(adapter, []bool{true})

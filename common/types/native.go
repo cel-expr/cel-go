@@ -1042,14 +1042,14 @@ func (t *NativeType) makeFieldGetter(refField reflect.StructField) func(obj any)
 			if refField.Type == durationType {
 				return func(obj any) (any, error) {
 					if ptr, ok := t.structPtrFrom(obj, expectedPtrTyp, expectedStructTyp); ok {
-						return Duration{Duration: *(*time.Duration)(unsafe.Add(ptr, offset))}, nil
+						return durationOf(*(*time.Duration)(unsafe.Add(ptr, offset))), nil
 					}
 					refVal := unwrapStruct(obj)
 					refFieldVal := safeGetFieldByIndex(refVal, refField.Index)
 					if !refFieldVal.IsValid() {
 						return nil, nil
 					}
-					return Duration{Duration: time.Duration(refFieldVal.Int())}, nil
+					return durationOf(time.Duration(refFieldVal.Int())), nil
 				}
 			}
 			switch refField.Type.Kind() {
@@ -1246,9 +1246,9 @@ func (t *NativeType) makeFieldGetter(refField reflect.StructField) func(obj any)
 						if ptr, ok := t.structPtrFrom(obj, expectedPtrTyp, expectedStructTyp); ok {
 							elemPtr := *(*unsafe.Pointer)(unsafe.Add(ptr, offset))
 							if elemPtr == nil {
-								return Duration{Duration: 0}, nil
+								return Duration{}, nil
 							}
-							return Duration{Duration: *(*time.Duration)(elemPtr)}, nil
+							return durationOf(*(*time.Duration)(elemPtr)), nil
 						}
 						refVal := unwrapStruct(obj)
 						refFieldVal := safeGetFieldByIndex(refVal, refField.Index)
@@ -1499,7 +1499,7 @@ func getFieldValue(adapter Adapter, refField reflect.Value) any {
 		return False
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		if refField.Type() == durationType {
-			return Duration{Duration: time.Duration(refField.Int())}
+			return durationOf(time.Duration(refField.Int()))
 		}
 		return Int(refField.Int())
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
@@ -1546,7 +1546,7 @@ func getFieldValue(adapter Adapter, refField reflect.Value) any {
 				return False
 			case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 				if elemType == durationType {
-					return Duration{Duration: 0}
+					return Duration{}
 				}
 				return IntZero
 			case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:

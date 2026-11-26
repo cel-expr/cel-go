@@ -15,6 +15,7 @@
 package types
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"strconv"
@@ -29,15 +30,50 @@ import (
 	structpb "google.golang.org/protobuf/types/known/structpb"
 )
 
+const (
+	// minDurationSeconds is the minimum supported duration in seconds (-10000 years).
+	minDurationSeconds int64 = -315576000000
+	// maxDurationSeconds is the maximum supported duration in seconds (+10000 years).
+	maxDurationSeconds int64 = 315576000000
+	nanosPerSecond     int64 = 1_000_000_000
+)
+
+var errDurationRange = errors.New("duration out of range for time.Duration")
+
 // Duration type that implements ref.Val and supports add, compare, negate,
 // and subtract operators. This type is also a receiver which means it can
 // participate in dispatch to receiver functions.
 type Duration struct {
-	time.Duration
+	Seconds int64
+	Nanos   int32
 }
 
 func durationOf(d time.Duration) Duration {
-	return Duration{Duration: d}
+	sec := int64(d) / nanosPerSecond
+	nsec := int32(int64(d) % nanosPerSecond)
+	return Duration{Seconds: sec, Nanos: nsec}
+}
+
+func normalizeDuration(sec, nsec int64) (Duration, error) {
+	if nsec <= -nanosPerSecond || nsec >= nanosPerSecond {
+		var err error
+		sec, err = addInt64Checked(sec, nsec/nanosPerSecond)
+		if err != nil {
+			return Duration{}, errDurationOverflow
+		}
+		nsec %= nanosPerSecond
+	}
+	if sec > 0 && nsec < 0 {
+		sec--
+		nsec += nanosPerSecond
+	} else if sec < 0 && nsec > 0 {
+		sec++
+		nsec -= nanosPerSecond
+	}
+	if sec < minDurationSeconds || sec > maxDurationSeconds {
+		return Duration{}, errDurationOverflow
+	}
+	return Duration{Seconds: sec, Nanos: int32(nsec)}, nil
 }
 
 var (
@@ -56,14 +92,14 @@ func (d Duration) Add(other ref.Val) ref.Val {
 	switch other.Type() {
 	case DurationType:
 		dur2 := other.(Duration)
-		val, err := addDurationChecked(d.Duration, dur2.Duration)
+		val, err := addDurationChecked(d, dur2)
 		if err != nil {
 			return WrapErr(err)
 		}
-		return durationOf(val)
+		return val
 	case TimestampType:
 		ts := other.(Timestamp).Time
-		val, err := addTimeDurationChecked(ts, d.Duration)
+		val, err := addTimeDurationChecked(ts, d)
 		if err != nil {
 			return WrapErr(err)
 		}
@@ -78,23 +114,37 @@ func (d Duration) Compare(other ref.Val) ref.Val {
 	if !ok {
 		return MaybeNoSuchOverloadErr(other)
 	}
-	d1 := d.Duration
-	d2 := otherDur.Duration
 	switch {
-	case d1 < d2:
+	case d.Seconds < otherDur.Seconds:
 		return IntNegOne
-	case d1 > d2:
+	case d.Seconds > otherDur.Seconds:
+		return IntOne
+	case d.Nanos < otherDur.Nanos:
+		return IntNegOne
+	case d.Nanos > otherDur.Nanos:
 		return IntOne
 	default:
 		return IntZero
 	}
 }
 
+func (d Duration) toTimeDuration() (time.Duration, error) {
+	tsec, err := multiplyInt64Checked(d.Seconds, nanosPerSecond)
+	if err != nil {
+		return 0, errDurationRange
+	}
+	nsec, err := addInt64Checked(tsec, int64(d.Nanos))
+	if err != nil {
+		return 0, errDurationRange
+	}
+	return time.Duration(nsec), nil
+}
+
 // ConvertToNative implements ref.Val.ConvertToNative.
 func (d Duration) ConvertToNative(typeDesc reflect.Type) (any, error) {
 	// If the duration is already assignable to the desired type return it.
 	if reflect.TypeFor[time.Duration]().AssignableTo(typeDesc) {
-		return d.Duration, nil
+		return d.toTimeDuration()
 	}
 	if reflect.TypeFor[Duration]().AssignableTo(typeDesc) {
 		return d, nil
@@ -102,10 +152,10 @@ func (d Duration) ConvertToNative(typeDesc reflect.Type) (any, error) {
 	switch typeDesc {
 	case anyValueType:
 		// Pack the duration as a dpb.Duration into an Any value.
-		return anypb.New(dpb.New(d.Duration))
+		return anypb.New(&dpb.Duration{Seconds: d.Seconds, Nanos: d.Nanos})
 	case durationValueType:
 		// Unwrap the CEL value to its underlying proto value.
-		return dpb.New(d.Duration), nil
+		return &dpb.Duration{Seconds: d.Seconds, Nanos: d.Nanos}, nil
 	case JSONValueType:
 		// CEL follows the proto3 to JSON conversion.
 		// Note, using jsonpb would wrap the result in extra double quotes.
@@ -122,9 +172,19 @@ func (d Duration) ConvertToNative(typeDesc reflect.Type) (any, error) {
 func (d Duration) ConvertToType(typeVal ref.Type) ref.Val {
 	switch typeVal {
 	case StringType:
-		return String(strconv.FormatFloat(d.Seconds(), 'f', -1, 64) + "s")
+		var sb strings.Builder
+		d.appendString(&sb)
+		return String(sb.String())
 	case IntType:
-		return Int(d.Duration)
+		tsec, err := multiplyInt64Checked(d.Seconds, nanosPerSecond)
+		if err != nil {
+			return WrapErr(err)
+		}
+		nsec, err := addInt64Checked(tsec, int64(d.Nanos))
+		if err != nil {
+			return WrapErr(err)
+		}
+		return Int(nsec)
 	case DurationType:
 		return d
 	case TypeType:
@@ -136,21 +196,21 @@ func (d Duration) ConvertToType(typeVal ref.Type) ref.Val {
 // Equal implements ref.Val.Equal.
 func (d Duration) Equal(other ref.Val) ref.Val {
 	otherDur, ok := other.(Duration)
-	return Bool(ok && d.Duration == otherDur.Duration)
+	return Bool(ok && d.Seconds == otherDur.Seconds && d.Nanos == otherDur.Nanos)
 }
 
 // IsZeroValue returns true if the duration value is zero
 func (d Duration) IsZeroValue() bool {
-	return d.Duration == 0
+	return d.Seconds == 0 && d.Nanos == 0
 }
 
 // Negate implements traits.Negater.Negate.
 func (d Duration) Negate() ref.Val {
-	val, err := negateDurationChecked(d.Duration)
+	val, err := negateDurationChecked(d)
 	if err != nil {
 		return WrapErr(err)
 	}
-	return durationOf(val)
+	return val
 }
 
 // Receive implements traits.Receiver.Receive.
@@ -169,11 +229,11 @@ func (d Duration) Subtract(subtrahend ref.Val) ref.Val {
 	if !ok {
 		return MaybeNoSuchOverloadErr(subtrahend)
 	}
-	val, err := subtractDurationChecked(d.Duration, subtraDur.Duration)
+	val, err := subtractDurationChecked(d, subtraDur)
 	if err != nil {
 		return WrapErr(err)
 	}
-	return durationOf(val)
+	return val
 }
 
 // Type implements ref.Val.Type.
@@ -183,11 +243,44 @@ func (d Duration) Type() ref.Type {
 
 // Value implements ref.Val.Value.
 func (d Duration) Value() any {
-	return d.Duration
+	return d
+}
+
+func (d Duration) appendString(sb *strings.Builder) {
+	sec := d.Seconds
+	nsec := int64(d.Nanos)
+	if sec < 0 || nsec < 0 {
+		sb.WriteByte('-')
+		sec = -sec
+		nsec = -nsec
+	}
+	sb.WriteString(strconv.FormatInt(sec, 10))
+	if nsec != 0 {
+		sb.WriteByte('.')
+		var buf [9]byte
+		for i := 8; i >= 0; i-- {
+			buf[i] = byte('0' + nsec%10)
+			nsec /= 10
+		}
+		end := 9
+		for end > 0 && buf[end-1] == '0' {
+			end--
+		}
+		sb.Write(buf[:end])
+	}
+	sb.WriteByte('s')
+}
+
+func (d Duration) String() string {
+	var sb strings.Builder
+	d.appendString(&sb)
+	return sb.String()
 }
 
 func (d Duration) format(sb *strings.Builder) {
-	fmt.Fprintf(sb, `duration("%ss")`, strconv.FormatFloat(d.Seconds(), 'f', -1, 64))
+	sb.WriteString(`duration("`)
+	d.appendString(sb)
+	sb.WriteString(`")`)
 }
 
 // DurationGetHours returns the duration in hours.
@@ -196,7 +289,7 @@ func DurationGetHours(val ref.Val) ref.Val {
 	if !ok {
 		return MaybeNoSuchOverloadErr(val)
 	}
-	return Int(dur.Hours())
+	return Int(dur.Seconds / 3600)
 }
 
 // DurationGetMinutes returns duration in minutes.
@@ -205,7 +298,7 @@ func DurationGetMinutes(val ref.Val) ref.Val {
 	if !ok {
 		return MaybeNoSuchOverloadErr(val)
 	}
-	return Int(dur.Minutes())
+	return Int(dur.Seconds / 60)
 }
 
 // DurationGetSeconds returns duration in seconds.
@@ -214,7 +307,7 @@ func DurationGetSeconds(val ref.Val) ref.Val {
 	if !ok {
 		return MaybeNoSuchOverloadErr(val)
 	}
-	return Int(dur.Seconds())
+	return Int(dur.Seconds)
 }
 
 // DurationGetMilliseconds returns duration in milliseconds.
@@ -223,5 +316,5 @@ func DurationGetMilliseconds(val ref.Val) ref.Val {
 	if !ok {
 		return MaybeNoSuchOverloadErr(val)
 	}
-	return Int(dur.Milliseconds())
+	return Int(dur.Seconds*1000 + int64(dur.Nanos)/1_000_000)
 }

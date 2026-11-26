@@ -157,59 +157,57 @@ func moduloUint64Checked(x, y uint64) (uint64, error) {
 	return x % y, nil
 }
 
-// addDurationChecked performs addition with overflow detection of two time.Durations.
+// addDurationChecked performs addition with overflow detection of two Durations.
 //
 // If the operation fails due to overflow the error return value will be non-nil.
-func addDurationChecked(x, y time.Duration) (time.Duration, error) {
-	val, err := addInt64Checked(int64(x), int64(y))
+func addDurationChecked(x, y Duration) (Duration, error) {
+	sec, err := addInt64Checked(x.Seconds, y.Seconds)
 	if err != nil {
-		return time.Duration(0), err
+		return Duration{}, errDurationOverflow
 	}
-	return time.Duration(val), nil
+	return normalizeDuration(sec, int64(x.Nanos)+int64(y.Nanos))
 }
 
-// subtractDurationChecked performs subtraction with overflow detection of two time.Durations.
+// subtractDurationChecked performs subtraction with overflow detection of two Durations.
 //
 // If the operation fails due to overflow the error return value will be non-nil.
-func subtractDurationChecked(x, y time.Duration) (time.Duration, error) {
-	val, err := subtractInt64Checked(int64(x), int64(y))
+func subtractDurationChecked(x, y Duration) (Duration, error) {
+	sec, err := subtractInt64Checked(x.Seconds, y.Seconds)
 	if err != nil {
-		return time.Duration(0), err
+		return Duration{}, errDurationOverflow
 	}
-	return time.Duration(val), nil
+	return normalizeDuration(sec, int64(x.Nanos)-int64(y.Nanos))
 }
 
-// negateDurationChecked performs negation with overflow detection of a time.Duration.
+// negateDurationChecked performs negation with overflow detection of a Duration.
 //
 // If the operation fails due to overflow the error return value will be non-nil.
-func negateDurationChecked(x time.Duration) (time.Duration, error) {
-	val, err := negateInt64Checked(int64(x))
+func negateDurationChecked(x Duration) (Duration, error) {
+	sec, err := negateInt64Checked(x.Seconds)
 	if err != nil {
-		return time.Duration(0), err
+		return Duration{}, errDurationOverflow
 	}
-	return time.Duration(val), nil
+	nsec, err := negateInt64Checked(int64(x.Nanos))
+	if err != nil {
+		return Duration{}, errDurationOverflow
+	}
+	return normalizeDuration(sec, nsec)
 }
 
-// addTimeDurationChecked performs addition with overflow detection of a time.Time and time.Duration.
+// addTimeDurationChecked performs addition with overflow detection of a time.Time and Duration.
 //
 // If the operation fails due to overflow the error return value will be non-nil.
-func addTimeDurationChecked(x time.Time, y time.Duration) (time.Time, error) {
+func addTimeDurationChecked(x time.Time, y Duration) (time.Time, error) {
 	return offsetTimeDurationChecked(x, y, false)
 }
 
-func offsetTimeDurationChecked(x time.Time, y time.Duration, subtract bool) (time.Time, error) {
-	// This is tricky. A time is represented as (int64, int32) where the first is seconds and second
-	// is nanoseconds. A duration is int64 representing nanoseconds. We cannot normalize time to int64
-	// as it could potentially overflow. The only way to proceed is to break time and duration into
-	// second and nanosecond components.
-
+func offsetTimeDurationChecked(x time.Time, y Duration, subtract bool) (time.Time, error) {
 	// First we break time into its components by truncating and subtracting.
 	sec1 := x.Truncate(time.Second).Unix()                // Truncate to seconds.
 	nsec1 := x.Sub(x.Truncate(time.Second)).Nanoseconds() // Get nanoseconds by truncating and subtracting.
 
-	// Second we break duration into its components by dividing and modulo.
-	sec2 := int64(y) / int64(time.Second)  // Truncate to seconds.
-	nsec2 := int64(y) % int64(time.Second) // Get remainder.
+	sec2 := y.Seconds
+	nsec2 := int64(y.Nanos)
 
 	var sec, nsec int64
 	var err error
@@ -226,25 +224,25 @@ func offsetTimeDurationChecked(x time.Time, y time.Duration, subtract bool) (tim
 
 	// We need to normalize nanoseconds to be positive and carry extra nanoseconds to seconds.
 	// Adapted from time.Unix(int64, int64).
-	if nsec < 0 || nsec >= int64(time.Second) {
+	if nsec < 0 || nsec >= nanosPerSecond {
 		// Add seconds.
-		sec, err = addInt64Checked(sec, nsec/int64(time.Second))
+		sec, err = addInt64Checked(sec, nsec/nanosPerSecond)
 		if err != nil {
 			return time.Time{}, err
 		}
 
-		nsec -= (nsec / int64(time.Second)) * int64(time.Second)
+		nsec -= (nsec / nanosPerSecond) * nanosPerSecond
 		if nsec < 0 {
 			// Subtract an extra second
 			sec, err = addInt64Checked(sec, -1)
 			if err != nil {
 				return time.Time{}, err
 			}
-			nsec += int64(time.Second)
+			nsec += nanosPerSecond
 		}
 	}
 
-	// Check if the the number of seconds from Unix epoch is within our acceptable range.
+	// Check if the number of seconds from Unix epoch is within our acceptable range.
 	if sec < minUnixTime || sec > maxUnixTime {
 		return time.Time{}, errTimestampOverflow
 	}
@@ -256,46 +254,32 @@ func offsetTimeDurationChecked(x time.Time, y time.Duration, subtract bool) (tim
 // subtractTimeChecked performs subtraction with overflow detection of two time.Time.
 //
 // If the operation fails due to overflow the error return value will be non-nil.
-func subtractTimeChecked(x, y time.Time) (time.Duration, error) {
-	// Similar to addTimeDurationOverflow() above.
-
+func subtractTimeChecked(x, y time.Time) (Duration, error) {
 	// First we break time into its components by truncating and subtracting.
 	sec1 := x.Truncate(time.Second).Unix()                // Truncate to seconds.
 	nsec1 := x.Sub(x.Truncate(time.Second)).Nanoseconds() // Get nanoseconds by truncating and subtracting.
 
-	// Second we break duration into its components by truncating and subtracting.
+	// Second we break time into its components by truncating and subtracting.
 	sec2 := y.Truncate(time.Second).Unix()                // Truncate to seconds.
 	nsec2 := y.Sub(y.Truncate(time.Second)).Nanoseconds() // Get nanoseconds by truncating and subtracting.
 
 	// Subtract seconds first, detecting any overflow.
 	sec, err := subtractInt64Checked(sec1, sec2)
 	if err != nil {
-		return time.Duration(0), err
+		return Duration{}, err
 	}
 
 	// Nanoseconds cannot overflow as time.Time normalizes them to [0, 999999999].
 	nsec := nsec1 - nsec2
 
-	// Scale seconds to nanoseconds detecting overflow.
-	tsec, err := multiplyInt64Checked(sec, int64(time.Second))
-	if err != nil {
-		return time.Duration(0), err
-	}
-
-	// Lastly we need to add the two nanoseconds together.
-	val, err := addInt64Checked(tsec, nsec)
-	if err != nil {
-		return time.Duration(0), err
-	}
-
-	return time.Duration(val), nil
+	return normalizeDuration(sec, nsec)
 }
 
 // subtractTimeDurationChecked performs subtraction with overflow detection of a time.Time and
-// time.Duration.
+// Duration.
 //
 // If the operation fails due to overflow the error return value will be non-nil.
-func subtractTimeDurationChecked(x time.Time, y time.Duration) (time.Time, error) {
+func subtractTimeDurationChecked(x time.Time, y Duration) (time.Time, error) {
 	return offsetTimeDurationChecked(x, y, true)
 }
 
