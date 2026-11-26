@@ -267,3 +267,36 @@ func TestDurationIsZeroValue(t *testing.T) {
 func duration(seconds, nanos int64) time.Duration {
 	return time.Duration(seconds)*time.Second + time.Duration(nanos)
 }
+
+func TestDurationStringFormatting(t *testing.T) {
+	tests := []struct {
+		dur  time.Duration
+		want string
+	}{
+		{0, "0s"},
+		{5 * time.Second, "5s"},
+		{-5 * time.Second, "-5s"},
+		{500 * time.Millisecond, "0.5s"},
+		{-500 * time.Millisecond, "-0.5s"},
+		{-time.Nanosecond, "-0.000000001s"},
+		{-5*time.Second - time.Nanosecond, "-5.000000001s"},
+		{100000*time.Hour + time.Nanosecond, "360000000.000000001s"},
+		{10000000*time.Second + time.Nanosecond, "10000000.000000001s"},
+		{math.MaxInt64, "9223372036.854775807s"},
+		{math.MinInt64, "-9223372036.854775808s"},
+	}
+	for _, tc := range tests {
+		d := Duration{Duration: tc.dur}
+		got := string(d.ConvertToType(StringType).(String))
+		if got != tc.want {
+			t.Errorf("ConvertToType(StringType) for %v = %q, want %q", tc.dur, got, tc.want)
+		}
+		jsonVal, err := d.ConvertToNative(JSONValueType)
+		if err != nil {
+			t.Fatalf("ConvertToNative(JSONValueType) for %v failed: %v", tc.dur, err)
+		}
+		if jsonVal.(*structpb.Value).GetStringValue() != tc.want {
+			t.Errorf("ConvertToNative(JSONValueType) for %v = %q, want %q", tc.dur, jsonVal.(*structpb.Value).GetStringValue(), tc.want)
+		}
+	}
+}

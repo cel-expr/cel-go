@@ -122,7 +122,9 @@ func (d Duration) ConvertToNative(typeDesc reflect.Type) (any, error) {
 func (d Duration) ConvertToType(typeVal ref.Type) ref.Val {
 	switch typeVal {
 	case StringType:
-		return String(strconv.FormatFloat(d.Seconds(), 'f', -1, 64) + "s")
+		var sb strings.Builder
+		d.appendString(&sb)
+		return String(sb.String())
 	case IntType:
 		return Int(d.Duration)
 	case DurationType:
@@ -186,8 +188,35 @@ func (d Duration) Value() any {
 	return d.Duration
 }
 
+func (d Duration) appendString(sb *strings.Builder) {
+	sec := int64(d.Duration) / int64(time.Second)
+	nsec := int64(d.Duration) % int64(time.Second)
+	if sec < 0 || nsec < 0 {
+		sb.WriteByte('-')
+		sec = -sec
+		nsec = -nsec
+	}
+	sb.WriteString(strconv.FormatInt(sec, 10))
+	if nsec != 0 {
+		sb.WriteByte('.')
+		var buf [9]byte
+		for i := 8; i >= 0; i-- {
+			buf[i] = byte('0' + nsec%10)
+			nsec /= 10
+		}
+		end := 9
+		for end > 0 && buf[end-1] == '0' {
+			end--
+		}
+		sb.Write(buf[:end])
+	}
+	sb.WriteByte('s')
+}
+
 func (d Duration) format(sb *strings.Builder) {
-	fmt.Fprintf(sb, `duration("%ss")`, strconv.FormatFloat(d.Seconds(), 'f', -1, 64))
+	sb.WriteString(`duration("`)
+	d.appendString(sb)
+	sb.WriteString(`")`)
 }
 
 // DurationGetHours returns the duration in hours.
